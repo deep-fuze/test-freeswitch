@@ -1047,6 +1047,21 @@ void ConnectionImpl::OnEvent(EventType eType, const char* pReason)
     if (eType == ET_CONNECTED) {
         SetState(CONNECTED); // mark that we are conneceted now
     }
+
+    // for app server, set transceiver to NoTransceiver pointer
+    // to prevent sending from application as socket layer is
+    // useless to use anymore.  However, we are keeping this
+    // connection instance until application specifically ends it
+    // as client can always reconnect using FuzeTLS
+    //
+    // It's important to do this in context of transport thread as
+    // send/recv work is done with transport thread.  Worker thread
+    // shouldn't be doing this as it can interfere and crash with
+    // transport thread's work
+    //
+    if (is_end_event(eType) && TransportImpl::GetInstance()->IsAppServer()) {
+        ReplaceTransceiver(NoTransceiver::GetInstance());
+    }   
     
     EventData event_data;
     event_data.type_ = eType;
@@ -1105,13 +1120,6 @@ void ConnectionImpl::DeliverEventData(EventData &rEvent)
         TransportImpl* p = TransportImpl::GetInstance();
         if (p->IsAppServer() == false) {
             p->RequestReset(Resource::CONNECTION, ID());
-        }
-        else {
-            // for server, unless app is ignoring end events
-            // this won't work - need futher investigation
-            // as we are trying to keep the ConnectionImpl
-            // and wait for client to reconnect using other ways
-            ReplaceTransceiver(NoTransceiver::GetInstance());
         }
     }
 }
@@ -1580,7 +1588,12 @@ void ConnectionImpl::ReplaceTransceiver(Transceiver* p)
                                                    pTransceiver_);
         pTransceiver_->SetConnectionID(INVALID_ID);
     }
-    
+
+    if (InState(TERMINATED) && (p != NoTransceiver::GetInstance())) {
+        MLOG("Reconnected to new transceiver " << p->ID());
+        state_ = CONNECTED;
+    }
+
     pTransceiver_ = p;
 
     // if frame mode is on then enable it for new tcp transceiver
