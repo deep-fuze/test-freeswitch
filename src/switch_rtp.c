@@ -2861,10 +2861,9 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
 
 		/*
 		 * this is a fuze custom rtcp packet (MQT-5147)
-		 * this generates a second rtcp packet (more bandwidth) which doesn't really end up getting used for much
-		 * disabling
+		 * this generates a second rtcp packet
 		 */
-#if 0
+#if 1
         if (rtp_session->send_rtcp_custom) {
             int rem_len, i;
             rtcp_app_extn_t app_extn;
@@ -6214,6 +6213,12 @@ static switch_status_t process_rtcp_packet(switch_rtp_t *rtp_session, switch_siz
         if (rtp_session->rtcp_recv_msg.header.type == 200) {
             switch_time_t now;
             struct switch_rtcp_senderinfo* sr = (struct switch_rtcp_senderinfo*)rtp_session->rtcp_recv_msg.body;
+            struct switch_rtcp_app_specific *app = (struct switch_rtcp_app_specific *) rtp_session->rtcp_recv_msg.body;
+
+            if (ntohl(app->name) == 0x66757a65) {
+                return SWITCH_STATUS_TRUE;
+            }
+
             now = switch_micro_time_now();
             rtp_session->rtcp_fresh_frame = 1;
 
