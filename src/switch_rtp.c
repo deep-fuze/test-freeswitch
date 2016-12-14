@@ -6216,7 +6216,7 @@ static switch_status_t process_rtcp_packet(switch_rtp_t *rtp_session, switch_siz
             struct switch_rtcp_app_specific *app = (struct switch_rtcp_app_specific *) rtp_session->rtcp_recv_msg.body;
 
             if (ntohl(app->name) == 0x66757a65) {
-                return SWITCH_STATUS_TRUE;
+                return SWITCH_STATUS_SUCCESS;
             }
 
             now = switch_micro_time_now();
