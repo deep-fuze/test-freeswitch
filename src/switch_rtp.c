@@ -7049,7 +7049,7 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
         if (bytes) {
             rtp_session->missed_count = 0;
 
-            if (bytes < rtp_header_len) {
+            if (bytes < rtp_header_len && bytes != 6) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "Ignoring invalid RTP packet size of %ld bytes.\n", (long)bytes);
                 bytes = 0;
                 goto do_continue;
