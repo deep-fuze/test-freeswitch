@@ -487,6 +487,7 @@ struct switch_rtp {
     uint32_t ts_ooo_count;
     uint32_t rtp_send_fail_count;
     uint32_t adjust_cn_count;
+    switch_time_t last_ivr_send_time;
 };
 
 struct switch_rtcp_report_block {
@@ -2874,10 +2875,10 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
             }
         }
 
-		/*
-		 * this is a fuze custom rtcp packet (MQT-5147)
-		 * this generates a second rtcp packet
-		 */
+        /*
+         * this is a fuze custom rtcp packet (MQT-5147)
+         * this generates a second rtcp packet
+         */
 #if 1
         if (rtp_session->send_rtcp_custom) {
             int rem_len, i;
@@ -7993,11 +7994,29 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             /* this is the case where we have a jitter buffer and we're just generating our own sequence numbers */
             send_msg->header.seq = htons(++rtp_session->seq);
         } else if (*flags & SFF_IVR_FRAME) {
+            switch_time_t now = switch_time_now();
+            uint32_t diff = 0;
+
             /* this is the case where we are an IVR session and we're just generating our own sequence numbers */
             if (rtp_session->is_ivr == SWITCH_FALSE) {
                 rtp_session->is_ivr = SWITCH_TRUE;
                 rtp_session->write_count = 0;
+                rtp_session->last_ivr_send_time = now;
             }
+
+            diff = (now - rtp_session->last_ivr_send_time)/1000;
+
+            if (diff > 100) {
+                uint32_t old_ts = ntohl(send_msg->header.ts);
+                uint32_t new_ts = old_ts + ((diff/20)-1) * datalen;
+                send_msg->header.ts = htonl(new_ts);
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "timestamp adjustment of %u after %ums gap %u -> %u\n",
+                                  (diff/20) * 160, diff, old_ts, ntohl(send_msg->header.ts));
+                send_msg->header.m = 1;
+                rtp_session->next_ts = new_ts;
+            }
+
+            rtp_session->last_ivr_send_time = now;
 
             if (rtp_session->write_count % LOG_OUT_FREQUENCY == 0) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s ivr write (%u) seq=%u bpath=%d\n",
@@ -8014,6 +8033,8 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             switch_bool_t adjusted_cn = SWITCH_FALSE;
 
             if (rtp_session->is_ivr == SWITCH_TRUE) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s ivr -> bridge (%u) seq=%u bpath=%d x=%d\n",
+                                  rtp_session->rtp_conn_name, rtp_session->write_count, rtp_session->seq, bpath, send_msg->header.x);
                 rtp_session->is_ivr = SWITCH_FALSE;
                 rtp_session->write_count = 0;
             }
