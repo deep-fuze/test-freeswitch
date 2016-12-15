@@ -8,6 +8,7 @@
 typedef struct play_frame {
     struct play_frame *next;
     switch_frame_t frame;
+    int size;
     switch_bool_t encoded;
 } play_frame_t;
 
@@ -31,6 +32,7 @@ typedef struct file_cursor {
     play_frame_t *pCurr;
     switch_bool_t active;
     switch_bool_t pCurrPlayed;
+    switch_bool_t started;
     uint32_t bytes_left;
 } file_cursor_t;
 

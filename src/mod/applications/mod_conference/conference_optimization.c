@@ -331,6 +331,7 @@ play_frame_t *pf_new_frame(switch_memory_pool_t *pool, uint32_t size) {
     
     new_frame->encoded = SWITCH_FALSE;
     new_frame->next = NULL;
+    new_frame->size = size;
 
     return new_frame;
 }
@@ -400,6 +401,7 @@ switch_bool_t fc_start_replay(file_cursor_t *cursor, filelist_t *filelist, char 
         cursor->active = SWITCH_TRUE;
         cursor->pCurrPlayed = SWITCH_FALSE;
         cursor->bytes_left = file->bytes;
+        cursor->started = SWITCH_FALSE;
         return SWITCH_TRUE;
     }
     cursor->active = SWITCH_FALSE;
@@ -408,7 +410,7 @@ switch_bool_t fc_start_replay(file_cursor_t *cursor, filelist_t *filelist, char 
 
 switch_bool_t fc_create_file(file_cursor_t *cursor, filelist_t *filelist, char *fname) {
     encoded_file_t *file;
-    
+
     if (!(file = eif_file_exists(filelist->files, fname))) {
         if ((file = eif_new_file(fname, filelist->pool))) {
             cursor->file = file;
@@ -416,6 +418,7 @@ switch_bool_t fc_create_file(file_cursor_t *cursor, filelist_t *filelist, char *
             cursor->active = SWITCH_TRUE;
             cursor->pCurrPlayed = SWITCH_FALSE;
             cursor->bytes_left = 0;
+            cursor->started = SWITCH_FALSE;
             file->next = filelist->files;
             filelist->files = file;
             
@@ -442,7 +445,7 @@ switch_bool_t fc_add_frame(file_cursor_t *cursor, switch_frame_t *pFrame) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "fc_add_frame: failed to set frame\n");
         return SWITCH_FALSE;
     }
-    
+
     if (cursor->pCurr == NULL) {
         if (cursor->file->frames == NULL) {
             /* first frame */
@@ -474,7 +477,15 @@ switch_frame_t *fc_get_frame(file_cursor_t *cursor) {
     play_frame_t *pFrame = NULL;
     
     if (cursor->active) {
-        if (cursor->pCurr == NULL) {
+        if (!cursor->started && cursor->pCurr == NULL) {
+            cursor->started = SWITCH_TRUE;
+            if (cursor->file->frames) {
+                cursor->pCurr = cursor->file->frames;
+                pFrame = cursor->pCurr;
+            } else {
+                return NULL;
+            }
+        } else if (cursor->pCurr == NULL) {
             /* exhausted all frames */
             return NULL;
         } else {
@@ -496,6 +507,9 @@ switch_frame_t *fc_get_frame(file_cursor_t *cursor) {
                 }
             }
         }
+    }
+    if (!cursor->started) {
+        cursor->started = SWITCH_TRUE;
     }
     if (pFrame) {
         cursor->bytes_left -= pFrame->frame.datalen;

@@ -453,6 +453,9 @@ static struct {
     switch_thread_t *output_thread[MAX_NUMBER_OF_OUTPUT_THREADS];
     switch_time_t output_thread_time[MAX_NUMBER_OF_OUTPUT_THREADS];
     int output_thread_dead[MAX_NUMBER_OF_OUTPUT_THREADS];
+
+    uint16_t max_participants_per_thread;
+    uint16_t min_sleep_per_thread;
 } globals;
 
 struct conference_obj;
@@ -657,6 +660,7 @@ typedef struct conference_obj {
     switch_bool_t ending_due_to_inactivity;
 
     switch_bool_t stopping;
+    uint16_t stop_entry_tone_participants;
 } conference_obj_t;
 
 /* Relationship with another member */
@@ -2819,7 +2823,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             }
 
             if (!switch_channel_test_app_flag_key("conf_silent", channel, CONF_SILENT_REQ) && !zstr(conference->enter_sound)
-                && conference->count < 50) {
+                && (conference->stop_entry_tone_participants == 0 || conference->count < conference->stop_entry_tone_participants)) {
                 const char * enter_sound = switch_channel_get_variable(channel, "conference_enter_sound");
                 if (switch_test_flag(conference, CFLAG_ENTER_SOUND)) {
                     if (!zstr(enter_sound)) {
@@ -2832,8 +2836,8 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                 }
             } else {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
-                                  "Skipping enter sound because more than 50 participants (count=%d)\n",
-                                  conference->count < 50);
+                                  "Skipping enter sound because more than %d participants (count=%d)\n",
+                                  conference->stop_entry_tone_participants, conference->count);
             }
         }
 
@@ -9089,6 +9093,66 @@ static switch_status_t conf_api_sub_volume_out(conference_member_t *member, swit
     return SWITCH_STATUS_SUCCESS;
 }
 
+static void conference_thread_print(switch_stream_handle_t *stream, char *delim)
+{
+
+    stream->write_function(stream, "Number of threads:%d, Max participants/thread: %d, Min sleep/thread:%d\n",
+                           MAX_NUMBER_OF_OUTPUT_THREADS, globals.max_participants_per_thread, globals.min_sleep_per_thread);
+
+    for (int i = 0; i < MAX_NUMBER_OF_OUTPUT_THREADS; i++) {
+        if (i < MAX_NUMBER_OF_OUTPUT_NTHREADS ||
+            globals.outputll[i].count > 0 ||
+            globals.output_thread_dead[i] > 0) {
+            stream->write_function(stream, "T%2d, [%8u] %3d participants avg:%5.0f %5.0f %5.0f min:%5.0f %5.0f %5.0f dead:%d\n",
+                                   i, globals.outputll[i].tid, globals.outputll[i].count,
+                                   globals.outputll[i].process_avg[0], globals.outputll[i].process_avg[1], globals.outputll[i].process_avg[2],
+                                   globals.outputll[i].process_avg_min[0], globals.outputll[i].process_avg_min[1],
+                                   globals.outputll[i].process_avg_min[2], globals.output_thread_dead[i]);
+        }
+    }
+}
+
+static void conference_file_print(switch_stream_handle_t *stream, char *delim, int detail)
+{
+    int j = 0;
+    for (int i = 0; i < MAX_NUMBER_OF_OUTPUT_THREADS; i++) {
+        encoded_file_t *pFile;
+
+        for (filelist_t *pFl = globals.filelist[i]; pFl != NULL; pFl = pFl->next) {
+            int filecount = 0;
+            for (pFile = pFl->files; pFile; pFile = pFile->next) {
+                filecount += 1;
+            }
+            if (detail >= 1 || (detail == 0 && filecount >= 1)) {
+                stream->write_function(stream, "FL(%2d,%d) codec:%3d impl:%3d files:%2d encodes:%d\n",
+                                       i, j, pFl->codec_id, pFl->impl_id, filecount, pFl->encode_cnt);
+                if (filecount >= 1 && detail >= 2) {
+                    filecount = 0;
+                    for (pFile = pFl->files; pFile; pFile = pFile->next) {
+                        play_frame_t *frames;
+                        int frame_cnt = 0;
+                        int frame_size = 0;
+                        for (frames = pFile->frames; frames; frames = frames->next) {
+                            frame_cnt += 1;
+                            if (frames->size > frame_size) {
+                                frame_size = frames->size;
+                            }
+                        }
+                        stream->write_function(stream, "  File%2d: %s, %u bytes %d frames %d bytes/frame %s %s\n",
+                                               filecount, pFile->name, pFile->bytes, frame_cnt, frame_size,
+                                               (pFile->done ? "done" : "in progress"), (pFile->writing ? "writing" : "written"));
+                        filecount += 1;
+                    }
+                }
+                j++;
+            }
+        }
+    }
+    if (!j) {
+        stream->write_function(stream, "No files\n");
+    }
+}
+
 static switch_status_t conf_api_sub_list(conference_obj_t *conference, switch_stream_handle_t *stream, int argc, char **argv)
 {
     int ret_status = SWITCH_STATUS_GENERR;
@@ -9101,6 +9165,9 @@ static switch_status_t conf_api_sub_list(conference_obj_t *conference, switch_st
     int summary = 0;
     int countonly = 0;
     int argofs = (argc >= 2 && strcasecmp(argv[1], "list") == 0);    /* detect being called from chat vs. api */
+    int thread = 0;
+    int file = 0;
+    int detail = 0;
 
     if (argv[1 + argofs]) {
         if (argv[2 + argofs] && !strcasecmp(argv[1 + argofs], "delim")) {
@@ -9124,10 +9191,27 @@ static switch_status_t conf_api_sub_list(conference_obj_t *conference, switch_st
             fuze = 1;
         } else if (strcasecmp(argv[1 + argofs], "count") == 0) {
             countonly = 1;
+        } else if (strcasecmp(argv[1 + argofs], "threads") == 0) {
+            thread = 1;
+        } else if (strcasecmp(argv[1 + argofs], "files") == 0) {
+            detail = 1;
+            file = 1;
+        } else if (strcasecmp(argv[1 + argofs], "files-detail") == 0) {
+            detail = 2;
+            file = 1;
+        } else if (strcasecmp(argv[1 + argofs], "files-brief") == 0) {
+            file = 1;
+            detail = 0;
         }
     }
 
-    if (conference == NULL) {
+    if (thread) {
+        count++;
+        conference_thread_print(stream, d);
+    } else if (file) {
+        count++;
+        conference_file_print(stream, d, detail);
+    } else if (conference == NULL) {
         switch_mutex_lock(globals.hash_mutex);
         for (hi = switch_core_hash_first(globals.conference_hash); hi; hi = switch_core_hash_next(&hi)) {
             int fcount = 0;
@@ -10160,7 +10244,7 @@ static switch_status_t conf_api_sub_enter_sound(conference_obj_t *conference, sw
         return SWITCH_STATUS_GENERR;
     }
 
-    if (conference->count > 50) {
+    if (conference->stop_entry_tone_participants > 0 && conference->count < conference->stop_entry_tone_participants) {
         return SWITCH_STATUS_SUCCESS;
     }
 
@@ -12800,6 +12884,9 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
     switch_bool_t notify_active_talkers = SWITCH_TRUE;
     uint16_t history_time_period = 2000;
     uint16_t history_reset_time_period = 500;
+    uint16_t stop_entry_tone_participants = 50;
+    uint16_t max_participants_per_thread = 400;
+    uint16_t min_sleep_per_thread = 5000;
     char *begin_sound = NULL;
 
     /* Validate the conference name */
@@ -13051,6 +13138,12 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
                 history_reset_time_period = strtol(val, NULL, 0);
             } else if (!strcasecmp(var, "begin-sound") && !zstr(val)) {
                 begin_sound = val;
+            } else if (!strcasecmp(var, "stop-entry-tone-after-participants") && !zstr(val)) {
+                stop_entry_tone_participants = strtol(val, NULL, 0);
+            } else if (!strcasecmp(var, "max-participants-per-thread") && !zstr(val)) {
+                max_participants_per_thread = strtol(val, NULL, 0);
+            } else if (strcasecmp(var, "min-sleep-per-thread") && !zstr(val)) {
+                min_sleep_per_thread = strtol(val, NULL, 0);
             }
         }
 
@@ -13094,6 +13187,8 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
         conference->last_time_active = switch_time_now();
         conference->min_inactive_to_end = MINUTES_INACTIVE_TO_END;
         conference->ending_due_to_inactivity = SWITCH_FALSE;
+
+        conference->stop_entry_tone_participants = stop_entry_tone_participants;
 
         conference->stopping = SWITCH_FALSE;
 
@@ -13389,6 +13484,15 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
         switch_core_hash_insert(globals.conference_hash, conference->name, conference);
         switch_mutex_unlock(globals.hash_mutex);
 
+        switch_mutex_lock(globals.conference_mutex);
+        if (globals.max_participants_per_thread != max_participants_per_thread) {
+            globals.max_participants_per_thread = max_participants_per_thread;
+        }
+        if (globals.min_sleep_per_thread != min_sleep_per_thread) {
+            globals.min_sleep_per_thread = min_sleep_per_thread;
+        }
+        switch_mutex_unlock(globals.conference_mutex);
+
         conference->member_id_counter = 0;
         conference->debug_stats_pool = NULL;
 
@@ -13431,6 +13535,13 @@ static int output_loop_list_add(conference_obj_t *conference, output_loop_t *ol)
     int start;
     switch_bool_t first;
     int idx;
+    uint16_t max_participants_per_thread;
+    uint16_t min_sleep_per_thread;
+
+    switch_mutex_lock(globals.conference_mutex);
+    max_participants_per_thread = globals.max_participants_per_thread;
+    min_sleep_per_thread = globals.min_sleep_per_thread;
+    switch_mutex_unlock(globals.conference_mutex);
 
     switch_mutex_lock(globals.outputlllock);
     first = (conference->list_idx == -1);
@@ -13466,13 +13577,13 @@ static int output_loop_list_add(conference_obj_t *conference, output_loop_t *ol)
 
             avg = calculate_thread_utilization(idx);
 
-            if  (avg > MIN_PROCESS_AVG && globals.outputll[idx].count < MAX_PARTICIPANTS) {
+            if  (avg > min_sleep_per_thread && globals.outputll[idx].count < max_participants_per_thread) {
                 lowest = idx;
                 break;
             } else {
                 if (idx == start) {
                     highest_avg = avg;
-                } else if (avg > highest_avg && globals.outputll[idx].count < MAX_PARTICIPANTS) {
+                } else if (avg > highest_avg && globals.outputll[idx].count < max_participants_per_thread) {
                     highest_avg = avg;
                     lowest = idx;
                 }
@@ -13480,7 +13591,7 @@ static int output_loop_list_add(conference_obj_t *conference, output_loop_t *ol)
         }
     } else {
         for (idx = conference->list_idx; idx < MAX_NUMBER_OF_OUTPUT_THREADS; idx += MAX_NUMBER_OF_OUTPUT_NTHREADS) {
-            if (globals.outputll[idx].count < MAX_PARTICIPANTS) {
+            if (globals.outputll[idx].count < max_participants_per_thread) {
                 lowest = idx;
                 break;
             }
@@ -14117,6 +14228,9 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_conference_load)
 
         launch_conference_loop_output(i, globals.thread_pool);
     }
+
+    globals.max_participants_per_thread = 400;
+    globals.min_sleep_per_thread = 5000;
 
     /* Subscribe to presence request events */
     if (switch_event_bind(modname, SWITCH_EVENT_PRESENCE_PROBE, SWITCH_EVENT_SUBCLASS_ANY, pres_event_handler, NULL) != SWITCH_STATUS_SUCCESS) {
