@@ -974,9 +974,13 @@ static switch_status_t rtp_sendto(switch_rtp_t *rtp_session, switch_socket_t *so
 #endif
     if (rtp_session && rtp_session->rtp_conn && where) {
         return fuze_transport_socket_write(rtp_session->rtp_conn, (const uint8_t *) buf, *len);
-    } else {
+    } 
+	return SWITCH_STATUS_SUCCESS;
+#ifdef OLD_TRANSPORT
+	else {
         return switch_socket_sendto(sock, where, flags, buf, len);
     }
+#endif
 }
 
 static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t *from,
@@ -1012,7 +1016,10 @@ static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t
             switch_set_sockaddr_v4(from, ntohl(saddr.sa.sin.sin_addr.s_addr), ntohs(saddr.sa.sin.sin_port));
         }
         return ret;
-    } else {
+    }
+	return SWITCH_STATUS_SUCCESS;
+#ifdef OLD_TRANSPORT
+	else {
         switch_status_t ret = switch_socket_recvfrom(from, sock, flags, buf, len);
         
 #ifdef CHECK_FOR_LARGE_PKTS
@@ -1020,9 +1027,9 @@ static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_recvfrom len too large:%zu ret=%x\n", *len, ret);
         }
 #endif
-
         return ret;
     }
+#endif
 }
 
 static switch_status_t rtcp_sendto(switch_rtp_t *rtp_session, switch_socket_t *sock,
@@ -1040,9 +1047,13 @@ static switch_status_t rtcp_sendto(switch_rtp_t *rtp_session, switch_socket_t *s
 #endif
     if (rtp_session && rtp_session->rtcp_conn && where) {
         return fuze_transport_socket_write(rtp_session->rtcp_conn, (const uint8_t *) buf, *len);
-    } else {
+    }
+	return SWITCH_STATUS_SUCCESS;
+#ifdef OLD_TRANSPORT
+	else {
         return switch_socket_sendto(sock, where, flags, buf, len);
     }
+#endif
 }
 
 static switch_status_t rtcp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t *from,
@@ -1079,9 +1090,13 @@ static switch_status_t rtcp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_
             switch_set_sockaddr_v4(from, ntohl(saddr.sa.sin.sin_addr.s_addr), ntohs(saddr.sa.sin.sin_port));
         }
         return ret;
-    } else {
+    }
+	return SWITCH_STATUS_SUCCESS;
+#ifdef OLD_TRANSPORT
+	else {
         return switch_socket_recvfrom(from, sock, flags, buf, len);
     }
+#endif
 }
 
 static switch_bool_t do_2833(switch_rtp_t *rtp_session);
