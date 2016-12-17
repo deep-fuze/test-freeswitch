@@ -50,6 +50,8 @@ SWITCH_DECLARE(switch_status_t) switch_core_perform_file_open(const char *file, 
 	char *fp = NULL;
 	int to = 0;
 
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "switch_core_file_open %s (%s:%d) fh:%" PRId64 "\n", file_path, file, line, (uint64_t)fh);
+
 	if (switch_test_flag(fh, SWITCH_FILE_OPEN)) {
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Handle already open\n");
 		return SWITCH_STATUS_FALSE;
@@ -639,6 +641,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_file_close(switch_file_handle_t *fh)
 
 	switch_resample_destroy(&fh->resampler);
 
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "switch_core_file_close %s %" PRId64 "\n", fh->file_path, (uint64_t)fh);
 
 	if (fh->spool_path) {
 		char *command;
@@ -664,7 +667,6 @@ SWITCH_DECLARE(switch_status_t) switch_core_file_close(switch_file_handle_t *fh)
 	}
 
 	switch_safe_free(fh->dbuf);
-
 
 	return status;
 }
