@@ -376,7 +376,8 @@ struct output_loop {
     switch_frame_t write_frame;
 
     /* accumlate function */
-    switch_frame_t acc_frame;
+    switch_frame_t *acc_frame;
+    int acc_frame_idx;
     uint8_t frame_cnt;
 
     uint8_t *data;
@@ -6546,12 +6547,8 @@ void init_output_loop(output_loop_t *ol, conference_member_t *member, switch_thr
     
     ol->write_frame.codec = &member->write_codec;
 
-    ol->acc_frame.data = ol->data = switch_core_session_alloc(member->session, SWITCH_RECOMMENDED_BUFFER_SIZE);
-    ol->acc_frame.buflen = SWITCH_RECOMMENDED_BUFFER_SIZE;
-
-    ol->acc_frame.codec = &member->write_codec;
-
-    ol->frame_cnt = 0;
+    ol->acc_frame_idx = 0;
+    ol->acc_frame = NULL;
 
     member->out_start_of_interval = switch_micro_time_now() / 1000;
     member->out_last_sent = member->out_start_of_interval;
@@ -7071,49 +7068,37 @@ static void *SWITCH_THREAD_FUNC conference_loop_output(switch_thread_t *thread, 
     return NULL;
 }
 
-switch_status_t accumulate_and_send(output_loop_t *ol, switch_frame_t *from_frame,
-                                    switch_frame_t *to_frame, switch_time_t *before_send_time) {
+switch_status_t accumulate_and_send(output_loop_t *ol, switch_frame_t *from_frame, switch_time_t *before_send_time) {
 
     conference_member_t *member = ol->member;
-    switch_bool_t send = SWITCH_FALSE;
-    switch_bool_t equal = SWITCH_FALSE;
 
     if (!from_frame) { return SWITCH_STATUS_FALSE; }
 
     /* add data to acc_frame */
-    if (member->frame_max <= 1 && ol->frame_cnt == 0) {
-        /* just send! */
-        to_frame = from_frame;
-        send = SWITCH_TRUE;
-        equal = SWITCH_TRUE;
-    } else {
-        if (switch_frame_append(to_frame, from_frame, from_frame->datalen) != SWITCH_STATUS_SUCCESS) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "member %d failed to switch_frame_append\n", member->id);
-        } else {
-            if (ol->frame_cnt == 0) {
-                to_frame->timestamp = from_frame->timestamp;
+    if (member->frame_max <= 1) {
+        if (ol->acc_frame) {
+            /* send acc frame */
+            if (switch_core_session_write_enc_frame(member->session, ol->acc_frame,
+                                                    SWITCH_IO_FLAG_NONE, 0, before_send_time) != SWITCH_STATUS_SUCCESS) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "member %d failed to write_enc_frame\n", member->id);
+                return SWITCH_STATUS_FALSE;
             }
-            ol->frame_cnt += 1;
+            ol->acc_frame = NULL;
         }
-        if (ol->frame_cnt >= member->frame_max) {
-            send = SWITCH_TRUE;
-        }
-    }
-
-    if (send) {
-        if (to_frame->datalen < 160) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "member %d sending frame w/ %d bytes (from frame %d bytes) eq:%d cnt:%d max:%d\n",
-                              member->id, to_frame->datalen, from_frame->datalen, equal, ol->frame_cnt, member->frame_max);
-        }
-        if (switch_core_session_write_enc_frame(member->session, to_frame,
+        if (switch_core_session_write_enc_frame(member->session, from_frame,
                                                 SWITCH_IO_FLAG_NONE, 0, before_send_time) != SWITCH_STATUS_SUCCESS) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "member %d failed to write_enc_frame\n", member->id);
             return SWITCH_STATUS_FALSE;
-        } else {
-            ol->frame_cnt = 0;
-            if (!equal) {
-                switch_frame_reset(to_frame);
-                to_frame->samples = 0;
+        }
+    } else {
+        if (!ol->acc_frame) {
+            ol->acc_frame = cwc_get_acc_frame(member->meo.cwc, &ol->acc_frame_idx);
+        }
+        if (cwc_set_acc_frame(member->meo.cwc, from_frame, ol->acc_frame_idx)) {
+            if (switch_core_session_write_enc_frame(member->session, ol->acc_frame,
+                                                    SWITCH_IO_FLAG_NONE, 0, before_send_time) != SWITCH_STATUS_SUCCESS) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "member %d failed to write_enc_frame\n", member->id);
+                return SWITCH_STATUS_FALSE;
             }
         }
     }
@@ -7274,7 +7259,6 @@ OUTPUT_LOOP_RET process_output_loop(output_loop_t *ols, switch_timer_t *timer)
             
             /* Fuze: this part hasn't changed */
             ols->write_frame.samples = ols->write_frame.datalen / 2;
-            ols->write_frame.timestamp = timer->samplecount;
             
             if(!switch_test_flag(member, MFLAG_CAN_HEAR)) {
                 memset(ols->write_frame.data, 255, ols->write_frame.datalen);
@@ -7306,8 +7290,7 @@ OUTPUT_LOOP_RET process_output_loop(output_loop_t *ols, switch_timer_t *timer)
             }
 
             if (frame) {
-                frame->timestamp = timer->samplecount;
-                if (accumulate_and_send(ols, frame, &ols->acc_frame, &before_send_time) != SWITCH_STATUS_SUCCESS) {
+                if (accumulate_and_send(ols, frame, &before_send_time) != SWITCH_STATUS_SUCCESS) {
                     switch_mutex_unlock(member->audio_out_mutex);
                     switch_mutex_unlock(member->write_mutex);
                     return OUTPUT_LOOP_FAILED;
@@ -7332,7 +7315,6 @@ OUTPUT_LOOP_RET process_output_loop(output_loop_t *ols, switch_timer_t *timer)
         ols->write_frame.datalen = ols->bytes;
         ols->write_frame.samples = ols->samples;
         memset(ols->write_frame.data, 255, ols->write_frame.datalen);
-        ols->write_frame.timestamp = timer->samplecount;
         
         if (ols->individual == SWITCH_FALSE) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
@@ -7343,8 +7325,7 @@ OUTPUT_LOOP_RET process_output_loop(output_loop_t *ols, switch_timer_t *timer)
         frame = process_file_play(member, &ols->write_frame, SWITCH_TRUE);
 
         if (frame) {
-            frame->timestamp = timer->samplecount;
-            if (accumulate_and_send(ols, frame, &ols->acc_frame, &before_send_time) != SWITCH_STATUS_SUCCESS) {
+            if (accumulate_and_send(ols, frame, &before_send_time) != SWITCH_STATUS_SUCCESS) {
                 switch_channel_hangup(channel, SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER);
                 switch_mutex_unlock(member->write_mutex);
                 return OUTPUT_LOOP_HANGUP;
@@ -7404,7 +7385,6 @@ OUTPUT_LOOP_RET process_output_loop(output_loop_t *ols, switch_timer_t *timer)
             if (!meo_frame_encoded(&member->meo)) {
                 switch_frame_t *frame = NULL;
                 ols->write_frame.samples = ols->write_frame.datalen / 2;
-                ols->write_frame.timestamp = timer->samplecount;
                 
                 if ((ols->write_frame.datalen = (uint32_t)meo_read_buffer(&member->meo, ols->write_frame.data, ols->bytes))) {
                     
@@ -7439,7 +7419,7 @@ OUTPUT_LOOP_RET process_output_loop(output_loop_t *ols, switch_timer_t *timer)
             }
             
             rdframe = meo_get_frame(&member->meo);
-            
+
             if (rdframe == NULL) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
                                   "member %d null read frame\n",member->id);
@@ -7447,9 +7427,7 @@ OUTPUT_LOOP_RET process_output_loop(output_loop_t *ols, switch_timer_t *timer)
                 break;
             }
 
-            rdframe->timestamp = timer->samplecount;
-
-            if (accumulate_and_send(ols, rdframe, &ols->acc_frame, &before_send_time) != SWITCH_STATUS_SUCCESS) {
+            if (accumulate_and_send(ols, rdframe, &before_send_time) != SWITCH_STATUS_SUCCESS) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "failed to send frame!\n");
                 failed = SWITCH_TRUE;
                 switch_mutex_unlock(member->meo.cwc->codec_mutex);

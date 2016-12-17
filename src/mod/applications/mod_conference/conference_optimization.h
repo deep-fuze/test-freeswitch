@@ -64,6 +64,8 @@ typedef struct conference_frame {
     switch_bool_t written;
 } conference_frame_t;
 
+#define N_ACC_FRAMES 8
+
 /* This is a codec.
  * Each conference has a set of codecs
  * Each member points to one of these codecs
@@ -73,7 +75,11 @@ typedef struct conference_write_codec {
     switch_mutex_t *codec_mutex;
 
     conference_frame_t frames[MAX_CONF_FRAMES];
-    
+
+    switch_frame_t acc_frame[N_ACC_FRAMES];
+    switch_bool_t acc_frame_written[N_ACC_FRAMES];
+    int acc_frame_cnt[N_ACC_FRAMES];
+
     uint32_t codec_id;
     uint32_t impl_id;
     
@@ -83,7 +89,7 @@ typedef struct conference_write_codec {
     uint64_t encode_cnt;
     uint64_t rd_cnt;
     uint64_t ivr_encode_cnt;
-  uint32_t last_write_size;
+    uint32_t last_write_size;
 } conference_write_codec_t;
 
 /* This is a member object.
@@ -133,6 +139,9 @@ switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t read_idx);
 switch_bool_t cwc_frame_written(conference_write_codec_t *cwc, uint32_t read_idx);
 switch_bool_t cwc_frame_encoded(conference_write_codec_t *cwc, uint32_t read_idx);
 conference_write_codec_t *cwc_get(conference_write_codec_t *cwc, int codec_id, int impl_id);
+
+switch_bool_t cwc_set_acc_frame(conference_write_codec_t *cwc, switch_frame_t *frame, int idx);
+switch_frame_t *cwc_get_acc_frame(conference_write_codec_t *cwc, int *idx);
 
 /* Conference Encoder Optimization Functions */
 void ceo_start_write(conf_encoder_optimization_t *ceo);
