@@ -3273,7 +3273,6 @@ static switch_status_t conference_del_member(conference_obj_t *conference, confe
         conference_play_file(conference, (char *)exit_sound, CONF_DEFAULT_LEADIN,
                              switch_core_session_get_channel(member->session), !switch_test_flag(conference, CFLAG_WAIT_MOD) ? 0 : 1, 0);
     }
-
     lock_member(member);
 
 
@@ -3363,7 +3362,6 @@ static switch_status_t conference_del_member(conference_obj_t *conference, confe
             if (!exit_sound && conference->exit_sound && switch_test_flag(conference, CFLAG_EXIT_SOUND)) {
                 conference_play_file(conference, conference->exit_sound, 0, channel, 0, 0);
             }
-
             if (conference->count == 1 && conference->alone_sound && !switch_test_flag(conference, CFLAG_WAIT_MOD) && !switch_test_flag(member, MFLAG_GHOST) && !conference->is_recording) {
                 conference_stop_file(conference, FILE_STOP_ASYNC);
                 conference_play_file(conference, conference->alone_sound, 0, channel, 1, 0);
@@ -6807,11 +6805,11 @@ static void *SWITCH_THREAD_FUNC conference_loop_output(switch_thread_t *thread, 
             loop_now = switch_time_now();
 
             switch_mutex_lock(list->lock);
-			/*
-			 * Make sure that each conference that we have here has some participants in the main thread.
-			 * The simplified conference processing model requires this otherwise mixing will not happen
-			 * as mixing ONLY happens on the main thread.
-			 */
+            /*
+             * Make sure that each conference that we have here has some participants in the main thread.
+             * The simplified conference processing model requires this otherwise mixing will not happen
+             * as mixing ONLY happens on the main thread.
+             */
             for (output_loop_t *ols = list->loop; ols; ) {
                 if (ols->stopping) { continue; }
                 if (ols->member->conference->participants_per_thread[0] < MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD) {
@@ -6827,7 +6825,6 @@ static void *SWITCH_THREAD_FUNC conference_loop_output(switch_thread_t *thread, 
                         output_loop_list_add_to_idx(ols->member->conference, ols, ols->member->conference->list_idx);
                         ols->new_ol = SWITCH_TRUE;
                         ols = list->loop;
-                        globals.outputll[list->idx].count -= 1;
                     } else {
                         prev->next = ols->next;
                         ols->next = NULL;
@@ -6837,8 +6834,8 @@ static void *SWITCH_THREAD_FUNC conference_loop_output(switch_thread_t *thread, 
                         output_loop_list_add_to_idx(ols->member->conference, ols, ols->member->conference->list_idx);
                         ols = prev->next;
                         ols->new_ol = SWITCH_TRUE;
-                        globals.outputll[list->idx].count -= 1;
                     }
+                    globals.outputll[list->idx].count -= 1;
                 } else {
                     prev = ols;
                     ols = ols->next;
@@ -6936,6 +6933,10 @@ static void *SWITCH_THREAD_FUNC conference_loop_output(switch_thread_t *thread, 
                 ols->tid = tid;
                 switch_monitor_change_tid(tid, switch_core_get_monitor_index(ols->member->session));
                 switch_monitor_change_desc(tid, switch_core_get_monitor_index(ols->member->session), "conference_loop_output");
+                ols->member->meo.cwc = cwc_get(ols->member->conference->ceo.cwc[list->idx/MAX_NUMBER_OF_OUTPUT_NTHREADS],
+                                               ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id);
+                ols->member->meo.filelist = filelist_get(globals.filelist[list->idx],
+                                                         ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id);
                 switch_channel_change_thread(ols->channel);
             }
 
@@ -9150,18 +9151,22 @@ static void conference_thread_print(switch_stream_handle_t *stream, char *delim,
                                    globals.outputll[i].process_avg[0], globals.outputll[i].process_avg[1], globals.outputll[i].process_avg[2],
                                    globals.outputll[i].process_avg_min[0], globals.outputll[i].process_avg_min[1],
                                    globals.outputll[i].process_avg_min[2], globals.output_thread_dead[i]);
-            if (detail >= 2) {
+            if (detail >= 1) {
                 switch_mutex_lock(globals.outputlllock);
                 switch_mutex_lock(globals.outputll[i].lock);
                 if (globals.outputll[i].loop) {
                     output_loop_t *olp;
                     int j = 0;
                     for (olp = globals.outputll[i].loop; olp->next; olp = olp->next) {
-                        stream->write_function(stream, "  %3d L%2d OL%2d m%4d %s %s %s%s%s\n",
-                                               j, olp->list_idx, olp->initial_list_idx, olp->member->id, olp->member->mname, 
-                                               olp->member->conference->meeting_id,
-                                               (olp->starting ? "starting " : ""), (olp->stopping ? "stopping " : ""),
-                                               (olp->stopped ? "stopped " : ""));
+                        if (detail >= 2 || (detail == 1 && switch_test_flag(olp->member, MFLAG_TALKING))) {
+                            stream->write_function(stream, "  %3d L%2d OL%2d m%4d %s %s codec:%d %s%s %s%s%s\n",
+                                                   j, olp->list_idx, olp->initial_list_idx, olp->member->id, olp->member->mname,
+                                                   olp->member->conference->meeting_id, olp->member->orig_read_impl.codec_id,
+                                                   (switch_test_flag(olp->member, MFLAG_TALKING) ? "speaking " : ""),
+                                                   (olp->individual ? "individual " : "mix "),
+                                                   (olp->starting ? "starting " : ""), (olp->stopping ? "stopping " : ""),
+                                                   (olp->stopped ? "stopped " : ""));
+                        }
                         j++;
                     }
                 }
@@ -9252,6 +9257,9 @@ static switch_status_t conf_api_sub_list(conference_obj_t *conference, switch_st
         } else if (strcasecmp(argv[1 + argofs], "count") == 0) {
             countonly = 1;
         } else if (strcasecmp(argv[1 + argofs], "threads") == 0) {
+            detail = 0;
+            thread = 1;
+        } else if (strcasecmp(argv[1 + argofs], "threads-active") == 0) {
             detail = 1;
             thread = 1;
         } else if (strcasecmp(argv[1 + argofs], "threads-detail") == 0) {
