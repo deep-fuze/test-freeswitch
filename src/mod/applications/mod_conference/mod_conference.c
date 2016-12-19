@@ -13605,7 +13605,7 @@ float calculate_thread_utilization(int idx)
 
 static void output_loop_list_add_to_idx(conference_obj_t *conference, output_loop_t *ol, int idx)
 {
-    switch_mutex_unlock(globals.outputlllock);
+    switch_mutex_lock(globals.outputlllock);
     switch_mutex_lock(globals.outputll[idx].lock);
     if (globals.outputll[idx].loop) {
         output_loop_t *olp;
