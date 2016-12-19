@@ -9258,7 +9258,7 @@ static void conference_thread_print(switch_stream_handle_t *stream, char *delim,
                             output_loop_t *olp;
                             int j = 0;
 
-                            for (olp = globals.outputll[i].loop; olp->next; olp = olp->next) {
+                            for (olp = globals.outputll[i].loop; olp; olp = olp->next) {
                                 stream->write_function(stream, "  %3d L%2d OL%2d m%4d %s %s %s%s%s\n",
                                                        j, olp->list_idx, olp->initial_list_idx, olp->member->id, olp->member->mname, 
                                                        olp->member->conference->meeting_id,
