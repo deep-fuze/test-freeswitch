@@ -46,7 +46,7 @@ void cwc_next(conference_write_codec_t *cwc) {
 
 switch_bool_t cwc_initialize(conference_write_codec_t *cwc, switch_memory_pool_t *mutex_pool,
                              switch_memory_pool_t *frame_pool) {
-
+    
     switch_mutex_init(&cwc->codec_mutex, SWITCH_MUTEX_NESTED, mutex_pool);
 
     cwc->next = NULL;
@@ -72,21 +72,9 @@ switch_bool_t cwc_initialize(conference_write_codec_t *cwc, switch_memory_pool_t
         }
         cwc->frames[i].frame.datalen = 0; /*ENC_FRAME_DATA;*/
         switch_set_flag(&cwc->frames[i].frame, SFF_DYNAMIC);
-        cwc->acc_frame[i].buflen = ENC_FRAME_DATA;
+        
         cwc->frames[i].encoded = SWITCH_FALSE;
         cwc->frames[i].written = SWITCH_FALSE;
-    }
-
-    for (int i = 0; i < N_ACC_FRAMES; i++) {
-      memset(&cwc->acc_frame[i], 0, sizeof(switch_frame_t));
-      if ((cwc->acc_frame[i].data = switch_core_alloc(frame_pool, 2000))== 0){
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "no memory for new frame data\n");
-      }
-      cwc->acc_frame[i].datalen = 0;
-      cwc->acc_frame[i].buflen = 2000;
-      switch_set_flag(&cwc->acc_frame[i], SFF_DYNAMIC);
-      cwc->acc_frame_written[i] = SWITCH_FALSE;
-      cwc->acc_frame_cnt[i] = 0;
     }
     
     return SWITCH_TRUE;
@@ -130,57 +118,10 @@ switch_bool_t cwc_write_buffer(conference_write_codec_t *cwc, int16_t *data, uin
 switch_bool_t cwc_set_frame(conference_write_codec_t *cwc, uint32_t read_idx, switch_frame_t *frame) {
     if (switch_frame_copy(frame, &cwc->frames[read_idx].frame, frame->datalen) == SWITCH_STATUS_SUCCESS) {
         cwc->frames[read_idx].encoded = SWITCH_TRUE;
-        for (int i = 0; i < N_ACC_FRAMES; i++) {
-            if (cwc->acc_frame_written[i]) {
-                cwc->acc_frame_written[i] = SWITCH_FALSE;
-                if (cwc->acc_frame_cnt[i] == N_ACC_FRAMES) {
-                    cwc->acc_frame[i].datalen = 0;
-                    cwc->acc_frame_cnt[i] = 0;
-                }
-            } else {
-                cwc->acc_frame[i].datalen = 0;
-                cwc->acc_frame_cnt[i] = 0;
-            }
-        }
         return SWITCH_TRUE;
     } else {
         return SWITCH_FALSE;
     }
-}
-
-switch_bool_t cwc_set_acc_frame(conference_write_codec_t *cwc, switch_frame_t *frame, int idx) {
-    if (!cwc->acc_frame_written[idx]) {
-        switch_frame_append(&cwc->acc_frame[idx], frame, frame->datalen);
-        cwc->acc_frame_cnt[idx] += 1;
-        cwc->acc_frame_written[idx] = SWITCH_TRUE;
-        if (cwc->acc_frame_cnt[idx] == N_ACC_FRAMES) {
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "cwc_set_acc_frame:%d\n", idx);
-        }
-    }
-    return cwc->acc_frame_cnt[idx] == N_ACC_FRAMES;
-}
-
-//switch_frame_t *cwc_get_acc_frame(conference_write_codec_t *cwc, int idx) {
-//    return &cwc->acc_frame[i].frame;
-//}
-
-switch_frame_t *cwc_get_acc_frame(conference_write_codec_t *cwc, int *idx) {
-    for (int i = 0; i < N_ACC_FRAMES; i++) {
-        if (cwc->acc_frame_written[i] && cwc->acc_frame_cnt[i] == 1) {
-            *idx = i;
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "cwc_get_acc_frame:%d wr:%d cnt:%d (return)\n", i, cwc->acc_frame_written[i], cwc->acc_frame_cnt[i]);
-            return &cwc->acc_frame[i];
-        }
-    }
-    for (int i = 0; i < N_ACC_FRAMES; i++) {
-        if (!cwc->acc_frame_written[i] && cwc->acc_frame_cnt[i] == 0) {
-          *idx = i;
-          switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "cwc_get_acc_frame:%d wr:%d cnt:%d (return)\n", i, cwc->acc_frame_written[i], cwc->acc_frame_cnt[i]);
-          return &cwc->acc_frame[i];
-        }
-    }
-    *idx = 0;
-    return NULL;
 }
 
 switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t read_idx) {
