@@ -343,9 +343,9 @@ SWITCH_DECLARE(void) switch_log_vprintf(switch_text_channel_t channel, const cha
 	uint32_t len;
 	uint32_t tid = switch_thread_self();
 #ifdef SWITCH_FUNC_IN_LOG
-	const char *extra_fmt = "%s [%u] [%s] %s:%d %s()%c%s";
+	const char *extra_fmt = "%s [%s] [%s] %s:%d %s()%c%s";
 #else
-	const char *extra_fmt = "%s [%u] [%s] %s:%d%c%s";
+	const char *extra_fmt = "%s [%s] [%s] %s:%d%c%s";
 #endif
 	switch_log_level_t limit_level = runtime.hard_log_level;
 	switch_log_level_t special_level = SWITCH_LOG_UNINIT;
