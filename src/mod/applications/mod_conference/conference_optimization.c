@@ -6,8 +6,8 @@
 #define CONF_DBLOCK_SIZE CONF_BUFFER_SIZE
 #define CONF_DBUFFER_SIZE CONF_BUFFER_SIZE
 
-//#define ENC_FRAME_DATA (640)
-#define ENC_FRAME_DATA (4096)
+#define ENC_FRAME_DATA (640)
+//#define ENC_FRAME_DATA (4096)
 
 uint32_t cwc_get_idx(conference_write_codec_t *cwc) {
     return cwc->write_idx;
@@ -438,7 +438,7 @@ switch_bool_t fc_add_frame(file_cursor_t *cursor, switch_frame_t *pFrame) {
         return SWITCH_FALSE;
     }
 
-    if (!(frame = pf_new_frame(cursor->file->pool, ENC_FRAME_DATA /*pFrame->datalen*/))) {
+    if (!(frame = pf_new_frame(cursor->file->pool, pFrame->datalen))) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "fc_add_frame: failed to alloc frame\n");
         return SWITCH_FALSE;
     }
