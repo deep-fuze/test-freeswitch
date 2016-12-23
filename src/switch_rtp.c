@@ -1119,12 +1119,14 @@ SWITCH_DECLARE(void) switch_close_transport(switch_channel_t *channel) {
     if (rtp_session) {
         __sockaddr_t saddr;
         size_t len;
-        uint8_t buf[4000];
+        uint8_t buf[SWITCH_RTP_MAX_BUF_LEN];
 
         if (rtp_session->rtp_conn) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session), SWITCH_LOG_INFO, "fuze transport close rtp connection\n");
-            len = 4000;
-            while (fuze_transport_socket_read(rtp_session->rtp_conn, &saddr, (uint8_t *) buf, &len) == TR_STATUS_SUCCESS) { }
+            len = SWITCH_RTP_MAX_BUF_LEN;
+            while (fuze_transport_socket_read(rtp_session->rtp_conn, &saddr, (uint8_t *) buf, &len) == TR_STATUS_SUCCESS) {
+				len = SWITCH_RTP_MAX_BUF_LEN;
+			}
             fuze_transport_close_connection(rtp_session->rtp_conn);
             rtp_session->rtp_conn = NULL;
         } else {
@@ -1133,8 +1135,10 @@ SWITCH_DECLARE(void) switch_close_transport(switch_channel_t *channel) {
 
         if (rtp_session->rtcp_conn) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session), SWITCH_LOG_INFO, "fuze transport close rtcp connection\n");
-            len = 4000;
-            while (fuze_transport_socket_read(rtp_session->rtcp_conn, &saddr, (uint8_t *) buf, &len) == TR_STATUS_SUCCESS) { }
+            len = SWITCH_RTP_MAX_BUF_LEN;
+            while (fuze_transport_socket_read(rtp_session->rtcp_conn, &saddr, (uint8_t *) buf, &len) == TR_STATUS_SUCCESS) {
+				len = SWITCH_RTP_MAX_BUF_LEN;
+			}
             fuze_transport_close_connection(rtp_session->rtcp_conn);
             rtp_session->rtcp_conn = NULL;
         } else {
