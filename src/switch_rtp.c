@@ -446,6 +446,7 @@ struct switch_rtp {
     switch_bool_t srtp_protect_error;
     uint16_t last_bridge_seq[2];
     switch_bool_t is_bridge;
+    switch_bool_t is_fuze_app;
     switch_bool_t is_ivr;
     switch_bool_t last_write_ts_set;
 
@@ -4525,6 +4526,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     /* fuze specifics for initialization */
     rtp_session->base_seq_set = SWITCH_FALSE;
     rtp_session->is_bridge = SWITCH_FALSE;
+    rtp_session->is_fuze_app = SWITCH_FALSE;
     rtp_session->is_ivr = SWITCH_FALSE;
 
     rtp_session->high_drift_packets = 0;
@@ -7988,6 +7990,11 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
         send = 0;
     }
 
+	if (!rtp_session->is_fuze_app && (*flags & SFF_CNG)) {
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "dropping CNG packet on session that isn't a fuze_app session\n");
+		send = 0;
+	}
+
     /* fuze */
     if (send) {
         if (rtp_session->use_webrtc_neteq) {
@@ -8768,6 +8775,22 @@ SWITCH_DECLARE(uint32_t) switch_rtp_get_samples_per_second(switch_rtp_t *rtp_ses
 SWITCH_DECLARE(uint32_t) switch_rtp_get_packets_received(switch_rtp_t *rtp_session)
 {
     return rtp_session->total_received;
+}
+
+SWITCH_DECLARE(void) switch_rtp_set_fuze_app(switch_channel_t *channel, switch_bool_t val)
+{
+    switch_rtp_t *rtp_session;
+
+    rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session) {
+        return;
+    }
+
+    rtp_session->is_fuze_app = val;
+
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "switch_rtp_set_fuze_app %s\n",
+                      (val ? "TRUE" : "FALSE"));
 }
 
 #define MAX_DESCRIPTION_LEN 1024

@@ -48,6 +48,7 @@ static void switch_core_media_set_r_sdp_codec_string(switch_core_session_t *sess
 
 extern SWITCH_DECLARE(void) switch_set_rtp_session_email(switch_rtp_t *rtp_session, char *email);
 extern SWITCH_DECLARE(void) switch_set_rtp_session_phone(switch_rtp_t *rtp_session, char *phone);
+extern SWITCH_DECLARE(void) switch_rtp_set_fuze_app(switch_channel_t *channel, switch_bool_t val);
 
 //#define DTLS_CLIENT 
 //#define GOOGLE_ICE
@@ -3582,6 +3583,7 @@ SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *s
 							  "setting fuze_app for this session subject:%s app_type:%s\n", sdp->sdp_subject, get_fuze_app_type(sdp, r_sdp));
 		}
         switch_channel_set_variable(session->channel, "fuze_app", get_fuze_app_type(sdp, r_sdp));
+		switch_rtp_set_fuze_app(session->channel, SWITCH_TRUE);
     }
 
     /* set email */
@@ -8832,6 +8834,7 @@ SWITCH_DECLARE(void) switch_core_media_set_session_name(switch_core_session_t *s
 							  "setting fuze_app for this session subject:%s app_type:%s\n", sdp->sdp_subject, get_fuze_app_type(sdp, r_sdp));
 		}
         switch_channel_set_variable(session->channel, "fuze_app", get_fuze_app_type(sdp, r_sdp));
+		switch_rtp_set_fuze_app(session->channel, SWITCH_TRUE);
 
         if ((uuid = switch_channel_get_partner_uuid(session->channel)) &&
             (other_session = switch_core_session_locate(uuid))) {
@@ -8842,6 +8845,7 @@ SWITCH_DECLARE(void) switch_core_media_set_session_name(switch_core_session_t *s
 									  "setting fuze_app for this session as well subect:%s app_type%s\n", sdp->sdp_subject, get_fuze_app_type(sdp, r_sdp));
 				}
                 switch_channel_set_variable(session->channel, "fuze_app", get_fuze_app_type(sdp, r_sdp));
+				switch_rtp_set_fuze_app(other_channel, SWITCH_TRUE);
             }
             switch_core_session_rwunlock(other_session);
         }
