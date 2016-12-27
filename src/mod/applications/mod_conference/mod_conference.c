@@ -745,7 +745,6 @@ struct conference_member {
     uint16_t consecutive_inactive_slots;
     cJSON *json;
     cJSON *status_field;
-    uint8_t loop_loop;
 
     uint32_t flush_len;
     uint32_t low_count;
@@ -6227,13 +6226,15 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
     }
     
     il->loops++;
-    
+
     if (switch_channel_test_flag(member->channel, CF_CONFERENCE_RESET_MEDIA)) {
         switch_channel_clear_flag(member->channel, CF_CONFERENCE_RESET_MEDIA);
         
+
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                          "CF_CONFERENCE_RESET_MEDIA mid:%s/%d\n", member->mname, member->id);
+
         if (il->loops > 500) {
-            member->loop_loop = 1;
-            
             if (setup_media(member, member->conference)) {
                 switch_mutex_unlock(member->read_mutex);
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
@@ -6241,9 +6242,8 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
                 return INPUT_LOOP_RET_BREAK;
             }
         }
-        
     }
-    
+
     /* skip frames that are not actual media or when we are muted or silent */
 /* xxx this is where i left off with can_speak */
     if ((switch_test_flag(member, MFLAG_TALKING) || 
@@ -7044,7 +7044,7 @@ static void *SWITCH_THREAD_FUNC conference_loop_output(switch_thread_t *thread, 
                 }
                 
                 if (!switch_test_flag(ols->member, MFLAG_RUNNING) || !switch_test_flag(ols->member, MFLAG_ITHREAD) ||
-                    !switch_channel_ready(ols->channel) || ols->member->loop_loop) {
+                    !switch_channel_ready(ols->channel)) {
                     set_ols_stopping(ols);
                     if (ols->ild) {
                         switch_close_transport(ols->ild->channel);
@@ -7712,15 +7712,6 @@ OUTPUT_LOOP_RET process_output_loop_end_member(output_loop_t *ols) {
                           switch_channel_cause2str(switch_channel_get_cause(channel)));
     }
 
-    if (member->loop_loop) {
-        
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR,
-                          "M(%s)/I(%s):U(%s) (id:%d) Output loop returning!!!\n",
-                          member->conference->meeting_id, member->conference->instance_id, member->mname, member->id);
-        
-        return OUTPUT_LOOP_OK;
-    }
-    
     /* if it's an outbound channel, store the release cause in the conference struct, we might need it */
     if (switch_channel_direction(channel) == SWITCH_CALL_DIRECTION_OUTBOUND) {
         member->conference->bridge_hangup_cause = switch_channel_get_cause(channel);
@@ -12023,6 +12014,8 @@ static int setup_media(conference_member_t *member, conference_obj_t *conference
     switch_core_codec_destroy(&member->write_codec);
   done:
 
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "SETUP_MEDIA FAILED\n");
+
     return -1;
 
 
@@ -12433,11 +12426,12 @@ SWITCH_STANDARD_APP(conference_function)
                     conference->max_members = max_members_val;
                 }
             }
+#if 0
             else
             {
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "No channel override for conference max_members\n");
             }
-
+#endif
             /* check for variable to override endconf_grace_time profile value */
             if (!zstr(endconf_grace_time_str = switch_channel_get_variable(channel, "conference_endconf_grace_time"))) {
                 uint32_t grace_time_val;
@@ -13653,7 +13647,7 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
 
         switch_mutex_lock(globals.hash_mutex);
         set_conference_state_unlocked(conference, CFLAG_INHASH);
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Insert conference %s in hash\n", conference->name);
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Insert conference %s in hash\n", conference->name);
         switch_core_hash_insert(globals.conference_hash, conference->name, conference);
         switch_mutex_unlock(globals.hash_mutex);
 
