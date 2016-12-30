@@ -1771,7 +1771,7 @@ NetworkBuffer::Ptr ConnectionImpl::GetBuffer(Buffer::Ptr spBuf)
     }
     
     if (!p_buf) {
-        MLOG("Requested shallow copy - creating shallow num: " << Summer2);
+        MLOG("Requested shallow copy - creating shallow num: " << bufNum_);
         p_buf = new NetworkBuffer(spBuf);
         p_buf->appID_ = ID(); // mark the connection ID for release
         bufAlloc[SHALLOW_COPY]++;
