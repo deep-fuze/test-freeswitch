@@ -21,23 +21,27 @@ using std::multimap;
 //
 // Simple timer service using single thread
 //
-class TimerService : public Runnable
+class TimerServiceImpl : public TimerService
+                       , public Runnable
 {
 public:
-    TimerService();
-    virtual ~TimerService();
+    TimerServiceImpl(const char* pName);
+    virtual ~TimerServiceImpl();
     
-    void Terminate();
+    virtual void Terminate();
     
-    // Weak Pointer interface
-    int64_t StartTimerEx(Timer::Ptr pTimer, int32_t ms, int32_t appData,
-                         const char* pFile, int line);
-    void    StopTimer(Timer::Ptr pTimer, int64_t handle);
+    virtual int64_t StartTimerEx(Timer::Ptr pTimer,
+                                 int32_t ms, int32_t appData,
+                                 const char* pFile, int line);
+    virtual int64_t StartTimerEx(Timer::Ptr pTimer,
+                                 int32_t ms, void* appData,
+                                 const char* pFile, int line);
+    virtual int64_t StartTimerEx(Timer* pTimer,
+                                 int32_t ms, int32_t appData,
+                                 const char* pFile, int line);
     
-    // Raw Pointer interface - only if you know what you are doing
-    int64_t StartTimerEx(Timer* pTimer, int32_t ms, int32_t appData,
-                         const char* pFile, int line);
-    void    StopTimer(Timer* pTimer, int64_t handle);
+    virtual void    StopTimer(Timer* pTimer, int64_t handle);
+    virtual void    StopTimer(Timer::Ptr pTimer, int64_t handle);
     
 private:
     
@@ -47,8 +51,9 @@ private:
     struct TimerInfo
     {
         Timer::WPtr wpTimer_;
-        Timer*      pTimer_; // for matching id while stop timer
+        Timer*      pTimer_;    // for matching id while stop timer
         int32_t     appData_;
+        void*       appDataEx_; // this parameter is used for the StartTimerEx function
         bool        useRaw_;
         const char* pFile_;
         int         line_;
@@ -67,6 +72,8 @@ private:
     
     TimerPool  pool_;
     MutexLock  lock_;
+    
+    string     name_;
 };
 
 } // namespace fuze

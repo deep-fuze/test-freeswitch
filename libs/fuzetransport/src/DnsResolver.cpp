@@ -110,7 +110,7 @@ const char* typeString(int type)
     {
     case 1:  return "A";
     case 33: return "SRV";
-    case 35: return "NATPR";
+    case 35: return "NAPTR";
     default: return "UNEXPECTED";
     }
 }
@@ -208,7 +208,7 @@ const uint8_t* HandleDnsReply(void* pArg, const uint8_t* pData, const uint8_t* p
             A::Ptr sp(new A);
             
             sp->domain_   = domain;
-            sp->type_     = type;
+            sp->type_     = Record::A;
             sp->class_    = dnsclass;
             sp->ttl_      = ttl;
             sp->hostName_ = ares_inet_ntop(AF_INET, pData, addr, sizeof(addr));
@@ -228,7 +228,7 @@ const uint8_t* HandleDnsReply(void* pArg, const uint8_t* pData, const uint8_t* p
             SRV::Ptr sp(new SRV);
             
             sp->domain_   = domain;
-            sp->type_     = type;
+            sp->type_     = Record::SRV;
             sp->class_    = dnsclass;
             sp->ttl_      = ttl;
             sp->priority_ = (uint32_t)DNS__16BIT(pData);
@@ -256,7 +256,7 @@ const uint8_t* HandleDnsReply(void* pArg, const uint8_t* pData, const uint8_t* p
             NAPTR::Ptr sp(new NAPTR);
             
             sp->domain_ = domain;
-            sp->type_   = type;
+            sp->type_   = Record::NAPTR;
             sp->class_  = dnsclass;
             sp->ttl_    = ttl;
             sp->order_  = (uint32_t)DNS__16BIT(pData);
@@ -317,10 +317,10 @@ int GetDnsType(Record::Type type)
 {
     switch (type)
     {
-        case Record::A:     return 1;
-        case Record::SRV:   return 33;
-        case Record::NAPTR: return 35;
-        default:            return 0;
+    case Record::A:     return 1;
+    case Record::SRV:   return 33;
+    case Record::NAPTR: return 35;
+    default:            return 0;
     }
 }
     
@@ -373,6 +373,8 @@ void ResolverImpl::OnReply(void* pArg, int status, int timeouts, uint8_t* pBuf, 
         _WLOG_("Length too short " << len << "B < " << HFIXEDSZ << "B");
         return;
     }
+
+    ResolverImpl* p_resolver = reinterpret_cast<ResolverImpl*>(pArg);
     
     /* Parse the answer header. */
     int id      = DNS_HEADER_QID(pBuf);
@@ -404,10 +406,13 @@ void ResolverImpl::OnReply(void* pArg, int status, int timeouts, uint8_t* pBuf, 
     
     // answers
     if (ancount > 0) {
+        Record::List replies;
         for (int i = 0; i < ancount; i++) {
-            pData = HandleDnsReply(pArg, pData, pBuf, len);
+            pData = HandleDnsReply(&replies, pData, pBuf, len);
             if (!pData) return;
         }
+        SetDnsCache(replies);
+        p_resolver->SetReplies(replies);
     }
     
     // NS records
@@ -420,11 +425,50 @@ void ResolverImpl::OnReply(void* pArg, int status, int timeouts, uint8_t* pBuf, 
     
     // additional records
     if (arcount > 0) {
+        Record::List replies;
         for (int i = 0; i < arcount; i++) {
-            pData = HandleDnsReply(0, pData, pBuf, len);
+            pData = HandleDnsReply(&replies, pData, pBuf, len);
             if (!pData) return;
         }
+        SetDnsCache(replies);
+        p_resolver->SetReplies(replies);
+    }
+}
+
+void ResolverImpl::SetReplies(Record::List newReplies)
+{
+    // make sure we don't add same result twice in the result
+    for (auto& new_reply : newReplies) {
+        bool duplicate = false;
+        for (auto& reply : replies_) {
+            if (*new_reply == *reply) {
+                _DLOG_("duplicate found - ignored");
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) continue;
+        replies_.push_back(new_reply);
+    }
+}
+
+void SetDnsCache(Record::List& rList)
+{
+    if (rList.size() > 0) {
+        _DLOG_("Record: " << rList.size());
         
+        Record::Ptr sp = rList.front();
+        
+        string domain = sp->domain_;
+        
+        if (sp->type_ == Record::SRV) {
+            rList.sort(SrvCompare);
+        }
+        else if (sp->type_ == Record::NAPTR) {
+            rList.sort(NaptrCompare);
+        }
+        
+        TransportImpl::GetInstance()->SetDnsCache(rList);
     }
 }
     
@@ -466,35 +510,68 @@ ResolverImpl::~ResolverImpl()
 {
     ares_destroy(channel_);
 }
-    
-Record::List ResolverImpl::Query(const string& rDomain, Record::Type type)
-{
-    _MLOG_(rDomain << " (" << toStr(type) << ")");
 
-    Record::List reply = TransportImpl::GetInstance()->GetDnsCache(rDomain, type);
+
+void ResolverImpl::SetQuery(const string& rDomain, Record::Type type)
+{
+    _DLOG_(rDomain << " (" << toStr(type) << ")");
     
-    if (reply.empty()) {
-        ares_query(channel_, rDomain.c_str(), 1, GetDnsType(type), OnReply, &reply);
-        ProcessQuery();
-        
-        if (type == Record::SRV) {
-            reply.sort(SrvCompare);
-        }
-        else if (type == Record::NAPTR) {
-            reply.sort(NaptrCompare);
-        }
-        
-        TransportImpl::GetInstance()->SetDnsCache(rDomain, type, reply);
+    QueryReq query;
+    
+    query.domain_ = rDomain;
+    query.type_   = type;
+    
+    queries_.push_back(query);
+}
+    
+Record::List ResolverImpl::Query(int timeout)
+{
+    if (queries_.size() > 1) {
+        _MLOG_(queries_.size() << " queries (timeout: " << timeout << " sec)");
     }
     
-    return reply;
-}
+    // clear replies if application is using same instance
+    replies_.clear();
 
-void ResolverImpl::ProcessQuery()
+    bool do_query = false;
+    
+    for (auto& query : queries_) {
+        
+        // check cache first
+        Record::List cache =
+            TransportImpl::GetInstance()->GetDnsCache(query.domain_, query.type_);
+                                                      
+        if (!cache.empty()) {
+            for (auto& it : cache) {
+                replies_.push_back(it);
+            }
+        }
+        else {
+            do_query = true;
+            ares_query(channel_, query.domain_.c_str(), 1,
+                       GetDnsType(query.type_), OnReply, this);
+        }
+    }
+    
+    // if there is no cache available then do query
+    if (do_query) {
+        ProcessQuery(timeout);
+    }
+    
+    // clear queries
+    queries_.clear();
+    
+    return replies_;
+}
+    
+void ResolverImpl::ProcessQuery(int timeout)
 {
     /* Wait for all queries to complete. */
     timeval tv;
     fd_set read_fds, write_fds;
+    
+    // set the absolute limit to the DNS look up
+    int64_t app_timeout = GetTimeMs() + (timeout * 1000);
     
     for (;;) {
         FD_ZERO(&read_fds);
@@ -504,11 +581,49 @@ void ResolverImpl::ProcessQuery()
             break;
         }
         
-        _DLOG_("Waiting for DNS reply");
         timeval* p_tv = ares_timeout(channel_, 0, &tv);
-        if (select(nfds, &read_fds, &write_fds, 0, p_tv) < 0) {
+        
+        _MLOG_("Waiting for DNS reply (timeout: " << tv.tv_sec <<
+               "." << tv.tv_usec/1000 << " seconds)");
+        
+        // if c-ares returned 0 for wait time then set 1 second as mininum
+        if (tv.tv_sec == 0) {
+            tv.tv_sec  = 1;
+            tv.tv_usec = 0;
+        }
+        
+        if (timeout != 0) {
+            
+            // calculate the app timeout
+            int64_t curr_time = GetTimeMs();
+            if (curr_time >= app_timeout) {
+                _MLOG_("App timeout reached");
+                break;
+            }
+            
+            int app_time = int(app_timeout - curr_time);
+            app_time /= 1000;
+            if (app_time == 0) app_time = 1;
+            
+            if (tv.tv_sec >= app_time) {
+                tv.tv_sec  = app_time;
+                tv.tv_usec = 0;
+                _MLOG_("Query timeout reset to " << timeout << " seconds");
+            }
+        }
+        
+        int ret = select(nfds, &read_fds, &write_fds, 0, p_tv);
+        if (ret < 0) {
             _WLOG_("select fail");
             break;
+        }
+        else if (ret == 0) {
+            _DLOG_("Timed out after " << tv.tv_sec <<
+                   "." << tv.tv_usec/1000 << " seconds");
+            if (GetTimeMs() >= app_timeout) {
+                _MLOG_("App timeout reached");
+                break;
+            }
         }
         
         _DLOG_("Received an event");

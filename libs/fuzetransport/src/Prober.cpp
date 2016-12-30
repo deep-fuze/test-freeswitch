@@ -30,6 +30,8 @@
 
 #define _LOG_(A,B) DEBUG_OUT(A, AREA_COM, FNAME << __FUZE_FUNC__ << ": " << B)
 
+#define USE_STUN
+
 namespace fuze {
 
 Prober::Prober()
@@ -76,16 +78,19 @@ void Prober::StartUdpProbe(const string& rAddr, uint16_t port)
             int len = (int)strlen(p);
             const int REQ_LEN = 160;
             
-            spReq_ = Buffer::MAKE(REQ_LEN);
+            spReq_ = spConn_->GetBuffer(REQ_LEN);
+            spReq_->setDebugInfo(__FILE__, __LINE__);
             uint8_t* p_buf = spReq_->getBuf();
             memset(p_buf, '.', REQ_LEN);
             memcpy(p_buf, p, len);
             spReq_->setSize(REQ_LEN);
 #else
             uint8_t trans_id[12] = {0};
+            spReq_ = spConn_->GetBuffer(512);
+            spReq_->setDebugInfo(__FILE__, __LINE__);
             // also send binding request of our own as well for server
-            spReq_ = stun::CreateBindRequest("FuzeServer:FuzeClient",
-                                             trans_id, "", true);
+            stun::CreateBindRequest(spReq_, "FuzeServer:FuzeClient",
+                                    trans_id, "", true);
 #endif
             MutexLock scoped(&lock_);
             spConn_->Send(spReq_);

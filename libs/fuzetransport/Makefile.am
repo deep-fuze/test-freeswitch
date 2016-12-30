@@ -13,6 +13,7 @@ DEFS = @DEFS@ -DSTD_SHARED_PTR -DNO_FUZECORE -DNEW_SRTP
 lib_LTLIBRARIES = libfuzetransport.la 
 libfuzetransport_la_SOURCES = src/core/Log.cpp \
                          src/core/MutexLock.cpp \
+                         src/core/ReadWriteLock.cpp \
                          src/core/Thread.cpp \
                          src/core/ConditionVariable.cpp \
                          src/core/Semaphore.cpp \

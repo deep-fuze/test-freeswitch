@@ -62,7 +62,7 @@ TransportBase::Type GetSrcBaseType(const CongestionInfo& rInfo)
     TransportBase::Type src_type = TransportBase::NONE;
     
     CongestionInfo::const_iterator it
-        = rInfo.find(TransportBaseImpl::SRC_BASE_TYPE);
+        = rInfo.find(SRC_BASE_TYPE);
 
     if (it != rInfo.end()) {
         
@@ -92,6 +92,8 @@ NetworkBuffer::NetworkBuffer(uint32_t size)
     : Buffer(size)
     , remotePort_(0)
     , changed_(false)
+    , appID_(INVALID_ID)
+    , bShallowCopy_(false)
 {
 }
     
@@ -99,6 +101,8 @@ NetworkBuffer::NetworkBuffer(Buffer::Ptr spRecv)
     : Buffer(*spRecv)
     , remotePort_(0)
     , changed_(false)
+    , appID_(INVALID_ID)
+    , bShallowCopy_(true)
 {
 }
 
@@ -119,7 +123,14 @@ void SetInfo(const char* pProxyAddress,
              const char* pCredential,
              Type        type)
 {
+    MLOG("Proxy: " << (pProxyAddress ? pProxyAddress : " N/A"));
+    
     bool enable = (pProxyAddress && (*pProxyAddress != 0));
+
+#ifdef FORCE_HTTP_PROXY
+    if (!enable) return;
+#endif
+    
     TransportImpl::GetInstance()->EnableProxyConnector(enable);
     
     if (ProxyConnector::Ptr sp_proxy =
@@ -164,8 +175,15 @@ string GetLocalIPAddress(const char* pRemoteAddr)
             if (getsockname(sock, (sockaddr*)&local, &len) == 0) {
                 static in_addr s_last_val = {0};
                 if (memcmp(&s_last_val, &local.sin_addr, sizeof(in_addr))) {
-                    MLOG(toStr(s_last_val) << " -> " << toStr(local.sin_addr));
-                    s_last_val = local.sin_addr;
+                    if (strcmp(pRemoteAddr, "8.8.8.8") == 0) {
+                        MLOG(toStr(s_last_val) << " -> " << toStr(local.sin_addr));
+                        s_last_val = local.sin_addr;
+                    }
+                    else {
+                        MLOG("Found IP " << toStr(local.sin_addr) <<
+                             " with respect to remote IP " << pRemoteAddr <<
+                             " (current local IP: " << toStr(s_last_val) << ")");
+                    }
                 }
                 ip_addr = toStr(local.sin_addr);
             }
@@ -326,7 +344,9 @@ vector<string> TranslateToIPs(const string& rAddress)
 {
     vector<string> result;
     
-    for (auto& rec : Resolver::Create()->Query(rAddress, Record::A)) {
+    Resolver::Ptr sp_res = Resolver::Create();
+    sp_res->SetQuery(rAddress, Record::A);
+    for (auto& rec : sp_res->Query()) {
         if (A::Ptr sp_a = fuze_dynamic_pointer_cast<A>(rec)) {
             if (sp_a->hostName_.empty() == false) {
                 MLOG("Address " << rAddress << " resolved to " << sp_a->hostName_);
@@ -370,7 +390,7 @@ void dns::ClearCache()
     TransportImpl::GetInstance()->ClearDnsCache();
 }
     
-bool ReservePort(bool bUDP, uint16_t port, const char* pIP, uint32_t holdTime)
+bool ReservePort(bool bUDP, uint16_t port, const char* pIP, uint32_t holdTime, bool logError)
 {
     bool bResult = false;
     
@@ -402,6 +422,12 @@ bool ReservePort(bool bUDP, uint16_t port, const char* pIP, uint32_t holdTime)
         if (::bind(sock, (sockaddr*)&saddr, sizeof(saddr)) == 0) {
             bResult = true;
         }
+        else {
+            if (logError)
+            {
+                DLOG("Failed to bind to \"" << pIP << ":" << port << "\"");
+            }
+        }
         
         if (bResult && bUDP) {
             if (holdTime == 0) {
@@ -424,17 +450,17 @@ bool ReservePort(bool bUDP, uint16_t port, const char* pIP, uint32_t holdTime)
     
 bool IsUdpPortAvailable(uint16_t port, const char* pIP)
 {
-    return ReservePort(true, port, pIP, 0);
+    return ReservePort(true, port, pIP, 0, false);
 }
 
 bool IsTcpPortAvailable(uint16_t port, const char* pIP)
 {
-    return ReservePort(false, port, pIP, 0);
+    return ReservePort(false, port, pIP, 0, false);
 }
 
 bool ReserveUdpPort(uint32_t holdTimeMs, uint16_t port, const char* pIP)
 {
-    return ReservePort(true, port, pIP, holdTimeMs);
+    return ReservePort(true, port, pIP, holdTimeMs, true);
 }
     
 void ReleaseUdpPort(uint16_t port)
@@ -516,36 +542,90 @@ const char* toStr(RateType type)
     default:             return "INVALID";
     }
 }
-    
+
 int64_t StartTimerEx(Timer::Ptr pTimer, int32_t ms, int32_t appData,
                      const char* pFile, int line)
 {
-    TimerService& r_ts = TransportImpl::GetInstance()->GetTimerService();
-    pFile = (strrchr(pFile, _DIR_MARK_) ? strrchr(pFile, _DIR_MARK_) + 1 : pFile);
-    return r_ts.StartTimerEx(pTimer, ms, appData, pFile, line);
+    TimerService::Ptr& sp_ts = TransportImpl::GetInstance()->GetTimerService();
+    return sp_ts->StartTimerEx(pTimer, ms, appData, pFile, line);
 }
     
-void StopTimer(Timer::Ptr pTimer, int64_t handle)
-{
-    TimerService& r_ts = TransportImpl::GetInstance()->GetTimerService();
-    return r_ts.StopTimer(pTimer, handle);
-}
-
 int64_t StartTimerEx(Timer* pTimer, int32_t ms, int32_t appData,
                      const char* pFile, int line)
 {
-    TimerService& r_ts = TransportImpl::GetInstance()->GetTimerService();
-    pFile = (strrchr(pFile, _DIR_MARK_) ? strrchr(pFile, _DIR_MARK_) + 1 : pFile);
-    return r_ts.StartTimerEx(pTimer, ms, appData, pFile, line);
+    TimerService::Ptr& sp_ts = TransportImpl::GetInstance()->GetTimerService();
+    return sp_ts->StartTimerEx(pTimer, ms, appData, pFile, line);
 }
 
+int64_t StartTimerEx(Timer::Ptr pTimer, int32_t ms, void* appData,
+                     const char* pFile, int line)
+{
+    TimerService::Ptr& sp_ts = TransportImpl::GetInstance()->GetTimerService();
+    return sp_ts->StartTimerEx(pTimer, ms, appData, pFile, line);
+}
+
+void StopTimer(Timer::Ptr pTimer, int64_t handle)
+{
+    TimerService::Ptr& sp_ts = TransportImpl::GetInstance()->GetTimerService();
+    return sp_ts->StopTimer(pTimer, handle);
+}
+    
 void StopTimer(Timer* pTimer, int64_t handle)
 {
-    TimerService& r_ts = TransportImpl::GetInstance()->GetTimerService();
-    return r_ts.StopTimer(pTimer, handle);
+    TimerService::Ptr& sp_ts = TransportImpl::GetInstance()->GetTimerService();
+    return sp_ts->StopTimer(pTimer, handle);
 }
-
-const char* dns::toStr(Record::Type type)
+    
+namespace dns {
+    
+bool Record::operator==(const Record& rRhs)
+{
+    bool result = false;
+    
+    if (domain_ == rRhs.domain_ && type_ == rRhs.type_) {
+        switch (type_)
+        {
+        case Record::A:
+        {
+            struct A* p_lhs = dynamic_cast<struct A*>(this);
+            const struct A* p_rhs = dynamic_cast<const struct A*>(&rRhs);
+            if (p_lhs && p_rhs) {
+                if (p_lhs->hostName_ == p_rhs->hostName_) {
+                    result = true;
+                }
+            }
+            break;
+        }
+        case Record::SRV:
+        {
+            struct SRV* p_lhs = dynamic_cast<struct SRV*>(this);
+            const struct SRV* p_rhs = dynamic_cast<const struct SRV*>(&rRhs);
+            if (p_lhs && p_rhs) {
+                if (p_lhs->name_ == p_rhs->name_ && p_lhs->port_ == p_rhs->port_) {
+                    result = true;
+                }
+            }
+            break;
+        }
+        case Record::NAPTR:
+        {
+            struct NAPTR* p_lhs = dynamic_cast<struct NAPTR*>(this);
+            const struct NAPTR* p_rhs = dynamic_cast<const struct NAPTR*>(&rRhs);
+            if (p_lhs && p_rhs) {
+                if (p_lhs->replacement_ == p_rhs->replacement_) {
+                    result = true;
+                }
+            }
+            break;
+        }
+        default:;
+        }
+    }
+    
+    return result;
+}
+    
+const char* toStr(Record::Type type)
 {
     switch (type)
     {
@@ -554,6 +634,36 @@ const char* dns::toStr(Record::Type type)
     case Record::NAPTR: return "NAPTR";
     default:            return "INVALID";
     }
+}
+    
+} // namespace dns
+
+DebugOut& operator<<(DebugOut& rOut, dns::Record::Ptr spRecord)
+{
+    switch (spRecord->type_)
+    {
+    case dns::Record::A:
+        if (A::Ptr sp = fuze_dynamic_pointer_cast<A>(spRecord)) {
+            rOut << "[A] " << sp->domain_ << " -> " << sp->hostName_ << " ttl " << sp->ttl_;
+        }
+        break;
+    case dns::Record::SRV:
+        if (SRV::Ptr sp = fuze_dynamic_pointer_cast<SRV>(spRecord)) {
+            rOut << "[SRV] " << sp->name_ << ":" << sp->port_ << " ttl " << sp->ttl_
+                 << " priority: " << sp->priority_ << " weight: " << sp->weight_;
+        }
+        break;
+    case dns::Record::NAPTR:
+        if (NAPTR::Ptr sp = fuze_dynamic_pointer_cast<NAPTR>(spRecord)) {
+            rOut << "[NAPTR] " << sp->replacement_ << " ttl " << sp->ttl_ << " "
+                 << sp->flag_ << " " << sp->services_ << " order: " << sp->order_
+                 << ", pref: " << sp->pref_ << " " << sp->regexp_;
+        }
+        break;
+    default:;
+    }
+    
+    return rOut;
 }
     
 } // namespace fuze

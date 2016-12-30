@@ -26,8 +26,9 @@ public:
     ResolverImpl();
     ~ResolverImpl();
     
-    virtual Record::List Query(const string& rDomain,
-                               Record::Type  type);
+    virtual void SetQuery(const string& rDomain,
+                          Record::Type  type);
+    virtual Record::List Query(int timeout = 30);
     
 private:
     
@@ -37,10 +38,22 @@ private:
                         uint8_t* pBuf,
                         int      len);
     
-    void ProcessQuery();
-
-    ares_channel  channel_;
+    void ProcessQuery(int timeout);
+    void SetReplies(Record::List newReplies);
+    
+    // for parallel queries
+    struct QueryReq
+    {
+        string       domain_;
+        Record::Type type_;
+    };
+    
+    ares_channel      channel_;
+    Record::List      replies_;
+    vector<QueryReq>  queries_;
 };
+
+void SetDnsCache(Record::List& rList);
     
 } // namespace dns
 } // namespace fuze

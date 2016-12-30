@@ -12,6 +12,7 @@
 #include <Transport.h>
 #include <Resource.h>
 #include <MutexLock.h>
+#include <ReadWriteLock.h>
 #include <vector>
 #include <queue>
 
@@ -50,6 +51,8 @@ public:
     Transceiver*        GetTransceiver(Resource::Type type, int tranID);
     ServerCore*         GetServerCore(int coreID);
     
+    void ReserveConnections(int num);
+    
     // the objects here are expected to be reset
     // before Release is called
     void Release(Resource* p);
@@ -66,6 +69,7 @@ private:
     vector<Resource*>   resources_[Resource::MAX_NUM];
     queue<Resource*>    idle_[Resource::MAX_NUM];
     MutexLock           lock_[Resource::MAX_NUM];
+    ReadWriteLock       rwLock_[Resource::MAX_NUM];
 };
     
 } // namespace fuze

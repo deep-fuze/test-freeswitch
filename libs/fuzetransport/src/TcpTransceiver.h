@@ -30,7 +30,7 @@ using std::auto_ptr;
 class TcpFramer
 {
 public:
-    TcpFramer();
+    TcpFramer(TcpCoreUser& rUser);
 
     void SetMTU(uint32_t mtu);
     void Clear();
@@ -60,6 +60,8 @@ private:
     uint32_t     recvBytes_;
     uint8_t      headType_;
     
+    TcpCoreUser& rCoreUser_; // to get buffer from
+    
     char         log_[64]; // debug purpose
 };
     
@@ -73,6 +75,7 @@ public:
     // Implement Transceiver Interfaces
     virtual bool Start();
     virtual bool Send(Buffer::Ptr spBuffer);
+    virtual bool Send(const unsigned char* buf, size_t size);
     virtual void SetConnectionID(int connID);
     virtual ConnectionType ConnType();
 
@@ -89,10 +92,15 @@ public:
     virtual void     OnWriteError(int error);
     virtual void     OnReadTimeout();
     
+    virtual Buffer::Ptr GetBuffer(uint32_t bufSize);
+    virtual Buffer::Ptr GetBuffer(Buffer::Ptr spBuf);
+    
     // Implement TlsCoreUser Interfaces
     virtual void OnDataEncrypted(Buffer::Ptr spData);
     virtual void OnDataDecrypted(Buffer::Ptr spData);
     virtual void OnInternalError();
+    
+    virtual Buffer::Ptr GetTlsBuffer(uint32_t bufSize);
     
     // Start with connected socket (handling incoming client)
     //

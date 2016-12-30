@@ -119,7 +119,7 @@ bool Thread::Detach()
     return bResult;
 }
 
-ThreadID Thread::GetThreadID()
+ThreadID_t Thread::GetThreadID()
 {
     return threadID_;
 }
@@ -129,7 +129,7 @@ const char* Thread::Name()
     return name_.c_str();
 }
     
-ThreadID Thread::ID()
+ThreadID_t Thread::ID()
 {
 #ifdef WIN32
     return GetCurrentThreadId();
@@ -151,8 +151,19 @@ ThreadRet WINAPI dispatch_thread(void* pArg)
 {
     Thread* p_thread = static_cast<Thread*>(pArg);
 
-    // initialize seed for rand()
-    srand((unsigned)time(0));
+    static bool seeded = false;
+    if (!seeded) {
+        seeded = true;
+        
+        unsigned seed = (unsigned)time(0);
+#ifdef WIN32
+        seed += (unsigned)_getpid();
+#else
+        seed += getpid();
+#endif
+        // initialize seed for rand()
+        srand(seed);
+    }
     
     MLOG(p_thread->name_ << " starting");
         

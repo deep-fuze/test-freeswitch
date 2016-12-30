@@ -23,9 +23,7 @@ class RateLimiter
 public:
     RateLimiter(TcpCore* pCore);
 
-    inline virtual ~RateLimiter()
-    {
-    }
+    inline virtual ~RateLimiter() {}
 
     void Reset(); // reset to original state with TcpCore
     
@@ -82,9 +80,10 @@ public:
     // Invoked on read timeout on every timeout value set by User
     virtual void OnReadTimeout() = 0;
     
-    inline virtual ~TcpCoreUser()
-    {
-    }
+    virtual Buffer::Ptr GetBuffer(uint32_t bufSize) = 0;
+    virtual Buffer::Ptr GetBuffer(Buffer::Ptr spBuf) = 0;
+    
+    inline virtual ~TcpCoreUser() {}
 };
 
 //
@@ -135,7 +134,7 @@ private:
     // the MTU size for TcpTransceiver is 65KB as
     // different TcpState only allow 2 bytes of length
     // field (UdpOverTcp, DataOverTls)
-    static const uint32_t BUFFER_SIZE    = 32000;
+    static const uint32_t BUFFER_SIZE    = 30000;
     static const uint32_t BUF_SIZE_LIMIT = 65000; // 65KB
     
     // TcpCore needs to be have strong association

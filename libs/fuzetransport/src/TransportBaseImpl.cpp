@@ -22,8 +22,6 @@ namespace fuze {
 
 NoBaseObserver NoBaseObserver::sInstance_;
     
-const char* TransportBaseImpl::SRC_BASE_TYPE = "SrcBaseType";
-    
 TransportBaseImpl::TransportBaseImpl(int baseID)
     : Resource(baseID)
     , type_(TransportBase::NONE)
@@ -211,7 +209,7 @@ void TransportBaseImpl::OnCongestion(const CongestionInfo &rInfo)
             }
         }
     }
-    catch (std::exception& ex) {
+    catch (const std::exception& ex) {
         ELOG("exception - " << ex.what());
     }
     catch (...) {

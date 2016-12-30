@@ -23,7 +23,7 @@ using std::queue;
 struct StatData
 {
     static const uint16_t MAX_NUM = 200;
-    
+
     uint16_t     data_[MAX_NUM];
     uint16_t     index_;
     uint32_t     seq_;
@@ -106,26 +106,29 @@ public:
     virtual void SetRemoteAddressPerBuffer(bool enabled);
     virtual bool Start(ConnectionType eType, int mode = 0);
     virtual bool Send(Buffer::Ptr spBuffer);
+    virtual bool Send(const unsigned char* buf, size_t size);
     virtual bool GetConnectedType(ConnectionType& rType);
     virtual bool GetLocalAddress(string& rIP, uint16_t& rPort);
     virtual bool GetRemoteAddress(string& rIP, uint16_t& rPort);
-    virtual void SetPriority(PriorityType priority);
-    virtual bool GetPriority(PriorityType &rPriority);
     virtual void GetSendQInfo(size_t& rNum, uint32_t& rBufSize);
     virtual void EnableRateReport(bool flag);
+    virtual void EnablePortReservation(bool flag);
+    virtual bool UsePortReservation();
+    virtual NetworkBuffer::Ptr GetBuffer(uint32_t bufSize);
+    virtual NetworkBuffer::Ptr GetBuffer(Buffer::Ptr spBuf);
     
     // Addtional internal API
     const Address& GetLocalAddress();
     const Address& GetRemoteAddress();
     
-    bool IsValidRemote(const Address& rAddr);
+    bool IsValidRemote(const Address& rAddr) const { return (rAddr == remote_ || rAddr == b4akamaiMap_); }
     
     void GetLocalIceCredential(string& rUser, string& rPwd);
     void GetRemoteIceCredential(string& rUser, string& rPwd);
 
-    bool IsPayloadType(PayloadType flag);
+    bool IsPayloadType(PayloadType flag) const { return 0 != (flag & payloadType_); }
     bool IsFallback();
-    bool IsRemotePerBuffer();
+    bool IsRemotePerBuffer() const { return bRemotePerBuf_; }
     
     // Resource Interface
     virtual void Reset();
@@ -206,14 +209,13 @@ private:
                                              // we created binding with Server
     bool                     bWYSWYG_;       // enable framing for TCP
     
-    PriorityType             priority_;
-
     uint32_t                 payloadType_;
     
     Address                  b4akamaiMap_;   // Sometimes akamai sends original src IP
                                              // Prevent their bug to mess up the client
     
     bool                     bRemotePerBuf_;
+    bool                     bReservePort_;
     
 private: // ICE-lite short-term credential
     string                   localUser_;
@@ -233,7 +235,7 @@ private: // statistics for send/recv
     
 public: // Interface for thread to enter and work
     
-    bool ServiceQueue(ThreadID workerID);
+    bool ServiceQueue(ThreadID_t workerID);
     
 private: // separate work thread for heavy lifting such as video/screenshare
     
@@ -254,13 +256,35 @@ private: // separate work thread for heavy lifting such as video/screenshare
     void DeliverEventData(EventData& rEvent);
     void DeliverRateData(RateData& rRate);
     
-    ThreadID                 workerId_;
+    ThreadID_t               workerId_;
     WorkerThread::Ptr        spWorker_; // shared thread worker
     
     queue<Buffer::Ptr>       workQ_;
     queue<EventData>         eventQ_;
     queue<RateData>          rateQ_;
     MutexLock                qLock_;
+    
+private:
+    enum QueueSizeType
+    {
+        SHALLOW_COPY,
+        SIZE_64, SIZE_256, SIZE_1024, SIZE_2048,
+        SIZE_32000, SIZE_65000, SIZE_262000,
+        MAX_QUEUE_SIZE
+    };
+
+    typedef queue<NetworkBuffer*> BufferQueue;
+    
+    static uint32_t SizeArray[MAX_QUEUE_SIZE];
+    
+    static void    HandleReleasedBuffer(NetworkBuffer* pBuf);
+    void           AddBuffer(NetworkBuffer* pBuf);
+    QueueSizeType  GetSizeType(uint32_t bufSize);
+    
+    vector<BufferQueue>      recycleQ_;
+    MutexLock                rcqLock_;
+    int                      bufNum_;
+    int                      bufAlloc[MAX_QUEUE_SIZE];
 };
 
 //
@@ -273,6 +297,7 @@ public:
     
     virtual bool Start() { return false; }
     virtual bool Send(Buffer::Ptr spBuffer) { return false; }
+    virtual bool Send(const unsigned char* buf, size_t size) { return false; }
     virtual void SetConnectionID(int connID) {}
     
     virtual void           Reset()    {}

@@ -350,7 +350,7 @@ void ssl_state(const SSL* pSSL, int type, int val)
 }
     
 TlsCore::TlsCore(TlsCoreUser& rUser, bool bServer)
-    : rCoreUser(rUser)
+    : rCoreUser_(rUser)
     , bServer_(bServer)
     , pSSL_(0)
     , pBioSSL_(0)
@@ -514,6 +514,17 @@ bool TlsCore::IsInHandshake()
     return (SSL_is_init_finished(pSSL_) == false);
 }
 
+const char* TlsCore::GetVersion()
+{
+    const char* p = "NO SSL!";
+    
+    if (pSSL_) {
+        p = SSL_get_version(pSSL_);
+    }
+    
+    return p;
+}
+    
 uint32_t TlsCore::ProcessData(uint8_t* pData, uint32_t dataLen, ProcessType type)
 {
     BIO* p_in_bio  = (type == PT_ENCRYPT ? pBioSSL_ : pBioIO_);
@@ -547,13 +558,13 @@ uint32_t TlsCore::ProcessData(uint8_t* pData, uint32_t dataLen, ProcessType type
                 if (written < 0) {
                     if (!BIO_should_retry(p_in_bio)) {
                         ELOG("BIO_write error on " << p_type_str);
-                        rCoreUser.OnInternalError();
+                        rCoreUser_.OnInternalError();
                         break;
                     }
                 }
                 else if (written == 0) {
                     ELOG("SSL Startup failed - BIO_write");
-                    rCoreUser.OnInternalError();
+                    rCoreUser_.OnInternalError();
                     break;
                 }
                 else {
@@ -578,7 +589,7 @@ uint32_t TlsCore::ProcessData(uint8_t* pData, uint32_t dataLen, ProcessType type
         size_t read_pending = BIO_ctrl_pending(p_out_bio);
         
         if (read_pending > 0) {
-            Buffer::Ptr sp_output = Buffer::MAKE((uint32_t)read_pending+1);
+            Buffer::Ptr sp_output = rCoreUser_.GetTlsBuffer((uint32_t)read_pending+1);
             uint8_t* p_buf    = sp_output->getBuf();
             uint32_t buf_size = sp_output->size()-1;
             
@@ -586,7 +597,7 @@ uint32_t TlsCore::ProcessData(uint8_t* pData, uint32_t dataLen, ProcessType type
             if (read < 0) {
                 if (!BIO_should_retry(p_out_bio)) {
                     MLOG("No BIO_read and No Retry " << p_type_str << " (flags:" <<
-                         p_out_bio->flags << ", read_pending: " << read_pending <<
+                          BIO_get_flags(p_out_bio) << ", read_pending: " << read_pending <<
                           ", read: " << read << ")");
                     // https://www.openssl.org/docs/crypto/BIO_read.html#
                     // A 0 or -1 return is not necessarily an indication of an error.
@@ -601,7 +612,7 @@ uint32_t TlsCore::ProcessData(uint8_t* pData, uint32_t dataLen, ProcessType type
             }
             else if (read == 0) {
                 WLOG("SSL BIO_read failure (alert or start fail)");
-                rCoreUser.OnInternalError();
+                rCoreUser_.OnInternalError();
                 break;
             }
             else {
@@ -614,10 +625,10 @@ uint32_t TlsCore::ProcessData(uint8_t* pData, uint32_t dataLen, ProcessType type
                      (type == PT_ENCRYPT ? "far end" : "App"));
                 
                 if (type == PT_ENCRYPT) {
-                    rCoreUser.OnDataEncrypted(sp_output);
+                    rCoreUser_.OnDataEncrypted(sp_output);
                 }
                 else {
-                    rCoreUser.OnDataDecrypted(sp_output);
+                    rCoreUser_.OnDataDecrypted(sp_output);
                 }
                 
                 loop_again = true;
@@ -662,14 +673,8 @@ void DtlsCore::InitDtlsCertificate(SSL_CTX*& rpCtx, bool bServer)
     // rpCtx could be set if some other thread accessed right before
     if (!rpCtx) {
         SSL_CTX* p_ctx = SSL_CTX_new(bServer ?
-#ifdef DTLS_server_method
                                      DTLS_server_method() :
-                                     DTLS_client_method());
-#else
-                                     DTLSv1_server_method() :
-                                     DTLSv1_client_method());
-#endif
-        
+                                     DTLS_client_method());        
         if (EC_KEY* p_ecdh = EC_KEY_new_by_curve_name(NID_secp384r1)) {
             if (SSL_CTX_set_tmp_ecdh(p_ctx, p_ecdh) != 1) {
                 _ELOG_("SSL_CTX_set_tmp_ecdh failed");
@@ -778,10 +783,16 @@ bool DtlsCore::HandleTimeout()
 bool DtlsCore::ClientHelloVerified()
 {
 #ifndef NO_DTLS_SUPPORT
+#if OPENSSL_VERSION_NUMBER >= 0x1010000fL
+    if (SSL_get_state(pSSL_) == TLS_ST_SW_SRVR_HELLO) {
+        return true;
+    }
+#else
     if (pSSL_->d1->listen == 0 &&
         pSSL_->state == SSL3_ST_SW_SRVR_HELLO_A) {
         return true;
     }
+#endif
 #endif    
     return false;
 }

@@ -26,6 +26,9 @@ using std::map;
 
 namespace fuze {
 
+// Name used on base type string
+#define SRC_BASE_TYPE "SrcBaseType"
+
 //-----------------------------------------------------------------------------
 //  Network Buffer
 //
@@ -43,6 +46,10 @@ struct NetworkBuffer : public Buffer
     string   remoteIP_;
     uint16_t remotePort_;
     bool     changed_;
+    
+    // Variables added for buffer optimization
+    int      appID_;
+    bool     bShallowCopy_; // indicate internal raw buffer is owned by other buffer
     
     // constructor create a new buffer
     //
@@ -124,17 +131,6 @@ enum ConnectionType
 
 const char* toStr(ConnectionType eType);
 
-enum PriorityType
-{
-    PT_BESTEFFORT,
-    PT_BACKGROUND,
-    PT_EXCELLENTEFFORT,
-    PT_AUDIOVIDEO,
-    PT_VOICE,
-    PT_CONTROL,
-    PT_MAX_PRIORITY
-};
-
 //-----------------------------------------------------------------------------
 // Interface: App --> Transport
 //-----------------------------------------------------------------------------
@@ -142,6 +138,11 @@ class Connection
 {
 public:
     typedef fuze_shared_ptr<Connection> Ptr;
+
+    static const uint16_t ICE_UFRAG_LEN = 24;
+    static const uint16_t ICE_PWD_LEN   = 24;
+
+    static void GenerateIceCredentials(std::string &ufrag, std::string &pwd);
     
     // Register ConnectionObserver
     virtual void RegisterObserver(ConnectionObserver* pObserver) = 0;
@@ -176,14 +177,12 @@ public:
     //
     virtual void SetWYSWYGMode() = 0;
     
-    // Set the priority for the connection
-    virtual void SetPriority(PriorityType priority) = 0;
-
     // ICE-Lite short-term credential
     virtual void SetLocalIceCredential(const string& rUser, const string& rPwd) = 0;
     virtual void SetRemoteIceCredential(const string& rUser, const string& rPwd) = 0;
     
     // Set payload type - affects behavior such as timer or thread assignment
+    //                    also the QoS tag in network header
     enum PayloadType
     {
         STUN  = 0x0001,
@@ -208,16 +207,29 @@ public:
     
     // There may be some delay to send data
     virtual bool Send(Buffer::Ptr spBuffer) = 0;
+    virtual bool Send(const unsigned char* buf, size_t size) = 0;
     
     // Query the connection info
     virtual bool GetConnectedType(ConnectionType& rType) = 0;
-    virtual bool GetPriority(PriorityType &rPriority) = 0;
     virtual bool GetLocalAddress(string& rIP, uint16_t& rPort) = 0;
     virtual bool GetRemoteAddress(string& rIP, uint16_t& rPort) = 0;
+    virtual void GetLocalIceCredential(string& rUser, string& rPwd) = 0;
+    virtual void GetRemoteIceCredential(string& rUser, string& rPwd) = 0;
     
     // Query the send queue info
     virtual void GetSendQInfo(size_t& rNum, uint32_t& rBufSize) = 0;
     virtual void EnableRateReport(bool flag) = 0;
+
+    // Relevant to UDP sockets used for Video transfer
+    // Reset operation is done in the background thread
+    // and Allocate is not - therefore there is no way to find out when
+    // Those parameters control whether or not the ports were reserved and needs to be released or not
+    virtual void EnablePortReservation(bool flag) = 0;
+    virtual bool UsePortReservation() = 0;
+    
+    // Buffer memory optimization
+    virtual NetworkBuffer::Ptr GetBuffer(uint32_t bufSize) = 0;
+    virtual NetworkBuffer::Ptr GetBuffer(Buffer::Ptr spBuf) = 0; // shallow copy
     
     virtual ~Connection() {}
 };
@@ -466,22 +478,69 @@ public:
     typedef fuze_shared_ptr<Timer> Ptr;
     typedef fuze_weak_ptr<Timer>   WPtr;
     
-    virtual void OnTimer(int32_t AppData) = 0;
+    virtual void OnTimer(int32_t AppData) {}
+    virtual void OnTimerEx(void* AppData) {}
     
-    virtual ~Timer() {}
+    inline virtual ~Timer() {}
 };
-
-// macro hack to debug where timer is started
+  
+//
+// API for using global TimerService in Transport singleton
+//
+    
+// macro hack to indicate where timer is started
 #define StartTimer(A, B, C) StartTimerEx(A, B, C, __FILE__, __LINE__)
     
 int64_t StartTimerEx(Timer::Ptr pTimer, int32_t ms, int32_t appData,
                      const char* pFile, int line);
+int64_t StartTimerEx(Timer::Ptr pTimer, int32_t ms, void* appData,
+                         const char* pFile, int line);
 int64_t StartTimerEx(Timer* pTimer, int32_t ms, int32_t appData,
                      const char* pFile, int line);
+  
+//
+// NOTE: watch so that StopTimer using shared_ptr is not called within destructor
+//
+void StopTimer(Timer::Ptr pTimer, int64_t handle);
+void StopTimer(Timer* pTimer, int64_t handle);
+
+//
+// TimerService ABC for creating own timer service in application
+//
+class TimerService
+{
+public:
+    typedef fuze_shared_ptr<TimerService> Ptr;
     
-void    StopTimer(Timer::Ptr pTimer, int64_t handle);
-void    StopTimer(Timer* pTimer, int64_t handle);
+    static Ptr Create(const char* pName = "");
     
+    virtual void Terminate() = 0;
+    
+    // Weak Pointer interface
+    virtual int64_t StartTimerEx(Timer::Ptr pTimer,
+                                 int32_t ms, int32_t appData,
+                                 const char* pFile, int line) = 0;
+    
+    // Weak Pointer with void pointer as returned parameter
+    virtual int64_t StartTimerEx(Timer::Ptr pTimer,
+                                 int32_t ms, void* appData,
+                                 const char* pFile, int line) = 0;
+    
+    // Raw Pointer interface - only if you know what you are doing
+    virtual int64_t StartTimerEx(Timer* pTimer,
+                                 int32_t ms, int32_t appData,
+                                 const char* pFile, int line) = 0;
+    
+    // StopTimer using raw pointer or shared_ptr
+    //
+    //  note: when shared_ptr one is used don't call it in destructor of Timer
+    //
+    virtual void StopTimer(Timer* pTimer, int64_t handle) = 0;
+    virtual void StopTimer(Timer::Ptr pTimer, int64_t handle) = 0;
+
+    virtual ~TimerService() {}
+};
+
 //
 // Perform DNS lookup on domain address
 //
@@ -498,10 +557,12 @@ namespace dns {
         enum Type { A, SRV, NAPTR, MAX_NUM };
         
         string    domain_;
-        uint32_t  type_;
+        Type      type_;
         uint32_t  class_;
         uint32_t  ttl_;
         int64_t   expire_; // added to track time to be expired
+      
+        bool operator==(const Record& rRhs);
         
         virtual ~Record() {}
     };
@@ -539,14 +600,18 @@ namespace dns {
     {
     public:
         typedef fuze_shared_ptr<Resolver> Ptr;
+
+        static Ptr   Create();
+
+        static void  Init();
+        static void  Terminate();
         
-        static void Init();
-        static void Terminate();
+        // set DNS lookup request (multiple queries can be set)
+        virtual void SetQuery(const string& rDomain, Record::Type type) = 0;
         
-        static Ptr  Create();
+        // perform DNS query
+        virtual Record::List Query(int timeout = 30) = 0;
         
-        virtual Record::List Query(const string& rDomain,
-                                   Record::Type  type) = 0;
         virtual ~Resolver() {}
     };
 
@@ -558,6 +623,10 @@ namespace dns {
     
 } // namespace dns
 
+class DebugOut;
+
+DebugOut& operator<<(DebugOut& rOut, dns::Record::Ptr spRecord);
+    
 } // namespace fuze
 
 #endif // _FUZE_TRANSPORT_H_

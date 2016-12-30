@@ -16,6 +16,10 @@
 
 #include <queue>
 
+#if defined(__ANDROID_API__) || defined(WIN32) || defined(__APPLE__)
+#include <curl/curl.h>
+#endif
+
 using std::queue;
 
 namespace fuze {
@@ -26,7 +30,11 @@ struct ConnectInfo
     
     int              tcpID_;         // resource ID of TcpTransceiver
     string           remoteAddress_; // IP:port
-    void*            pCurl_;         // curl to clean up
+
+#if defined(__ANDROID_API__) || defined(WIN32) || defined(__APPLE__)
+    CURL*            pCurl_;         // curl to clean up
+#endif
+
     evutil_socket_t  socket_;        // resulted socket
     
     ConnectInfo();

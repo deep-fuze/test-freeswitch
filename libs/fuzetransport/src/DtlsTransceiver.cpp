@@ -203,6 +203,16 @@ void DtlsTransceiver::OnInternalError()
     
     pConn_->OnEvent(ET_FAILED);
 }
+
+Buffer::Ptr DtlsTransceiver::GetTlsBuffer(uint32_t bufSize)
+{
+    if (pConn_) {
+        return pConn_->GetBuffer(bufSize);
+    }
+    else {
+        return Buffer::MAKE(bufSize);
+    }
+}
     
 bool DtlsTransceiver::Start()
 {
@@ -460,6 +470,28 @@ bool DtlsTransceiver::Send(Buffer::Ptr spBuffer)
     return true;
 }
 
+bool DtlsTransceiver::Send(const unsigned char* buf, size_t size)
+{
+    if (IsActive() == false) {
+        ELOG(GetStatusString());
+        return false;
+    }
+
+    if ((socket_ == INVALID_SOCKET) || !pConn_) {
+        return false;
+    }
+
+    if (dtlsState_ != ESTABLISHED) {
+        if ((logCnt_++ % 50) == 0) {
+            WLOG("Connection is not established (cnt: " << logCnt_ << ")");
+        }
+        return false;
+    }
+
+    onWriteEventInternal((unsigned char*)buf, size);
+    return true;
+}
+
 void DtlsTransceiver::OnReadEvent()
 {
     long recv_bytes = 0;
@@ -541,11 +573,10 @@ void DtlsTransceiver::OnReadEvent()
                     
                     uint8_t trans_id[12];
                     if (stun::GetTransactionID(buffer_, recv_bytes, trans_id)) {
-                        if (Buffer::Ptr sp_resp = stun::CreateBindResponse(trans_id,
-                                                                           remote_addr,
-                                                                           local_pwd)) {
-                            SendData(sp_resp, remote_addr);
-                        }
+                        Buffer::Ptr sp_resp = GetTlsBuffer(512);
+                        sp_resp->setDebugInfo(__FILE__, __LINE__);
+                        stun::CreateBindResponse(sp_resp, trans_id, remote_addr, local_pwd);
+                        SendData(sp_resp, remote_addr);
                         
                         if (connType_ == CT_DTLS_SERVER) {
                             // also send binding request of our own as well for server
@@ -559,11 +590,11 @@ void DtlsTransceiver::OnReadEvent()
                                 trans_id[11-i] = tmp;
                             }
                             
-                            if (Buffer::Ptr sp_bind =
-                                    stun::CreateBindRequest(remote_user+":"+local_user,
-                                                            trans_id, remote_pwd)) {
-                                SendData(sp_bind, remote_addr);
-                            }
+                            Buffer::Ptr sp_bind = GetTlsBuffer(512);
+                            sp_bind->setDebugInfo(__FILE__, __LINE__);
+                            stun::CreateBindRequest(sp_bind, remote_user+":"+local_user,
+                                                    trans_id, remote_pwd);
+                            SendData(sp_bind, remote_addr);
                         }
                     }
                 }
@@ -608,7 +639,7 @@ void DtlsTransceiver::OnReadEvent()
                 DLOG("Decrypt " << recv_bytes << "B -> " << byte_out << "B");
                 
                 if (byte_out > 0) {
-                    Buffer::Ptr sp_data = Buffer::MAKE(byte_out);
+                    Buffer::Ptr sp_data = pConn_->GetBuffer(byte_out);
                     memcpy(sp_data->getBuf(), p_buf, byte_out);
                     pConn_->OnData(sp_data);
                 }
@@ -697,9 +728,10 @@ void DtlsTransceiver::OnWriteEvent()
         
         char trans_id[12];
         static int s_id = 100;
-        sprintf(trans_id, "%d", s_id++);        
-        Buffer::Ptr sp_bind = stun::CreateBindRequest(remote_user+":"+local_user,
-                                                      (uint8_t*)trans_id, remote_pwd);
+        sprintf(trans_id, "%d", s_id++);
+        Buffer::Ptr sp_bind = GetTlsBuffer(512);
+        stun::CreateBindRequest(sp_bind, remote_user+":"+local_user,
+                                (uint8_t*)trans_id, remote_pwd);
         SendData(sp_bind, pConn_->GetRemoteAddress());
         SetReadEvent(200); // keep doing this until we get success response
         RemoveWriteEvent();
@@ -724,46 +756,48 @@ void DtlsTransceiver::OnWriteEvent()
                 sendQ_.pop();
             }
 
-#ifdef DTLS_SRTP
-            // encrypt sending buffer using srtp
-            uint8_t* p_buf         = sp_buf->getBuf();
-            uint32_t buf_len       = sp_buf->size();
-            uint32_t new_buf_len   = buf_len + SRTP_MAX_TRAILER_LEN + 4;
-            Buffer::Ptr sp_new_buf = Buffer::MAKE(new_buf_len);
-            
-            memcpy(sp_new_buf->getBuf(), p_buf, buf_len);
-            
-            // now switch to new buffer
-            p_buf = sp_new_buf->getBuf();
-            int byte_out = (int)buf_len;
-            
-            int paylod_type = p_buf[1] & 0x7f;
-            if (paylod_type < 64 ||
-                (96 <= paylod_type && paylod_type <= 127)) {
-                srtp_.Encrypt(p_buf, &byte_out);
+            if (sp_buf)
+            {
+                onWriteEventInternal(sp_buf->getBuf(), sp_buf->size());
             }
-            else {
-                srtp_.EncryptRTCP(p_buf, &byte_out);
-            }
-            
-            DLOG("Encrypt " << buf_len << "B -> " << byte_out << "B");
-            
-            if (byte_out == 0) {
-                ELOG("failed to encrypt");
-            }
-            else {
-                sp_new_buf->setSize(byte_out);
-                SendData(sp_new_buf, pConn_->GetRemoteAddress());
-            }
-#else
-            if (sp_buf) {
-                pDtlsCore_->ProcessData(sp_buf->getBuf(),
-                                        sp_buf->size(),
-                                        TlsCore::PT_ENCRYPT);
-            }
-#endif
         }
     }
+}
+
+void DtlsTransceiver::onWriteEventInternal(uint8_t* p_buf, uint32_t buf_len)
+{
+#ifdef DTLS_SRTP
+    // encrypt sending buffer using srtp
+    uint32_t new_buf_len   = buf_len + SRTP_MAX_TRAILER_LEN + 4;
+    Buffer::Ptr sp_new_buf = GetTlsBuffer(new_buf_len);
+
+    memcpy(sp_new_buf->getBuf(), p_buf, buf_len);
+
+    // now switch to new buffer
+    p_buf = sp_new_buf->getBuf();
+    int byte_out = (int)buf_len;
+
+    int paylod_type = p_buf[1] & 0x7f;
+    if (paylod_type < 64 ||
+        (96 <= paylod_type && paylod_type <= 127)) {
+        srtp_.Encrypt(p_buf, &byte_out);
+    }
+    else {
+        srtp_.EncryptRTCP(p_buf, &byte_out);
+    }
+
+    DLOG("Encrypt " << buf_len << "B -> " << byte_out << "B");
+
+    if (byte_out == 0) {
+        ELOG("failed to encrypt");
+    }
+    else {
+        sp_new_buf->setSize(byte_out);
+        SendData(sp_new_buf, pConn_->GetRemoteAddress());
+    }
+#else
+    pDtlsCore_->ProcessData(p_buf, buf_len, TlsCore::PT_ENCRYPT);
+#endif
 }
     
 void DtlsTransceiver::OnTimeOutEvent()

@@ -27,25 +27,33 @@ namespace fuze {
 class Address
 {
 public:
-    Address();
-    Address(const sockaddr_in& rAddr);
+    Address() { Clear(); }
+    Address(const sockaddr_in& rAddr) { addr_ = rAddr; }
     
-    bool     operator==(const Address& rAddress) const;
-    bool     operator!=(const Address& rAddress) const;
-    Address& operator=(const Address& rAddress);
+    bool     operator==(const Address& rAddress) const
+    {
+        return (addr_.sin_addr.s_addr == rAddress.addr_.sin_addr.s_addr) &&
+               (addr_.sin_port == rAddress.addr_.sin_port);
+    }
+    bool     operator!=(const Address& rAddress) const {return !(*this == rAddress);}
+    Address& operator=(const Address& rAddress)
+    {
+        addr_ = rAddress.addr_;
+        return *this;
+    }
     
     string       IPString() const;
-    in_addr      IPNum() const; // network byte ordered
-    uint16_t     Port() const;  // host byte ordered
-    sockaddr_in  SocketAddress() const;
+    in_addr      IPNum() const { return addr_.sin_addr; } // network byte ordered
+    uint16_t     Port() const { return ntohs(addr_.sin_port); }  // host byte ordered
+    sockaddr_in  SocketAddress() const { return addr_; }
     
-    bool Valid() const;
+    bool Valid() const {return (addr_.sin_addr.s_addr != INADDR_NONE && addr_.sin_port != 0);}
     void Clear();
     
     // return false if pIP is not valid
     bool SetIP(const char* pIP);
     bool SetPort(uint16_t port);
-    void SetSockAddr(const sockaddr_in& rSockAddr);
+    void SetSockAddr(const sockaddr_in& rSockAddr) {addr_ = rSockAddr;}
     
 private:
     sockaddr_in  addr_;

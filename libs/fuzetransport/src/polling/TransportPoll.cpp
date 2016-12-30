@@ -493,7 +493,7 @@ transport_status_t fuze_transport_socket_writeto(void *conn, __sockaddr_t *rem_a
 
     connection_wrap_t *conn_wrap = (connection_wrap_t *) conn;
 
-    Buffer::Ptr wrBuf(new NetworkBuffer((uint32_t)bytes));
+    Buffer::Ptr wrBuf = conn_wrap->conn_->GetBuffer((uint32_t)bytes);
     memcpy(wrBuf->getBuf(), buf, bytes);
     wrBuf->setSize((uint32_t)bytes);
 
@@ -516,7 +516,7 @@ transport_status_t fuze_transport_socket_write(void *conn, const uint8_t *buf, s
 
     bool ret = false;
     connection_wrap_t *conn_wrap = (connection_wrap_t *) conn;
-    Buffer::Ptr wrBuf(new NetworkBuffer((uint32_t)bytes));
+    Buffer::Ptr wrBuf = conn_wrap->conn_->GetBuffer((uint32_t)bytes);
     memcpy(wrBuf->getBuf(), buf, bytes);
     wrBuf->setSize((uint32_t)bytes);
 

@@ -10,16 +10,6 @@
 namespace fuze
 {
 
-Semaphore::Semaphore()
-    : count_(0)
-{
-}
-
-Semaphore::~Semaphore()
-{
-    cond_.Broadcast();
-}
-
 bool Semaphore::Wait(int ms)
 {
     bool bResult = true;
@@ -41,12 +31,6 @@ bool Semaphore::Wait(int ms)
     return bResult;
 }
 
-int Semaphore::GetCount()
-{
-    // watch this is only informal
-    return count_;
-}
-    
 void Semaphore::Post()
 {
     bool signal = false;

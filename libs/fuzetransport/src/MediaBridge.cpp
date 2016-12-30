@@ -61,12 +61,14 @@ void MediaBridge::OnDataReceived(void* pContext, Buffer::Ptr spBuffer)
                     fuze_dynamic_pointer_cast<NetworkBuffer>(spBuffer)) {
                     addr.SetIP(sp_net->remoteIP_.c_str());
                     addr.SetPort(sp_net->remotePort_);
-                    if (NetworkBuffer::Ptr sp_resp =
-                        stun::CreateBindResponse(tx_id, addr, s_no_pwd)) {
-                        sp_resp->remoteIP_   = sp_net->remoteIP_;
-                        sp_resp->remotePort_ = sp_net->remotePort_;
-                        spUdpServer_->Send(sp_resp);
-                    }
+                    
+                    NetworkBuffer::Ptr sp_resp = spUdpServer_->GetBuffer(512);
+                    sp_resp->setDebugInfo(__FILE__, __LINE__);
+
+                    stun::CreateBindResponse(sp_resp, tx_id, addr, s_no_pwd);
+                    sp_resp->remoteIP_   = sp_net->remoteIP_;
+                    sp_resp->remotePort_ = sp_net->remotePort_;
+                    spUdpServer_->Send(sp_resp);
                 }
             }
         }

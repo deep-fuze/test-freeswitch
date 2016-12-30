@@ -61,10 +61,15 @@ public:
     virtual void     OnWriteError(int error);
     virtual void     OnReadTimeout() {} // for client only
     
+    virtual Buffer::Ptr GetBuffer(uint32_t bufSize);
+    virtual Buffer::Ptr GetBuffer(Buffer::Ptr spBuf);
+    
     // Implement TlsCoreUser Interface
     virtual void OnDataEncrypted(Buffer::Ptr spData);
     virtual void OnDataDecrypted(Buffer::Ptr spData);
     virtual void OnInternalError();
+    
+    virtual Buffer::Ptr GetTlsBuffer(uint32_t bufSize);
     
     // Set the socket from server
     // note that this won't close the socket

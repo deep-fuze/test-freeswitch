@@ -55,10 +55,12 @@ UdpTransceiver::UdpTransceiver(int transID)
     , remotePort_(0)
     , bConnected_(false)
     , writeAdded_(false)
+    , recvBufSize_(2000)
     , recvCnt_(0)
     , checkTime_(0)
     , lastRecvCnt_(0)
     , remoteChangeCnt_(0)
+    , reservedPort_(false)
 {
     memset(pName_, 0, 16);
 }
@@ -89,8 +91,41 @@ void UdpTransceiver::Reset()
         pWriteEvent_ = 0;
         
         if (socket_ != INVALID_SOCKET) {
-            evutil_closesocket(socket_);
+            
+            if (!reservedPort_) {
+                evutil_closesocket(socket_);
+            }
+            else {
+                sockaddr_in  local;
+                ev_socklen_t len = sizeof(local);
+
+                if (getsockname(socket_, (sockaddr*)&local, &len) == 0) {
+                    const string& local_ip = toStr(local.sin_addr);
+                    uint16_t local_port = ntohs(local.sin_port);
+                    MLOG("socket interrogation results: " << local_ip << ":" << local_port);
+                    
+                    if (evutil_closesocket(socket_) == 0) {
+                        MLOG("socket is closed - reserving the port again"
+                             " so that it is not used.");
+                        const int MAX_TIME = 3 * 60 * 60 * 1000; // three hours
+                        if (ReserveUdpPort(MAX_TIME, local_port) == false) {
+                            ELOG("Failed to reserve UDP port:" << local_port);
+                        }
+                    }
+                    else {
+                        int e = evutil_socket_geterror(socket_);
+                        ELOG("evutil_closesocket failed: " <<
+                             evutil_socket_error_to_string(e) << ". errno=" << e);
+                    }
+                }
+                else {
+                    int e = evutil_socket_geterror(socket_);
+                    ELOG("getsockname failed: " <<
+                         evutil_socket_error_to_string(e) << ". errno=" << e);
+                }
+            }
         }
+        
         socket_ = INVALID_SOCKET;
 
         connectedUdp_    = false;
@@ -101,6 +136,7 @@ void UdpTransceiver::Reset()
         lastRecvCnt_     = 0;
         remoteChangeCnt_ = 0;
         writeAdded_      = false;
+        reservedPort_    = false;
         
         queue<Buffer::Ptr> empty;
         swap(sendQ_, empty);
@@ -124,6 +160,7 @@ void UdpTransceiver::SetConnectionID(int connID)
         connID_ = connID;
         pConn_ = ResourceMgr::GetInstance()->GetConnection(connID);
         memcpy(pName_, pConn_->GetName(), 15);
+        reservedPort_ = pConn_->UsePortReservation();
     }
 }
 
@@ -230,6 +267,42 @@ bool UdpTransceiver::Start()
                        (char*)&tos, sizeof(tos)) < 0) {
             ELOG("Failed to set ToS");
         }
+
+#ifdef SO_NET_SERVICE_TYPE
+        int st = INVALID_ID;
+        const char* p_log = "";
+        
+        //
+        // per socket.h comment on SO_NET_SERVICE_TYPE
+        //
+        if (pConn_->IsPayloadType(Connection::AUDIO)) {
+            st = NET_SERVICE_TYPE_VO;
+            p_log = "VO";
+        }
+        else if (pConn_->IsPayloadType(Connection::VIDEO)) {
+            st = NET_SERVICE_TYPE_VI;
+            p_log = "VI";
+        }
+        else if (pConn_->IsPayloadType(Connection::SS)) {
+            st = NET_SERVICE_TYPE_RV;
+            p_log = "RV";
+        }
+        else if (pConn_->IsPayloadType(Connection::SIP)) {
+            st = NET_SERVICE_TYPE_SIG;
+            p_log = "SIG";
+        }
+        
+        if (st != INVALID_ID) {
+            if (setsockopt(socket_, SOL_SOCKET, SO_NET_SERVICE_TYPE,
+                           (char*)&st, sizeof(st)) < 0) {
+                MLOG("NET_SERVICE_TYPE (" << p_log << ") not available");
+            }
+            else {
+                MLOG("NET_SERVICE_TYPE (" << p_log << ")");
+            }
+        }
+#endif
+        
 #else
 		HANDLE QOSHandle;
 		QOS_VERSION version;
@@ -241,45 +314,35 @@ bool UdpTransceiver::Start()
 			WLOG("qWAVE not available.");
 		}
 		else if (pfnQosCreateHandle_(&version, &QOSHandle) == 0) {
-			WLOG("Couldn't create QOS handle err=<" << GetLastError() << ">");
+			WLOG("Couldn't create QOS handle err=" << GetLastError());
 		}
 		else {
 			QOS_FLOWID flowid = 0;
-			PriorityType pt;
-			QOS_TRAFFIC_TYPE trafficType = QOSTrafficTypeBestEffort;
+			QOS_TRAFFIC_TYPE qos_type = QOSTrafficTypeBestEffort;
 
 			if (pConn_) {
-				if (pConn_->GetPriority(pt)) {
-					switch (pt)
-					{
-					case PT_BACKGROUND:
-						trafficType = QOSTrafficTypeBackground;
-						break;
-					case PT_EXCELLENTEFFORT:
-						trafficType = QOSTrafficTypeExcellentEffort;
-						break;
-					case PT_AUDIOVIDEO:
-						trafficType = QOSTrafficTypeAudioVideo;
-						break;
-					case PT_VOICE:
-						trafficType = QOSTrafficTypeVoice;
-						break;
-					case PT_CONTROL:
-					case PT_MAX_PRIORITY:
-						trafficType = QOSTrafficTypeControl;
-						break;
-					default:
-						trafficType = QOSTrafficTypeBestEffort;
-						break;
-					}
-				}
+                if (pConn_->IsPayloadType(Connection::AUDIO)) {
+                    qos_type = QOSTrafficTypeVoice;
+                }
+                else if (pConn_->IsPayloadType(Connection::VIDEO)) {
+                    qos_type = QOSTrafficTypeAudioVideo;
+                }
+                else if (pConn_->IsPayloadType(Connection::SS)) {
+                    qos_type = QOSTrafficTypeAudioVideo;
+                }
+                else if (pConn_->IsPayloadType(Connection::SIP)) {
+                    qos_type = QOSTrafficTypeControl;
+                }
 			}
-
+            
+            sockaddr_in remote  = pConn_->GetRemoteAddress().SocketAddress();
+            sockaddr*   p_saddr = (sockaddr*)(!connectedUdp_ ? &remote : 0);
+            
 			if (!pfnQosAddSocketToFlow_) {
 				WLOG("qWAVE not available.");
 			}
-			else if (pfnQosAddSocketToFlow_(QOSHandle, socket_, NULL, trafficType,
-								   QOS_NON_ADAPTIVE_FLOW, &flowid) == 0) {
+			else if (pfnQosAddSocketToFlow_(QOSHandle, socket_, p_saddr, qos_type,
+                                            QOS_NON_ADAPTIVE_FLOW, &flowid) == 0) {
 				MLOG("Not allowed to add socket to QOS flow [" << GetLastError() << "]");
 			}
 			else {
@@ -287,6 +350,12 @@ bool UdpTransceiver::Start()
 			}
 		}
 #endif
+        
+        if (pConn_->IsPayloadType(Connection::SIP)) {
+            MLOG("adjusting recv buf size to 30000");
+            recvBufSize_ = 30000;
+        }
+
         uint16_t timeout = 0;
         
         if (TransportImpl::GetInstance()->IsAppServer() == false) {
@@ -420,6 +489,21 @@ bool UdpTransceiver::Send(Buffer::Ptr spBuffer)
     return true;
 }
 
+bool UdpTransceiver::Send(const unsigned char* buf, size_t size)
+{
+    if (IsActive() == false) {
+        ELOG(GetStatusString());
+        return false;
+    }
+
+    if ((socket_ == INVALID_SOCKET) || !pConn_) {
+        return false;
+    }
+
+    onWriteEventInternal((char*)buf, size, Buffer::Ptr());
+    return true;
+}
+
 void UdpTransceiver::OnWriteEvent()
 {
     while (true) {
@@ -441,65 +525,68 @@ void UdpTransceiver::OnWriteEvent()
             }
         }
         
-        long sent = 0;
-        
         char* p_buf = (char*)sp_buf->getBuf();
         long  size  = sp_buf->size();
+        onWriteEventInternal(p_buf, size, sp_buf);
+    }
+}
 
-        if (!p_buf || size == 0) {
-            WLOG("0 bytes was requested to send - ignored");
-            continue;
+void UdpTransceiver::onWriteEventInternal(char* p_buf, long  size, Buffer::Ptr sp_buf)
+{
+    long sent = 0;
+    if (!p_buf || size == 0) {
+        WLOG("0 bytes was requested to send - ignored");
+        return;
+    }
+
+    if (pConn_->IsPayloadType(Connection::STUN)) {
+        if (stun::IsStun(p_buf, size)) {
+            MLOG(toStr(stun::GetType(p_buf, size)) << " " <<
+                 toStr(stun::GetMethod(p_buf, size)) <<
+                 " (" << size << "B)");
+            stun::PrintStun(p_buf, size);
+        }
+    }
+
+    if (connectedUdp_) {
+        sent = send(socket_, p_buf, size, 0);
+    }
+    else {
+        // first set connection remote as default remote address
+        sockaddr_in remote = pConn_->GetRemoteAddress().SocketAddress();
+        
+        if (pConn_->IsRemotePerBuffer()) {
+            Address addr;
+            if (NetworkBuffer::Ptr sp_net =
+                    fuze_dynamic_pointer_cast<NetworkBuffer>(sp_buf)) {
+                addr.SetIP(sp_net->remoteIP_.c_str());
+                addr.SetPort(sp_net->remotePort_);
+                remote = addr.SocketAddress();
+            }
         }
         
-        if (pConn_->IsPayloadType(Connection::STUN)) {
-            if (stun::IsStun(p_buf, size)) {
-                MLOG(toStr(stun::GetType(p_buf, size)) << " " <<
-                     toStr(stun::GetMethod(p_buf, size)) <<
-                     " (" << size << "B)");
-                stun::PrintStun(p_buf, size);
-            }
+        sent = sendto(socket_, p_buf, size, 0,
+                      (sockaddr*)&remote, sizeof(sockaddr));
+    }
+
+    if (sent == size) {
+        pConn_->OnBytesSent((uint32_t)sent);
+    }
+    else if (sent > 0) {
+        WLOG("Only sent " << sent << "/" << size << "B");
+    }
+    else { // -1 returned
+        static int s_last_error;
+        static int s_counter;
+        int error = evutil_socket_geterror(socket_);
+        if (s_last_error != error) {
+            s_counter = 0;
         }
-        
-        if (connectedUdp_) {
-            sent = send(socket_, p_buf, size, 0);
-        }
-        else {
-            // first set connection remote as default remote address
-            sockaddr_in remote = pConn_->GetRemoteAddress().SocketAddress();
-            
-            if (pConn_->IsRemotePerBuffer()) {
-                Address addr;
-                if (NetworkBuffer::Ptr sp_net =
-                        fuze_dynamic_pointer_cast<NetworkBuffer>(sp_buf)) {
-                    addr.SetIP(sp_net->remoteIP_.c_str());
-                    addr.SetPort(sp_net->remotePort_);
-                    remote = addr.SocketAddress();
-                }
-            }
-            
-            sent = sendto(socket_, p_buf, size, 0,
-                          (sockaddr*)&remote, sizeof(sockaddr));
-        }
-        
-        if (sent == size) {
-            pConn_->OnBytesSent((uint32_t)sent);
-        }
-        else if (sent > 0) {
-            WLOG("Only sent " << sent << "/" << size << "B");
-        }
-        else { // -1 returned
-            static int s_last_error;
-            static int s_counter;
-            int error = evutil_socket_geterror(socket_);
-            if (s_last_error != error) {
-                s_counter = 0;
-            }
-            if (!(s_counter++ % 10)) {
-                ELOG("Error: " << error << " (" <<
-                     evutil_socket_error_to_string(error) << ") cnt: " <<
-                     s_counter);
-                s_last_error = error;
-            }
+        if (!(s_counter++ % 10)) {
+            ELOG("Error: " << error << " (" <<
+                 evutil_socket_error_to_string(error) << ") cnt: " <<
+                 s_counter);
+            s_last_error = error;
         }
     }
 }
@@ -533,7 +620,7 @@ void UdpTransceiver::OnReadEvent()
     do {
         sockaddr_in saddr = {};
         
-        NetworkBuffer::Ptr sp_packet(new NetworkBuffer(MAX_UDP_PKT_SIZE));
+        NetworkBuffer::Ptr sp_packet = pConn_->GetBuffer(recvBufSize_);
         
 		char*    p_buf = (char*)sp_packet->getBuf();
 		uint32_t size  = sp_packet->size();

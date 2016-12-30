@@ -317,63 +317,57 @@ void WriteMessageIntegrityAndFingerPrint(Buffer::Ptr spStun, const string& rPwd)
     spStun->write2(crc_value);
 }
 
-NetworkBuffer::Ptr CreateBindResponse(const uint8_t* pTransID,
-                                      const Address& rAddress,
-                                      const string&  rPwd)
+void CreateBindResponse(Buffer::Ptr    spResp,
+                        const uint8_t* pTransID,
+                        const Address& rAddress,
+                        const string&  rPwd)
 {
-    NetworkBuffer::Ptr sp_resp(new NetworkBuffer(512));
-    sp_resp->setDebugInfo(__FILE__, __LINE__);
-    
     // write stun header
-    sp_resp->write2(uint16_t(0x0101));
-    sp_resp->write2(uint16_t(0)); // this will be filled with FINGERPRINT
-    sp_resp->write2(MAGIC_COOKIE);
-    sp_resp->write(pTransID, MSG_TRANS_ID);
+    spResp->write2(uint16_t(0x0101));
+    spResp->write2(uint16_t(0)); // this will be filled with FINGERPRINT
+    spResp->write2(MAGIC_COOKIE);
+    spResp->write(pTransID, MSG_TRANS_ID);
     
     // write XOR_MAPPED_ADDRESS attribute
-    sp_resp->write2(uint16_t(XOR_MAPPED_ADDRESS));
-    sp_resp->write2(uint16_t(8));
-    sp_resp->write(uint8_t(0)); // reserved
-    sp_resp->write(uint8_t(0x01)); // IPv4
+    spResp->write2(uint16_t(XOR_MAPPED_ADDRESS));
+    spResp->write2(uint16_t(8));
+    spResp->write(uint8_t(0)); // reserved
+    spResp->write(uint8_t(0x01)); // IPv4
     uint16_t xor_port = rAddress.Port() ^ uint16_t(MAGIC_COOKIE>>16);
-    sp_resp->write2(xor_port);
+    spResp->write2(xor_port);
     uint32_t xor_ip = ntohl(rAddress.IPNum().s_addr) ^ MAGIC_COOKIE;
-    sp_resp->write2(xor_ip);
+    spResp->write2(xor_ip);
     
     if (!rPwd.empty()) {
-        WriteMessageIntegrityAndFingerPrint(sp_resp, rPwd);
+        WriteMessageIntegrityAndFingerPrint(spResp, rPwd);
     }
 
     // set the buf size as position length as it is true length
-    sp_resp->setSize(sp_resp->position());
-    
-    return sp_resp;
+    spResp->setSize(spResp->position());
 }
 
-NetworkBuffer::Ptr CreateBindRequest(const string&  username,
-                                     const uint8_t* transID,
-                                     const string&  rPwd,
-                                     bool           bNoIce)
+void CreateBindRequest(Buffer::Ptr    spReq,
+                       const string&  username,
+                       const uint8_t* transID,
+                       const string&  rPwd,
+                       bool           bNoIce)
 {
-    NetworkBuffer::Ptr sp_req(new NetworkBuffer(512));
-    sp_req->setDebugInfo(__FILE__, __LINE__);
-    
     // write stun header
-    sp_req->write2(uint16_t(BINDING));
-    sp_req->write2(uint16_t(0)); // filled later with FINGERPRINT
-    sp_req->write2(MAGIC_COOKIE);
-    sp_req->write(transID, MSG_TRANS_ID);
+    spReq->write2(uint16_t(BINDING));
+    spReq->write2(uint16_t(0)); // filled later with FINGERPRINT
+    spReq->write2(MAGIC_COOKIE);
+    spReq->write(transID, MSG_TRANS_ID);
     
     // write USERNAME attribute
     uint16_t user_len = (uint16_t)username.size();
-    sp_req->write2(uint16_t(USERNAME));
-    sp_req->write2(user_len);
-    sp_req->write((uint8_t*)username.c_str(), user_len);
+    spReq->write2(uint16_t(USERNAME));
+    spReq->write2(user_len);
+    spReq->write((uint8_t*)username.c_str(), user_len);
     if (int padding = (user_len%4)) {
         padding = 4 - padding;
         uint8_t empty = 0;
         for (int i = 0; i < padding; ++i) {
-            sp_req->write(empty);
+            spReq->write(empty);
         }
     }
     
@@ -383,26 +377,24 @@ NetworkBuffer::Ptr CreateBindRequest(const string&  username,
         
         // write ICE-CONTROLLED
         uint64_t tm = (uint64_t)GetTimeMs();
-        sp_req->write2(uint16_t(attr_role));
-        sp_req->write2(uint16_t(8));
-        sp_req->write2(uint32_t(tm>>32));
-        sp_req->write2(uint32_t(tm));
+        spReq->write2(uint16_t(attr_role));
+        spReq->write2(uint16_t(8));
+        spReq->write2(uint32_t(tm>>32));
+        spReq->write2(uint32_t(tm));
         
         // write PRIORITY
         uint32_t priority = uint32_t(2^24)*126 + (2^8)*65535 + 255; // RTP
-        sp_req->write2(uint16_t(PRIORITY));
-        sp_req->write2(uint16_t(4));
-        sp_req->write2(priority);
+        spReq->write2(uint16_t(PRIORITY));
+        spReq->write2(uint16_t(4));
+        spReq->write2(priority);
     }
     
     if (!rPwd.empty()) {
-        WriteMessageIntegrityAndFingerPrint(sp_req, rPwd);
+        WriteMessageIntegrityAndFingerPrint(spReq, rPwd);
     }
 
     // set the buf size as position length as it is true length
-    sp_req->setSize(sp_req->position());
-    
-    return sp_req;
+    spReq->setSize(spReq->position());
 }
     
 } // namespace stun

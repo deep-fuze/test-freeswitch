@@ -33,11 +33,22 @@ Buffer::Ptr Data::GetData()
 {
     return spData_;
 }
+
+void Data::SetAllocator(Connection* pCon)
+{
+    pAllocator_ = pCon;
+}
     
 void Data::SetReceivedData(Buffer::Ptr spBuf)
 {
-    spData_.reset(new NetworkBuffer(spBuf));
-    spData_->setDebugInfo(__FILE__, __LINE__);
+    if (pAllocator_) {
+        spData_ = pAllocator_->GetBuffer(spBuf);
+        spData_->setDebugInfo(__FILE__, __LINE__);
+    }
+    else {
+        spData_ = Buffer::makeShallowCopy(spBuf);
+    }
+    
     spData_->pull(FUZE_HEADER_SIZE);
 }
 
@@ -47,7 +58,12 @@ void Data::SetDataToSend(Buffer::Ptr spBuf)
 
     // if no data is set then create empty data
     if (!spData_) {
-        spData_ = Buffer::MAKE(1);
+        if (pAllocator_) {
+            spData_ = pAllocator_->GetBuffer(1);
+        }
+        else {
+            spData_ = Buffer::MAKE(1);
+        }
         spData_->setSize(0);
     }
 
@@ -61,7 +77,13 @@ void Data::SetDataToSend(Buffer::Ptr spBuf)
 
 uint8_t* Data::CreateHeader(uint32_t headRoom)
 {
-    spHeader_ = Buffer::MAKE(headRoom);
+    if (pAllocator_) {
+        spHeader_ = pAllocator_->GetBuffer(headRoom);
+    }
+    else {
+        spHeader_ = Buffer::MAKE(headRoom);
+    }
+    
     return spHeader_->getBuf();
 }
     
@@ -71,8 +93,14 @@ TlsAppData::TlsAppData()
 
 void TlsAppData::SetReceivedData(Buffer::Ptr spBuf)
 {
-    spData_.reset(new NetworkBuffer(spBuf));
-    spData_->setDebugInfo(__FILE__, __LINE__);
+    if (pAllocator_) {
+        spData_ = pAllocator_->GetBuffer(spBuf);
+        spData_->setDebugInfo(__FILE__, __LINE__);
+    }
+    else {
+        spData_ = Buffer::makeShallowCopy(spBuf);
+    }
+    
     spData_->pull(TLS_HEADER_SIZE);
 }
 
@@ -82,7 +110,12 @@ void TlsAppData::SetDataToSend(Buffer::Ptr spBuf)
 
     // if no data is set then create empty data
     if (!spData_) {
-        spData_ = Buffer::MAKE(1);
+        if (pAllocator_) {
+            spData_ = pAllocator_->GetBuffer(1);
+        }
+        else {
+            spData_ = Buffer::MAKE(1);
+        }
         spData_->setSize(0);
     }
     

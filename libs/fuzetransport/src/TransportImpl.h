@@ -76,7 +76,7 @@ public:
     void Start();
     void End();
     
-    ThreadID    ID();
+    ThreadID_t  ID();
     const char* Name();
     
     void SetWork(ConnectionImpl* pConn);
@@ -170,15 +170,13 @@ public:
 
     void SetCongestionBaseID(TransportBase::Type eType, int baseID);
     
-    TimerService& GetTimerService();
+    TimerService::Ptr& GetTimerService();
     
     void ReserveUdpPort(uint16_t port, evutil_socket_t sock, uint32_t holdTime);
     PortReserve::Ptr GetReservedPort(uint16_t port);
 
     // DNS Cache interface
-    void SetDnsCache(const string& rDomain,
-                     Record::Type  type,
-                     Record::List& rList);
+    void SetDnsCache(Record::List& rList);
     Record::List GetDnsCache(const string& rDomain, Record::Type type);
     void MarkDnsCacheBad(const string& rIPString); // A record only
     void ClearDnsCache();
@@ -241,7 +239,7 @@ private:
     bool                   bServerMode_;  // added so that don't listen on 443 for Vidyo
     ProxyConnectorPtr      spProxy_;      // CURL wrapper for using HTTP Proxy
     
-    TimerService           timerService_;
+    TimerService::Ptr      spTimerService_;
     
     int                    baseID_[TransportBase::END];    
     TransportUser*         userList_[TransportUser::END_USER];

@@ -59,14 +59,16 @@ bool   Validate(const char*   pMsg,
 
 void PrintStun(const char* pMsg, uint32_t size);
 
-NetworkBuffer::Ptr CreateBindResponse(const uint8_t* pTransID,
-                                      const Address& rAddress,
-                                      const string&  rPwd);
+void CreateBindResponse(Buffer::Ptr    spResp,
+                        const uint8_t* pTransID,
+                        const Address& rAddress,
+                        const string&  rPwd);
 
-NetworkBuffer::Ptr CreateBindRequest(const string&  username,
-                                     const uint8_t* transID,
-                                     const string&  rPwd,
-                                     bool           bNoIce = false);
+void CreateBindRequest(Buffer::Ptr    spReq,
+                       const string&  username,
+                       const uint8_t* transID,
+                       const string&  rPwd,
+                       bool           bNoIce = false);
     
 } // namespace stun
 

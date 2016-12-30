@@ -45,9 +45,6 @@ public:
     
     void OnCongestion(const CongestionInfo& rInfo);
     
-    // Name used on base type string
-    static const char* SRC_BASE_TYPE;
-    
 private:
     
     TransportBase::Type  type_;

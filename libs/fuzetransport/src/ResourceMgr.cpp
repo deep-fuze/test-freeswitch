@@ -58,20 +58,53 @@ ResourceMgr::~ResourceMgr()
         for (size_t i = 0, iSize = resources_[type].size(); i < iSize; ++i) {
             delete resources_[type][i];
         }
+        WriteLock scoped(&rwLock_[type]);
         resources_[type].clear();
     }
 #endif
 }
 
+void ResourceMgr::ReserveConnections(int num)
+{
+    Resource::Type type = Resource::CONNECTION;
+    
+    for (int i = 0; i < num; ++i) {
+        Resource* p = 0;
+        {
+            WriteLock scoped(&rwLock_[type]);
+            int new_id = static_cast<int>(resources_[type].size());
+            p = new (std::nothrow) ConnectionImpl(new_id);
+            if (p) {
+                resources_[type].push_back(p);
+                p->type_ = type;
+            }
+        }
+        
+        if (p) {
+            MutexLock scoped(&lock_[type]);
+            idle_[type].push(p);
+        }
+    }
+}
+    
 Resource* ResourceMgr::GetNewResource(Resource::Type type)
 {
     Resource* p = 0;
     
     using std::nothrow;
     
-    MutexLock scoped(&lock_[type]);
+    {
+        MutexLock scoped(&lock_[type]);
+        
+        if (idle_[type].empty() == false) {
+            p = idle_[type].front();
+            idle_[type].pop();
+        }
+    }
     
-    if (idle_[type].empty()) {
+    if (!p) {
+        WriteLock scoped(&rwLock_[type]);
+
         int new_id = static_cast<int>(resources_[type].size());
         switch (type)
         {
@@ -105,10 +138,6 @@ Resource* ResourceMgr::GetNewResource(Resource::Type type)
             resources_[type].push_back(p);
             p->type_ = type;
         }
-    }
-    else {
-        p = idle_[type].front();
-        idle_[type].pop();
     }
     
     if (p) {
@@ -169,7 +198,7 @@ Resource* ResourceMgr::GetResource(Resource::Type type, int ID)
 {
     Resource* p = 0;
     
-    MutexLock scoped(&lock_[type]);
+    ReadLock scoped(&rwLock_[type]);
     
     if ((0 <= ID) && (ID < (int)resources_[type].size())) {
         if (resources_[type][ID]->status_ == Resource::ACTIVE) {

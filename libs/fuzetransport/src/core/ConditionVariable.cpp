@@ -92,7 +92,7 @@ bool ConditionVariable::Wait(MutexLock& lock, int timeout_ms)
                 signaled = false;
             }
             else if (ret == EINVAL) {
-                ELOG("pthread_cond_timedwait failed");
+                ELOG("pthread_cond_timedwait failed (" << timeout_ms << " ms");
             }
         }
     }

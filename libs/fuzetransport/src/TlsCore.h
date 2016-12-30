@@ -37,9 +37,9 @@ public:
     // action to take down the connection.
     virtual void OnInternalError() = 0;
     
-    inline virtual ~TlsCoreUser()
-    {
-    }
+    virtual Buffer::Ptr GetTlsBuffer(uint32_t bufSize) = 0;
+    
+    inline virtual ~TlsCoreUser() {}
 };
 
 //
@@ -65,6 +65,8 @@ public:
     
     uint32_t ProcessData(uint8_t* pData, uint32_t dataLen, ProcessType type);
     
+    const char* GetVersion();
+    
 public: // exceptional member variable to be exposed
     
     char log_[32];  // debug purpose
@@ -83,7 +85,7 @@ protected:
     
     static char      fingerPrint_[EVP_MAX_MD_SIZE*3]; // we need to add ':'
     
-    TlsCoreUser&     rCoreUser;
+    TlsCoreUser&     rCoreUser_;
     bool             bServer_;
     
     SSL*             pSSL_;

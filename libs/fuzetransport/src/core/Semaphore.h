@@ -23,13 +23,13 @@ namespace fuze
 class Semaphore : private NotCopyable
 {
 public:
-    explicit Semaphore();
-    virtual ~Semaphore();
+    explicit Semaphore() : count_(0) {}
+    virtual ~Semaphore() { cond_.Broadcast(); }
 
     // return false if timed out, true if signaled
     bool Wait(int ms = INFINITE); // milli-seconds
     void Post();
-    int  GetCount(); // semaphore count
+    int  GetCount() const {return count_;} // semaphore count - watch this is only informal
     
 private:
 

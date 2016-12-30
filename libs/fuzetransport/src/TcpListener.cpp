@@ -235,5 +235,11 @@ bool TcpListener::Send(Buffer::Ptr spBuffer)
     ELOG("Sending is not allowed");
     return false;
 }
+
+bool TcpListener::Send(const unsigned char* buf, size_t size)
+{
+    ELOG("Sending is not allowed");
+    return false;
+}
     
 } // namespace fuze

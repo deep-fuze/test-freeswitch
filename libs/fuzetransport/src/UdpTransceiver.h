@@ -21,6 +21,7 @@ public:
     // Implement Transceiver Interfaces
     virtual bool Start();
     virtual bool Send(Buffer::Ptr spBuffer);
+    virtual bool Send(const unsigned char* buf, size_t size);
     virtual void SetConnectionID(int connID);
     virtual ConnectionType ConnType();
 
@@ -38,8 +39,7 @@ private:
     void OnReadEvent();
     void OnWriteEvent();
     void OnTimeOutEvent();
-    
-    static const int MAX_UDP_PKT_SIZE = 30000;
+    void onWriteEventInternal(char* p_buf, long  size, Buffer::Ptr sp_buf);
     
     int                 connID_;
     ConnectionImpl*     pConn_;
@@ -58,6 +58,10 @@ private:
     MutexLock           qlock_;
     queue<Buffer::Ptr>  sendQ_;
     bool                writeAdded_;
+    
+    bool                reservedPort_;    // for NGV, reserving port
+
+    uint32_t            recvBufSize_;
     
 private: // NAT adopatation logic
     uint64_t            recvCnt_;         // valid stream count

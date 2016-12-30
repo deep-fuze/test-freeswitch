@@ -247,7 +247,7 @@ void ServerCore::OnDataDecrypted(Buffer::Ptr spData)
         uint32_t data_len = spData->size();
         uint8_t* p_buf    = recvBuf_->getBuf();
         uint32_t buf_len  = recvBuf_->size();
-        Buffer::Ptr new_buf = Buffer::make(data_len+buf_len+1);
+        Buffer::Ptr new_buf = Buffer::MAKE(data_len+buf_len+1);
         uint8_t* p_new = new_buf->getBuf();
         memcpy(p_new, p_buf, buf_len);
         memcpy(p_new+buf_len, p_data, data_len);
@@ -278,6 +278,21 @@ void ServerCore::OnInternalError()
     RequestRemove();
 }
 
+Buffer::Ptr ServerCore::GetBuffer(uint32_t bufSize)
+{
+    return Buffer::MAKE(bufSize);
+}
+
+Buffer::Ptr ServerCore::GetBuffer(Buffer::Ptr spBuf)
+{
+    return Buffer::makeShallowCopy(spBuf);
+}
+    
+Buffer::Ptr ServerCore::GetTlsBuffer(uint32_t bufSize)
+{
+    return Buffer::MAKE(bufSize);
+}
+    
 uint32_t ServerCore::OnHttpMessage(uint8_t* pBuf, uint32_t bufLen)
 {
     using tp::HttpRequest;

@@ -97,7 +97,7 @@ uint32_t StateAcceptTls::OnDataReceived(ServerCore* p,
         p->spTlsCore_->TriggerHandshake();
     }
     else {
-        MLOG("handshake finished with client");
+        MLOG("handshake finished with client: " << p->spTlsCore_->GetVersion());
         p->spTlsCore_->TriggerHandshake();
         p->SetState(ACCEPTED_TLS);
     }

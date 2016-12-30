@@ -97,6 +97,7 @@ public:
     // Implement Transceiver Interfaces
     virtual bool Start();
     virtual bool Send(Buffer::Ptr spBuffer);
+    virtual bool Send(const unsigned char* buf, size_t size);
     virtual void SetConnectionID(int connID);
     virtual ConnectionType ConnType();
     
@@ -108,6 +109,8 @@ public:
     virtual void OnDataDecrypted(Buffer::Ptr spData);
     virtual void OnInternalError();
     
+    virtual Buffer::Ptr GetTlsBuffer(uint32_t bufSize);
+
     // DTLS has client or server role
     void SetConnectionType(ConnectionType eType);
     
@@ -124,6 +127,7 @@ private:
     static void OnLibEvent(evutil_socket_t sock, short what, void* pArg);
     void OnReadEvent();
     void OnWriteEvent();
+    void onWriteEventInternal(uint8_t* p_buf, uint32_t buf_len);
     void OnTimeOutEvent();
     
     void SendData(Buffer::Ptr spData, const Address& rRemote);

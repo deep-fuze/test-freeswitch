@@ -8,11 +8,6 @@
 
 #include <ProxyConnector.h>
 #include <TcpTransceiver.h>
-
-#if defined(__ANDROID_API__) || defined(WIN32) || defined(__APPLE__)
-#include <curl/curl.h>
-#endif
-
 #include <Log.h>
 
 #define _LOG_(A,B) DEBUG_OUT(A, AREA_COM, __FUZE_FUNC__ << ": " << B)
@@ -33,7 +28,9 @@ int curl_log_callback(CURL* p, curl_infotype type,
     
 ConnectInfo::ConnectInfo()
     : tcpID_(INVALID_ID)
+#if defined(__ANDROID_API__) || defined(WIN32) || defined(__APPLE__)
     , pCurl_(0)
+#endif
     , socket_(INVALID_SOCKET)
 {
 }
@@ -43,7 +40,7 @@ ConnectInfo::~ConnectInfo()
 #if defined(__ANDROID_API__) || defined(WIN32) || defined(__APPLE__)
     // the socket belongs to curl, we shouldn't close it on our own
     if (pCurl_) {
-        curl_easy_cleanup(pCurl_);
+        curl_easy_cleanup((CURL*)pCurl_);
     }
 #endif
 }
@@ -153,7 +150,7 @@ void ProxyConnector::Run()
                 curl_easy_setopt(p, CURLOPT_HTTPPROXYTUNNEL, 1L);
                 curl_easy_setopt(p, CURLOPT_FRESH_CONNECT, 1L);
                 curl_easy_setopt(p, CURLOPT_CONNECT_ONLY, 1L);
-                curl_easy_setopt(p, CURLOPT_PROXYAUTH, CURLAUTH_ANY & ~CURLAUTH_NEGOTIATE);
+                curl_easy_setopt(p, CURLOPT_PROXYAUTH, CURLAUTH_ANY);
                 curl_easy_setopt(p, CURLOPT_CONNECTTIMEOUT, 30L);
                 curl_easy_setopt(p, CURLOPT_VERBOSE, 1L);
                 curl_easy_setopt(p, CURLOPT_DEBUGFUNCTION, &curl_log_callback);
@@ -161,7 +158,8 @@ void ProxyConnector::Run()
 #if defined(__ANDROID_API__)
                 curl_easy_setopt(p, CURLOPT_NOSIGNAL, 1L);
 
-                // TODO: Tell libcurl the path to our certificate store, so it can validate the certificates.
+                // TODO: Tell libcurl the path to our certificate store, so it can validate the certificates
+                // using our store instead of the ones provided by Android, the device manufacturer, and OpenSSL.
                 // CString castorePath = IApplicationInformation::getInstance()->getPathToCertStorePEMFile();
                 // FUZE_LOG_INFO(getLog(), "Path to cert store: %s", castorePath.c_str());
                 // curl_easy_setopt(curl, CURLOPT_CAINFO, castorePath.c_str());

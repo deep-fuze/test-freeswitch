@@ -9,23 +9,29 @@
 #include "TimerService.h"
 #include <Log.h>
 
-#define _LOG_(A,B) DEBUG_OUT(A, AREA_COM, __FUZE_FUNC__ << ": " << B)
+#define _LOG_(A,B) DEBUG_OUT(A, AREA_COM, __FUZE_FUNC__ << ": [" << name_ << "] " << B)
 
 namespace fuze {
 
-TimerService::TimerService()
-    : thread_(this, "TimerService")
+TimerService::Ptr TimerService::Create(const char* pName)
+{
+    return TimerService::Ptr(new TimerServiceImpl(pName));
+}
+    
+TimerServiceImpl::TimerServiceImpl(const char* pName)
+    : thread_(this, pName)
+    , name_(pName)
 {
     running_ = true;
     thread_.Start(true);
 }
 
-TimerService::~TimerService()
+TimerServiceImpl::~TimerServiceImpl()
 {
     Terminate();
 }
 
-void TimerService::Terminate()
+void TimerServiceImpl::Terminate()
 {
     if (running_) {
         running_ = false;
@@ -37,9 +43,11 @@ void TimerService::Terminate()
     }
 }
 
-int64_t TimerService::StartTimerEx(Timer::Ptr spTimer, int32_t ms, int32_t appData,
-                                   const char* pFile, int line)
+int64_t TimerServiceImpl::StartTimerEx(Timer::Ptr spTimer, int32_t ms, int32_t appData,
+                                       const char* pFile, int line)
 {
+    pFile = (strrchr(pFile, _DIR_MARK_) ? strrchr(pFile, _DIR_MARK_) + 1 : pFile);
+    
     int64_t handle = GetTimeMs() + ms;
     
     DLOG("handle: " << handle);
@@ -48,6 +56,7 @@ int64_t TimerService::StartTimerEx(Timer::Ptr spTimer, int32_t ms, int32_t appDa
     info.wpTimer_ = spTimer;
     info.pTimer_  = spTimer.get();
     info.appData_ = appData;
+    info.appDataEx_ = NULL;
     info.useRaw_  = false;
     info.pFile_   = pFile;
     info.line_    = line;
@@ -57,9 +66,34 @@ int64_t TimerService::StartTimerEx(Timer::Ptr spTimer, int32_t ms, int32_t appDa
     return handle;
 }
 
-int64_t TimerService::StartTimerEx(Timer* pTimer, int32_t ms, int32_t appData,
-                                   const char* pFile, int line)
+int64_t TimerServiceImpl::StartTimerEx(Timer::Ptr spTimer, int32_t ms, void* appData,
+                                       const char* pFile, int line)
 {
+    pFile = (strrchr(pFile, _DIR_MARK_) ? strrchr(pFile, _DIR_MARK_) + 1 : pFile);
+
+    int64_t handle = GetTimeMs() + ms;
+    
+    DLOG("handle: " << handle);
+    
+    TimerInfo info;
+    info.wpTimer_ = spTimer;
+    info.pTimer_  = spTimer.get();
+    info.appData_ = 0;
+    info.appDataEx_ = appData;
+    info.useRaw_  = false;
+    info.pFile_   = pFile;
+    info.line_    = line;
+    
+    AddTimer(info, handle);
+    
+    return handle;
+}
+
+int64_t TimerServiceImpl::StartTimerEx(Timer* pTimer, int32_t ms, int32_t appData,
+                                       const char* pFile, int line)
+{
+    pFile = (strrchr(pFile, _DIR_MARK_) ? strrchr(pFile, _DIR_MARK_) + 1 : pFile);
+
     int64_t handle = GetTimeMs() + ms;
     
     DLOG("handle: " << handle << " " << ms << " ms, appData: " << appData);
@@ -67,6 +101,7 @@ int64_t TimerService::StartTimerEx(Timer* pTimer, int32_t ms, int32_t appData,
     TimerInfo info;
     info.pTimer_  = pTimer;
     info.appData_ = appData;
+    info.appDataEx_ = NULL;
     info.useRaw_  = true;
     info.pFile_   = pFile;
     info.line_    = line;
@@ -76,17 +111,17 @@ int64_t TimerService::StartTimerEx(Timer* pTimer, int32_t ms, int32_t appData,
     return handle;
 }
 
-void TimerService::StopTimer(Timer::Ptr spTimer, int64_t handle)
+void TimerServiceImpl::StopTimer(Timer::Ptr spTimer, int64_t handle)
 {
     RemoveTimer(spTimer.get(), handle);
 }
 
-void TimerService::StopTimer(Timer* pTimer, int64_t handle)
+void TimerServiceImpl::StopTimer(Timer* pTimer, int64_t handle)
 {
     RemoveTimer(pTimer, handle);
 }
 
-void TimerService::AddTimer(TimerInfo& rInfo, int64_t handle)
+void TimerServiceImpl::AddTimer(TimerInfo& rInfo, int64_t handle)
 {
     bool b_wake = false;
     
@@ -105,7 +140,7 @@ void TimerService::AddTimer(TimerInfo& rInfo, int64_t handle)
     }
 }
 
-void TimerService::RemoveTimer(Timer* pTimer, int64_t handle)
+void TimerServiceImpl::RemoveTimer(Timer* pTimer, int64_t handle)
 {
     bool found = false;
     
@@ -127,7 +162,7 @@ void TimerService::RemoveTimer(Timer* pTimer, int64_t handle)
     }
 }
 
-void TimerService::Run()
+void TimerServiceImpl::Run()
 {
     TimerInfo timer;
     
@@ -168,11 +203,25 @@ void TimerService::Run()
             // if weak pointer is not available then use raw pointer
             if (timer.useRaw_) {
                 if (timer.pTimer_) {
-                    timer.pTimer_->OnTimer(timer.appData_);
+                    if (timer.appDataEx_)
+                    {
+                        timer.pTimer_->OnTimerEx(timer.appDataEx_);
+                    }
+                    else
+                    {
+                        timer.pTimer_->OnTimer(timer.appData_);
+                    }
                 }
             }
             else if (Timer::Ptr sp_timer = timer.wpTimer_.lock()) {
-                sp_timer->OnTimer(timer.appData_);
+                if (timer.appDataEx_)
+                {
+                    sp_timer->OnTimerEx(timer.appDataEx_);
+                }
+                else
+                {
+                    sp_timer->OnTimer(timer.appData_);
+                }
             }
             int64_t time_took = GetTimeMs() - start_time;
             if (time_took > 100) {

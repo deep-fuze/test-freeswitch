@@ -163,6 +163,7 @@ uint32_t StateUdpOverTcp::OnDataReceived(TcpTransceiver* p,
             spBuf->setSize(msg_len);
             
             Data data;
+            data.SetAllocator(p->pConn_);
             data.SetReceivedData(spBuf);
             
             // if we are connected then we only have Data to come in
@@ -190,6 +191,7 @@ uint32_t StateUdpOverTcp::OnDataReceived(TcpTransceiver* p,
 void StateUdpOverTcp::Send(TcpTransceiver* p, Buffer::Ptr spBuf)
 {
     fuze::Data data;
+    data.SetAllocator(p->pConn_);
     data.SetDataToSend(spBuf);
     
     if (Buffer::Ptr sp_header = data.GetHeader()) {
@@ -290,8 +292,8 @@ uint32_t StateSetupTls::OnDataReceived(TcpTransceiver* p,
     else {
         ConnectionType orig = p->pConn_->GetOriginalConnectionType();
         
-        MLOG("TLS handshake is done (requested connection: " <<
-             toStr(orig) << ")");
+        MLOG("TLS handshake is done [" << p->spTlsCore_->GetVersion() <<
+             "] (requested connection: " << toStr(orig) << ")");
         
         // if application has requested TLS connection then far end
         // must be TLS endpoint - expecting full TLS stuff
@@ -387,7 +389,7 @@ uint32_t StateDataOverTls::OnDataReceived(TcpTransceiver* p,
     if (p->bConnected_ == false) {
         ELOG("wrong state machine - StateDataOverTls");
         p->pConn_->OnEvent(ET_FAILED, "Wrong state");
-        return 0;
+        return spBuf->size();
     }
     
     uint32_t data_read = 0;
@@ -407,6 +409,7 @@ uint32_t StateDataOverTls::OnDataReceived(TcpTransceiver* p,
         spBuf->setSize(tls_len);
         
         TlsAppData tls_data;
+        tls_data.SetAllocator(p->pConn_);
         tls_data.SetReceivedData(spBuf);
         
         if (NetworkBuffer* pbuf =
@@ -422,6 +425,9 @@ uint32_t StateDataOverTls::OnDataReceived(TcpTransceiver* p,
     else {
         ELOG("unexpected message received - StateDataOverTls");
         p->pConn_->OnEvent(ET_FAILED, "unexpected msg on StateDataOverTls");
+        // discard the data as if we consumed it
+        data_read = buf_len;
+        WLOG("Data " << buf_len << "B [" << Hex(p_buf) << "]");
     }
     
     return data_read;
@@ -430,6 +436,7 @@ uint32_t StateDataOverTls::OnDataReceived(TcpTransceiver* p,
 void StateDataOverTls::Send(TcpTransceiver* p, Buffer::Ptr spBuf)
 {
     TlsAppData tls_data;
+    tls_data.SetAllocator(p->pConn_);
     tls_data.SetDataToSend(spBuf);
     
     if (Buffer::Ptr sp_header = tls_data.GetHeader()) {

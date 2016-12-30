@@ -405,7 +405,7 @@ void TcpCore::ResetReadBuffer()
     //       as transport provided buffer to application
     //       can't be touched again by transport
     //
-    Buffer::Ptr new_buf = Buffer::MAKE(buf_size);
+    Buffer::Ptr new_buf = rCoreUser_.GetBuffer(buf_size);
     new_buf->setSize(buf_size-1); // reserve null space
     if (byteRecv_ > 0) {
         // if we have filled up the buffer and get a new buffer
@@ -424,7 +424,7 @@ void TcpCore::OnReadEvent()
     // deleting the buffer and we are trying to avoid shutdown
     // crash due to buffer deallocation.
     if (!recvBuf_) {
-        recvBuf_= Buffer::MAKE(BUFFER_SIZE);
+        recvBuf_= rCoreUser_.GetBuffer(BUFFER_SIZE);
         recvBuf_->setSize(BUFFER_SIZE-1); // reserve null space
     }
     
@@ -477,7 +477,7 @@ void TcpCore::OnReadEvent()
             uint32_t app_read = 0;
             
             do {
-                Buffer::Ptr sp_copy = Buffer::makeShallowCopy(recvBuf_);
+                Buffer::Ptr sp_copy = rCoreUser_.GetBuffer(recvBuf_);
                 
                 sp_copy->setSize(byteRecv_);
                 

@@ -49,7 +49,8 @@
 
 namespace fuze {
 
-TcpFramer::TcpFramer()
+TcpFramer::TcpFramer(TcpCoreUser& rUser)
+    : rCoreUser_(rUser)
 {
     Clear();
 }
@@ -75,11 +76,11 @@ void TcpFramer::Clear()
 void TcpFramer::SetSendData(Buffer::Ptr spBuf)
 {
     // first make a copy of it
-    spSendBuffer_ = Buffer::makeShallowCopy(spBuf);
+    spSendBuffer_ = rCoreUser_.GetBuffer(spBuf);
     
     // Buffer needs to implement a way to protect
     // data integrity and protection
-    spSendHeader_ = Buffer::MAKE(HEADER_SIZE);
+    spSendHeader_ = rCoreUser_.GetBuffer(HEADER_SIZE);
     spSendHeader_->setSize(HEADER_SIZE);
     uint8_t* p_head = spSendHeader_->getBuf();
     
@@ -111,7 +112,7 @@ bool TcpFramer::GetSendFrame(Buffer::Ptr& rspBuf)
             else { // send by MTU size
                 _DLOG("send by MTU size (" << MTU_ << "B)");
                 Buffer::Ptr sp_fragment
-                    = Buffer::makeShallowCopy(spSendBuffer_);
+                    = rCoreUser_.GetBuffer(spSendBuffer_);
                 sp_fragment->setSize(MTU_);
                 rspBuf = sp_fragment;
                 spSendBuffer_->pull(MTU_);
@@ -177,7 +178,7 @@ void TcpFramer::SetRecvFrame(Buffer::Ptr spBuf)
                     new_buf_size = required_size;
                 }
                 
-                Buffer::Ptr sp_new = Buffer::MAKE(new_buf_size);
+                Buffer::Ptr sp_new = rCoreUser_.GetBuffer(new_buf_size);
                 uint8_t* p_new = sp_new->getBuf();
                 if (recvBytes_ > 0) {
                     memcpy(p_new, p_recv, recvBytes_);
@@ -251,7 +252,7 @@ bool TcpFramer::GetRecvData(Buffer::Ptr& rspBuf, uint8_t& rHeadType)
     if (recvBytes_ >= recvSize_) {
         uint32_t size_before = spRecvBuffer_->size();
         
-        rspBuf = Buffer::makeShallowCopy(spRecvBuffer_);
+        rspBuf = rCoreUser_.GetBuffer(spRecvBuffer_);
         rspBuf->setSize(recvSize_);
         spRecvBuffer_->pull(recvSize_);
         recvBytes_ -= recvSize_;
@@ -287,6 +288,7 @@ TcpTransceiver::TcpTransceiver(int transID)
     , connID_(INVALID_ID)
     , pConn_(0)
     , tcpCore_(*this)
+    , tcpFramer_(*this)
     , bConnected_(false)
     , bUseFrame_(false)
     , pState_(StateSetupTcp::GetInstance())
@@ -556,6 +558,15 @@ void TcpTransceiver::StartAfterProxyConnect()
     SetState(TcpTxrxState::SETUP_TLS);
     
     pState_->OnConnected(this);
+    
+    sockaddr_in  local;
+    ev_socklen_t len = sizeof(local);
+    if (getsockname(socket_, (sockaddr*)&local, &len) == 0) {
+        pConn_->SetLocalAddress(toStr(local.sin_addr), ntohs(local.sin_port));
+    }
+    else {
+        ELOG("Error at getsockname()");
+    }
 }
 
 void TcpTransceiver::SetSocketOption()
@@ -619,6 +630,42 @@ void TcpTransceiver::SetSocketOption()
                        (char*)&tos, sizeof(tos)) < 0) {
             ELOG("Failed to set ToS");
         }
+        
+#ifdef SO_NET_SERVICE_TYPE
+        int st = INVALID_ID;
+        const char* p_log = "";
+        
+        //
+        // per socket.h comment on SO_NET_SERVICE_TYPE
+        //
+        if (pConn_->IsPayloadType(Connection::AUDIO)) {
+            st = NET_SERVICE_TYPE_VO;
+            p_log = "VO";
+        }
+        else if (pConn_->IsPayloadType(Connection::VIDEO)) {
+            st = NET_SERVICE_TYPE_VI;
+            p_log = "VI";
+        }
+        else if (pConn_->IsPayloadType(Connection::SS)) {
+            st = NET_SERVICE_TYPE_RV;
+            p_log = "RV";
+        }
+        else if (pConn_->IsPayloadType(Connection::SIP)) {
+            st = NET_SERVICE_TYPE_SIG;
+            p_log = "SIG";
+        }
+        
+        if (st != INVALID_ID) {
+            if (setsockopt(socket_, SOL_SOCKET, SO_NET_SERVICE_TYPE,
+                           (char*)&st, sizeof(st)) < 0) {
+                MLOG("NET_SERVICE_TYPE (" << p_log << ") not available");
+            }
+            else {
+                MLOG("NET_SERVICE_TYPE (" << p_log << ")");
+            }
+        }
+#endif
+
 #else
 		HANDLE QOSHandle;
 		QOS_VERSION version;
@@ -627,47 +674,37 @@ void TcpTransceiver::SetSocketOption()
 		version.MinorVersion = 0;
 
         if (!pfnQosCreateHandle_) {
-			ELOG("qWAVE not available.");
+			WLOG("qWAVE not available.");
 		}
         else if (pfnQosCreateHandle_(&version, &QOSHandle) == 0) {
 			WLOG("Couldn't create QOS handle err=" << GetLastError());
 		}
         else {
-			QOS_FLOWID flowid = 0;
-			PriorityType pt;
-			QOS_TRAFFIC_TYPE trafficType = QOSTrafficTypeBestEffort;
-
+            QOS_FLOWID flowid = 0;
+            QOS_TRAFFIC_TYPE qos_type = QOSTrafficTypeBestEffort;
+            
             if (pConn_) {
-                if (pConn_->GetPriority(pt)) {
-					switch (pt)
-					{
-					case PT_BACKGROUND:
-						trafficType = QOSTrafficTypeBackground;
-						break;
-					case PT_EXCELLENTEFFORT:
-						trafficType = QOSTrafficTypeExcellentEffort;
-						break;
-					case PT_AUDIOVIDEO:
-						trafficType = QOSTrafficTypeAudioVideo;
-						break;
-					case PT_VOICE:
-						trafficType = QOSTrafficTypeVoice;
-						break;
-					case PT_CONTROL:
-					case PT_MAX_PRIORITY:
-						trafficType = QOSTrafficTypeControl;
-						break;
-					default:
-						trafficType = QOSTrafficTypeBestEffort;
-						break;
-					}
-				}
-			}
+                if (pConn_->IsPayloadType(Connection::AUDIO)) {
+                    qos_type = QOSTrafficTypeVoice;
+                }
+                else if (pConn_->IsPayloadType(Connection::VIDEO)) {
+                    qos_type = QOSTrafficTypeAudioVideo;
+                }
+                else if (pConn_->IsPayloadType(Connection::SS)) {
+                    qos_type = QOSTrafficTypeAudioVideo;
+                }
+                else if (pConn_->IsPayloadType(Connection::SIP)) {
+                    qos_type = QOSTrafficTypeControl;
+                }
+            }
+            
+            sockaddr_in remote  = pConn_->GetRemoteAddress().SocketAddress();
+            sockaddr*   p_saddr = (sockaddr*)&remote;
 
             if (!pfnQosAddSocketToFlow_) {
-				ELOG("qWAVE not available.");
+				WLOG("qWAVE not available.");
 			}
-			else if (pfnQosAddSocketToFlow_(QOSHandle, socket_, NULL, trafficType,
+			else if (pfnQosAddSocketToFlow_(QOSHandle, socket_, p_saddr, qos_type,
                                             QOS_NON_ADAPTIVE_FLOW, &flowid) == 0) {
 				MLOG("Not allowed to add socket to QOS flow [" << GetLastError() << "]");
 			}
@@ -805,12 +842,20 @@ bool TcpTransceiver::Send(Buffer::Ptr spBuffer)
     return true;
 }
 
+bool TcpTransceiver::Send(const unsigned char* buf, size_t size)
+{
+    Buffer::Ptr sp_buf = GetBuffer(size);
+    memcpy(sp_buf->getBuf(), buf, size);
+    sp_buf->setSize(size);
+    return Send(sp_buf);
+}
+
 void TcpTransceiver::SendStat(uint8_t type, uint16_t rateKbps, uint32_t seqNum)
 {
     if (bUseFrame_) {
         const uint32_t payload_len = 7;
         uint32_t total_len = TcpFramer::HEADER_SIZE + payload_len;
-        Buffer::Ptr sp_buf = Buffer::MAKE(total_len);
+        Buffer::Ptr sp_buf = GetBuffer(total_len);
         sp_buf->setSize(total_len);
         
         uint8_t* p_head = sp_buf->getBuf();
@@ -1021,6 +1066,36 @@ void TcpTransceiver::OnReadTimeout()
         pConn_->OnTransceiverTimeout();
     }
 }
+
+Buffer::Ptr TcpTransceiver::GetBuffer(uint32_t bufSize)
+{
+    if (pConn_) {
+        return pConn_->GetBuffer(bufSize);
+    }
+    else {
+        return Buffer::MAKE(bufSize);
+    }
+}
+    
+Buffer::Ptr TcpTransceiver::GetBuffer(Buffer::Ptr spBuf)
+{
+    if (pConn_) {
+        return pConn_->GetBuffer(spBuf);
+    }
+    else {
+        return Buffer::makeShallowCopy(spBuf);
+    }
+}
+
+Buffer::Ptr TcpTransceiver::GetTlsBuffer(uint32_t bufSize)
+{
+    if (pConn_) {
+        return pConn_->GetBuffer(bufSize);
+    }
+    else {
+        return Buffer::MAKE(bufSize);
+    }
+}
     
 void TcpTransceiver::OnDataEncrypted(Buffer::Ptr spData)
 {
@@ -1141,7 +1216,7 @@ void TcpTransceiver::SendMapData()
 {
     const uint32_t payload_len = 10;
     uint32_t total_len = TcpFramer::HEADER_SIZE + payload_len;
-    Buffer::Ptr sp_buf = Buffer::MAKE(total_len);
+    Buffer::Ptr sp_buf = GetBuffer(total_len);
     sp_buf->setSize(total_len);
     
     uint8_t* p_head = sp_buf->getBuf();

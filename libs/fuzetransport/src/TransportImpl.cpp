@@ -176,6 +176,9 @@ TransportImpl::TransportImpl()
         userList_[i] = 0;
     }
     
+    // start transport timer service
+    spTimerService_ = TimerService::Create("TransportTimer");
+    
     // add one threads by default
     AddWorkerThread(0);
 }
@@ -183,7 +186,7 @@ TransportImpl::TransportImpl()
 TransportImpl::~TransportImpl()
 {
     // stop timer first
-    timerService_.Terminate();
+    spTimerService_->Terminate();
     
     // get rid of threads
     threadQ_.clear();
@@ -278,6 +281,10 @@ void TransportImpl::EnableServerMode(Mode mode)
                 ELOG("Failed to initialize Transport Server");
                 exit(1);
             }
+            
+            // reserve 1000 connections
+            MLOG("Reserving 1000 connections");
+            ResourceMgr::GetInstance()->ReserveConnections(1000);
         }
         else {
             WLOG("Transport server already exists");
@@ -428,9 +435,9 @@ void TransportImpl::CreateEventBase()
         }
 
 		// Priority setting
-		if (event_base_priority_init(pEventBase_, PT_MAX_PRIORITY) == -1) {
-		 	ELOG("Failed to set priority " << PT_MAX_PRIORITY);
-		}    
+//		if (event_base_priority_init(pEventBase_, 3) == -1) {
+//		 	ELOG("Failed to set priority " << 3);
+//		}    
     }
 	else {
 		ELOG("Failed to create event base");		
@@ -784,9 +791,9 @@ ProxyConnector::Ptr TransportImpl::GetProxyConnector()
     return spProxy_;
 }
 
-TimerService& TransportImpl::GetTimerService()
+TimerService::Ptr& TransportImpl::GetTimerService()
 {
-    return timerService_;
+    return spTimerService_;
 }
 
 void TransportImpl::PrintQSize()
@@ -923,40 +930,45 @@ void PortReserve::OnTimer(int32_t AppData)
     }
 }
 
-void TransportImpl::SetDnsCache(const string& rDomain, Record::Type type, Record::List& rList)
+void TransportImpl::SetDnsCache(Record::List& rList)
 {
-    for (auto& it : rList) {
-        it->expire_ = GetTimeMs() + (it->ttl_ * 1000);
-    }
-    
-    if (!rList.empty()) {
-        if (type == Record::A) {
-            for (auto& a : rList) {
-                if (A::Ptr sp = fuze_dynamic_pointer_cast<A>(a))
-                    _MLOG_("[A] " << sp->hostName_ << " ttl " << sp->ttl_);
-            }
-        }
-        else if (type == Record::SRV) {
-            for (auto& srv : rList) {
-                if (SRV::Ptr sp = fuze_dynamic_pointer_cast<SRV>(srv))
-                    _MLOG_("[SRV] " << sp->name_ << ":" << sp->port_ <<
-                           " ttl " << sp->ttl_ << " priority: " <<
-                           sp->priority_ << " weight: " << sp->weight_);
-            }
-        }
-        else if (type == Record::NAPTR) {
-            for (auto& naptr : rList) {
-                if (NAPTR::Ptr sp = fuze_dynamic_pointer_cast<NAPTR>(naptr)) {
-                    _MLOG_("[NAPTR] " << sp->replacement_ << " ttl " <<
-                           sp->ttl_ << " " << sp->flag_ << " " <<
-                           sp->services_ << " order: " << sp->order_ <<
-                           ", pref: " << sp->pref_ << " " << sp->regexp_);
-                }
-            }
-        }
+    for (auto& sp_rec : rList) {
+        
+        sp_rec->expire_ = GetTimeMs() + (sp_rec->ttl_ * 1000);
         
         MutexLock scoped(&dnsLock_);
-        dnsCache_[type][rDomain] = rList;
+        
+        DnsRecordMap& r_map = dnsCache_[sp_rec->type_];
+        DnsRecordMap::iterator it = r_map.find(sp_rec->domain_);
+        if (it != r_map.end()) {
+            bool found = false;
+            // record exist already then see if there is duplicate
+            for (auto& sp : it->second) {
+                if (*sp_rec == *sp) {
+                    found = true;
+                    if (sp_rec->expire_ > sp->expire_) {
+                        _MLOG_(sp_rec << " - ttl extended with " <<
+                               sp_rec->expire_ - sp->expire_ << "ms");
+                        sp = sp_rec;
+                    }
+                    else {
+                        _MLOG_(sp_rec << " - ignored as recent cache");
+                    }
+                    break;
+                }
+            }
+            
+            if (!found) {
+                it->second.push_back(sp_rec);
+                _MLOG_(sp_rec << " - new record (size " << it->second.size() << ")");
+            }
+        }
+        else {
+            _MLOG_(sp_rec << " - new record (size 1)");
+            Record::List new_list;
+            new_list.push_back(sp_rec);
+            r_map[sp_rec->domain_] = new_list;
+        }
     }
 }
     
@@ -1067,6 +1079,9 @@ void WorkerThread::Start()
 {
     if (!bActive_) {
         MLOG(thread_.Name());
+
+        // set active true before we mark the thread to be active
+        bActive_ = true;
         
         bool result = false;
         int  count  = 20; // try 2 seconds
@@ -1074,12 +1089,15 @@ void WorkerThread::Start()
         while (result == false && --count > 0) {
             result = thread_.Start();
             if (!result) {
-                ELOG("Failed to create thread - try count: " << count);
+                WLOG("Failed thread start - try count: " << count);
                 Thread::SleepInMs(100);
             }
         }
         
-        bActive_ = result;
+        if (!result) {
+            ELOG("Failed to create thread");
+            bActive_ = false;
+        }
     }
 }
 
@@ -1105,7 +1123,7 @@ void WorkerThread::End()
     }
 }
 
-ThreadID WorkerThread::ID()
+ThreadID_t WorkerThread::ID()
 {
     return thread_.GetThreadID();
 }
@@ -1117,7 +1135,7 @@ const char* WorkerThread::Name()
     
 void WorkerThread::Run()
 {
-    ThreadID thrd_id = Thread::ID();
+    ThreadID_t thrd_id = Thread::ID();
     
     while (bActive_) {
         if (ConnectionImpl* p = GetWork()) {
@@ -1152,7 +1170,7 @@ void WorkerThread::SetWork(fuze::ConnectionImpl *pConn)
             queue<ConnectionImpl*> empty_q;
             swap(queue_, empty_q);
         }
-        else if ((q_size % 100) == 0) {
+        else if ((q_size % 300) == 0) {
             MLOG(thread_.Name() << "'s q size: " << q_size);
         }
     }

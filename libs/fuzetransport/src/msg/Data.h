@@ -30,10 +30,7 @@ class Data
 {
 public:
     Data();
-
-    inline virtual ~Data()
-    {
-    }
+    inline virtual ~Data() {}
     
     virtual void SetDataToSend(Buffer::Ptr spSend);
     virtual void SetReceivedData(Buffer::Ptr spRecv);
@@ -42,6 +39,8 @@ public:
     Buffer::Ptr GetHeader();
     Buffer::Ptr GetData();
     
+    void SetAllocator(Connection* pCon);
+
     static const uint8_t  FUZE_MARK = 0xFE;
     static const uint32_t FUZE_HEADER_SIZE = 3;
     
@@ -51,6 +50,8 @@ protected:
     
     Buffer::Ptr spHeader_;
     Buffer::Ptr spData_;
+    
+    Connection* pAllocator_; // connection as memory allocator
 };
     
 class TlsAppData : public Data
