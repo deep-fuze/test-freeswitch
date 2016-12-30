@@ -13,6 +13,7 @@
 #include <Transceiver.h>
 #include <Resource.h>
 #include <Thread.h>
+#include <atomic>
 #include <queue>
 
 namespace fuze {
@@ -283,8 +284,8 @@ private:
     
     vector<BufferQueue>      recycleQ_;
     MutexLock                rcqLock_;
-    uint16_t                 bufNum_;
-    uint16_t                 bufAlloc[MAX_QUEUE_SIZE];
+    std::atomic<uint16_t>    bufNum_;
+    std::atomic<uint16_t>    bufAlloc[MAX_QUEUE_SIZE];
 };
 
 //
