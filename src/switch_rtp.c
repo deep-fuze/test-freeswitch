@@ -7994,9 +7994,26 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
         send = 0;
     }
 
-	if (!rtp_session->is_fuze_app && (*flags & SFF_CNG)) {
-		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "dropping CNG packet on session that isn't a fuze_app session\n");
-		send = 0;
+	/*
+	 * Added support for comfort noise packets to enable the client to send "Comfort Noise" while muted to reduce both bandwidth
+	 * and processing on the conference node.  In some cases FS will generate Comfort Noise packets itself -- primarily when it tries
+	 * to read a packet but one isn't available (i.e. Timeout case).  Generally we do not want to send these are the far end may
+	 * not like these packets.  The cases when we don't want to send CN:
+	 *  - the session isn't one associated with a fuze client
+	 *  - during an IVR session
+	 *  - when the CN packet is associated with a timeout
+	 */
+	if (*flags & SFF_CNG) {
+		if (!rtp_session->is_fuze_app) {
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "dropping CNG packet on session that isn't a fuze_app session\n");
+			send = 0;
+		} else if (*flags & SFF_TIMEOUT) {
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "dropping CNG packet associated with TIMEOUT\n");
+			send = 0;
+		} else if (*flags & SFF_IVR_FRAME) {
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "dropping CNG packet during IVR\n");
+			send = 0;
+		}
 	}
 
     /* fuze */
@@ -8321,7 +8338,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             rtp_session->last_write_timestamp = switch_micro_time_now();
         }
 
-    }
+    } /* if (send) */
 
     ret = (int) bytes;
 

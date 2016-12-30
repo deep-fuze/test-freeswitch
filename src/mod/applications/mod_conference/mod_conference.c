@@ -6725,6 +6725,9 @@ static void start_conference_loops(conference_member_t *member)
 /* 10 seconds * 1000ms/s * 1000us/ms */
 #define PROCESSING_PERIOD (10*1000*1000)
 
+/* 10 mintues *60 seconds * 1000ms/s * 1000us/ms */
+#define PROCESSING_PERIOD_WHILE_IDLE (10*60*1000*1000)
+
 static void check_conference_loops(int idx)
 {
     switch_time_t now = switch_time_now();
@@ -6759,6 +6762,7 @@ static void *SWITCH_THREAD_FUNC conference_loop_output(switch_thread_t *thread, 
     switch_time_t time_asleep_sum = 0;
     uint32_t behind = 0;
     uint32_t overflow_number = list->idx/MAX_NUMBER_OF_OUTPUT_NTHREADS;
+	switch_time_t status_output_period = PROCESSING_PERIOD;
 
     /*
      * There's an edge case where we might have 2 threads processing a single queue.  The last thread
@@ -6792,7 +6796,13 @@ static void *SWITCH_THREAD_FUNC conference_loop_output(switch_thread_t *thread, 
 
         /* luke todo put in a stop condition */
 
-        if ((loop_now - loop_period_start) > PROCESSING_PERIOD) {
+		if (list->count == 0) {
+			status_output_period = PROCESSING_PERIOD_WHILE_IDLE;
+		} else {
+			status_output_period = PROCESSING_PERIOD;
+		}
+
+        if ((loop_now - loop_period_start) > status_output_period) {
             float ppp = 0;
 
             list->process_avg[list->process_avg_idx] = (float)(time_asleep_sum)/((loop_now - loop_period_start)/(20*1000));
