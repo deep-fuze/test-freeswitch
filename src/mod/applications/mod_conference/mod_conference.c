@@ -6443,9 +6443,9 @@ static void launch_conference_thread(int i, switch_memory_pool_t *pool)
     switch_thread_create(&globals.output_thread[i], thd_attr, conference_thread, &globals.conference_thread[i], pool);
 }
     
-#define get_output_list_lock(i, tid) get_output_list_lock_line(i, tid, __LINE__)
+#define conference_thread_list_lock(i, tid) conference_thread_list_lock_line(i, tid, __LINE__)
 
-switch_bool_t get_output_list_lock_line(int i, uint32_t tid, int line) {
+switch_bool_t conference_thread_list_lock_line(int i, uint32_t tid, int line) {
 #if 0
     int j = 0;
     switch_bool_t success = SWITCH_FALSE;
@@ -6469,16 +6469,16 @@ switch_bool_t get_output_list_lock_line(int i, uint32_t tid, int line) {
     return SWITCH_TRUE;
 }
 
-switch_bool_t get_output_list_unlock(int i) {
+switch_bool_t release_conference_thread_list_lock(int i) {
     globals.conference_thread_line[i] = 0;
     globals.conference_thread_tid[i] = 0;
     switch_mutex_unlock(globals.conference_thread[i].lock);
     return SWITCH_TRUE;
 }
 
-#define get_output_lock(tid) get_output_lock_line(tid, __LINE__)
+#define get_conference_thread_lock(tid) get_conference_thread_lock_line(tid, __LINE__)
 
-switch_bool_t get_output_lock_line(uint32_t tid, int line) {
+switch_bool_t get_conference_thread_lock_line(uint32_t tid, int line) {
 #if 0
     int j = 0;
     switch_bool_t success = SWITCH_FALSE;
@@ -6502,7 +6502,7 @@ switch_bool_t get_output_lock_line(uint32_t tid, int line) {
     return SWITCH_TRUE;
 }
 
-switch_bool_t get_output_unlock() {
+switch_bool_t release_conference_thread_lock() {
     globals.conference_thread_lock_line = 0;
     globals.conference_thread_lock_tid = 0;
     switch_mutex_unlock(globals.conference_thread_lock);
@@ -6768,9 +6768,9 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
      * There's an edge case where we might have 2 threads processing a single queue.  The last thread
      * to set the tid will be the one true owner.
      */
-    get_output_lock(tid);
+    get_conference_thread_lock(tid);
     list->tid = tid;
-    get_output_unlock();
+    release_conference_thread_lock();
     //switch_mutex_unlock(globals.conference_thread_lock);
     
     if (switch_core_timer_init(&timer, "soft", interval, tsamples, NULL) != SWITCH_STATUS_SUCCESS) {
@@ -6825,7 +6825,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             min_time = 20000;
         }
 
-        if (get_output_list_lock(list->idx, tid) == SWITCH_TRUE) {
+        if (conference_thread_list_lock(list->idx, tid) == SWITCH_TRUE) {
             int count = 0;
             for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
                 INPUT_LOOP_RET ret;
@@ -6873,7 +6873,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                     conference_loop_input_cleanup(ols->ild); /* luke todo!!!! */
                 }
             }
-            get_output_list_unlock(list->idx);
+            release_conference_thread_list_lock(list->idx);
         }
 
         if (list->idx >= MAX_NUMBER_OF_OUTPUT_NTHREADS) {
@@ -6895,7 +6895,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
 
             loop_now = switch_time_now();
 
-            if (get_output_list_lock(list->idx, tid)) {
+            if (conference_thread_list_lock(list->idx, tid)) {
                 int count = 0;
                 /*
                  * Make sure that each conference that we have here has some participants in the main thread.
@@ -6915,16 +6915,17 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                                           ols->member->id, list->idx, ols->member->conference->list_idx);
                         move_count += 1;
                     }
+					ols = ols->next;
                 }
-                get_output_list_unlock(list->idx);
+                release_conference_thread_list_lock(list->idx);
             }
             if (move_count > 0) {
 				/*
 				 * This lock is expensive as there is only one such lock shared across all threads.  
 				 * Grab this lock with extreme caution!
 				 */
-                if (get_output_lock(switch_thread_self())) {
-                    if (get_output_list_lock(list->idx, tid)) {
+                if (get_conference_thread_lock(switch_thread_self())) {
+                    if (conference_thread_list_lock(list->idx, tid)) {
                         int count = 0;
                         /*
                          * Make sure that each conference that we have here has some participants in the main thread.
@@ -6969,15 +6970,15 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                                 ols = ols->next;
                             }
                         }
-                        get_output_list_unlock(list->idx);
+                        release_conference_thread_list_lock(list->idx);
                     }
-                    get_output_unlock();
+                    release_conference_thread_lock();
                 }
             } /* move_count > 0 */
         }
 
         if (list->idx < MAX_NUMBER_OF_OUTPUT_NTHREADS) {
-            if (get_output_list_lock(list->idx, tid)) {
+            if (conference_thread_list_lock(list->idx, tid)) {
                 int count = 0;
                 //switch_mutex_lock(list->lock);
                 for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
@@ -7034,7 +7035,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                         break;
                     }
                 }
-                get_output_list_unlock(list->idx);
+                release_conference_thread_list_lock(list->idx);
             }
             //switch_mutex_unlock(list->lock);
 
@@ -7045,7 +7046,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             }
         }
 
-        if (get_output_list_lock(list->idx, tid)) {
+        if (conference_thread_list_lock(list->idx, tid)) {
             //switch_mutex_lock(list->lock);
             for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
                 OUTPUT_LOOP_RET ret = OUTPUT_LOOP_OK;
@@ -7147,7 +7148,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                     continue;
                 }
             } /* for */
-            get_output_list_unlock(list->idx);
+            release_conference_thread_list_lock(list->idx);
         }
         //switch_mutex_unlock(list->lock);
 
@@ -9287,8 +9288,8 @@ static void conference_thread_print(switch_stream_handle_t *stream, char *delim,
                                    globals.conference_thread_tid[i], globals.conference_thread_line[i]
                                    );
             if (detail >= 2) {
-                if (get_output_lock(switch_thread_self())) {
-                    if (get_output_list_lock(i, switch_thread_self())) {
+                if (get_conference_thread_lock(switch_thread_self())) {
+                    if (conference_thread_list_lock(i, switch_thread_self())) {
                         if (globals.conference_thread[i].loop) {
                             participant_thread_data_t *olp;
                             int j = 0;
@@ -9302,9 +9303,9 @@ static void conference_thread_print(switch_stream_handle_t *stream, char *delim,
                                 j++;
                             }
                         }
-                        get_output_list_unlock(i);
+                        release_conference_thread_list_lock(i);
                     }
-                    get_output_unlock();
+                    release_conference_thread_lock();
                 }
             }
         }
@@ -13742,8 +13743,8 @@ float calculate_thread_utilization(int idx)
 
 static void conference_list_add_to_idx(conference_obj_t *conference, participant_thread_data_t *ol, int idx)
 {
-    if (get_output_lock(switch_thread_self())) {
-        if (get_output_list_lock(idx, switch_thread_self())) {
+    if (get_conference_thread_lock(switch_thread_self())) {
+        if (conference_thread_list_lock(idx, switch_thread_self())) {
             if (globals.conference_thread[idx].loop) {
                 participant_thread_data_t *olp;
                 for (olp = globals.conference_thread[idx].loop; olp->next; olp = olp->next) {
@@ -13758,9 +13759,9 @@ static void conference_list_add_to_idx(conference_obj_t *conference, participant
             conference->participants_per_thread[idx/MAX_NUMBER_OF_OUTPUT_NTHREADS] += 1;
             globals.conference_thread[idx].count += 1;
             ol->debug = SWITCH_TRUE;
-            get_output_list_unlock(idx);
+            release_conference_thread_list_lock(idx);
         }
-        get_output_unlock();
+        release_conference_thread_lock();
     }
 }
 
@@ -13779,7 +13780,7 @@ static int conference_list_add(conference_obj_t *conference, participant_thread_
     min_sleep_per_thread = globals.min_sleep_per_thread;
     switch_mutex_unlock(globals.conference_mutex);
 
-    if (get_output_lock(switch_thread_self())) {
+    if (get_conference_thread_lock(switch_thread_self())) {
         //switch_mutex_lock(globals.conference_thread_lock);
     first = (conference->list_idx == -1);
     if (first) {
@@ -13838,7 +13839,7 @@ static int conference_list_add(conference_obj_t *conference, participant_thread_
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ol->member->session), SWITCH_LOG_INFO, "Adding member to list: %d utilization:%f part=%d first=%d\n",
                       lowest, calculate_thread_utilization(lowest), globals.conference_thread[lowest].count, first);
 
-    if (get_output_list_lock(lowest, switch_thread_self())) {
+    if (conference_thread_list_lock(lowest, switch_thread_self())) {
         //switch_mutex_lock(globals.conference_thread[lowest].lock);
         if (globals.conference_thread[lowest].loop) {
             participant_thread_data_t *olp;
@@ -13857,11 +13858,11 @@ static int conference_list_add(conference_obj_t *conference, participant_thread_
         }
         conference->participants_per_thread[lowest/MAX_NUMBER_OF_OUTPUT_NTHREADS] += 1;
         globals.conference_thread[lowest].count += 1;
-        get_output_list_unlock(idx);
+        release_conference_thread_list_lock(idx);
     }
     //    switch_mutex_unlock(globals.conference_thread[lowest].lock);
     //switch_mutex_unlock(globals.conference_thread_lock);
-    get_output_unlock();
+    release_conference_thread_lock();
     }
     return lowest;
 }
@@ -13872,8 +13873,8 @@ int conference_list_remove(conference_obj_t *conference, participant_thread_data
     uint32_t i = 0;
     participant_thread_data_t *iol, *iollast = NULL;
 
-    if (get_output_lock(switch_thread_self())) {
-        if (get_output_list_lock(idx, switch_thread_self())) {
+    if (get_conference_thread_lock(switch_thread_self())) {
+        if (conference_thread_list_lock(idx, switch_thread_self())) {
             for (iol = globals.conference_thread[idx].loop; iol; iol = iol->next) {
                 if (iol == ol) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ol->member->session), SWITCH_LOG_INFO,
@@ -13897,10 +13898,10 @@ int conference_list_remove(conference_obj_t *conference, participant_thread_data
             ret = globals.conference_thread[idx].count;
             conference->participants_per_thread[idx/MAX_NUMBER_OF_OUTPUT_NTHREADS] -= 1;
             
-            get_output_list_unlock(idx);
+            release_conference_thread_list_lock(idx);
         }
         //switch_mutex_unlock(globals.conference_thread[idx].lock);
-        get_output_unlock();
+        release_conference_thread_lock();
         switch_mutex_unlock(globals.conference_thread_lock);
     }
     return ret;
