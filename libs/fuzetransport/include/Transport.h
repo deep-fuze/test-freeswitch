@@ -53,7 +53,7 @@ struct NetworkBuffer : public Buffer
     
     // constructor create a new buffer
     //
-    NetworkBuffer(uint32_t size);
+    NetworkBuffer(uint32_t size, uint32_t realSize);
     
     // constructor for creating a "shallow copy" of buffer into network buffer
     //

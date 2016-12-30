@@ -283,8 +283,8 @@ private:
     
     vector<BufferQueue>      recycleQ_;
     MutexLock                rcqLock_;
-    int                      bufNum_;
-    int                      bufAlloc[MAX_QUEUE_SIZE];
+    std::atomic<uint16_t>    bufNum_;
+    std::atomic<uint16_t>    bufAlloc[MAX_QUEUE_SIZE];
 };
 
 //

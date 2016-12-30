@@ -88,8 +88,8 @@ TransportBase::Type GetSrcBaseType(const CongestionInfo& rInfo)
     return src_type;
 }
     
-NetworkBuffer::NetworkBuffer(uint32_t size)
-    : Buffer(size)
+NetworkBuffer::NetworkBuffer(uint32_t size, uint32_t realSize)
+    : Buffer(size, realSize)
     , remotePort_(0)
     , changed_(false)
     , appID_(INVALID_ID)

@@ -33,12 +33,16 @@ struct RawBuffer
 
     uint8_t* pBuf_;
     uint32_t size_;
+    uint32_t realSize_;
 
-    RawBuffer(uint32_t size) : pBuf_(new uint8_t[size]), size_(size) {}
+    RawBuffer(uint32_t size, uint32_t realSize)
+        : pBuf_(new uint8_t[realSize]), size_(size), realSize_(realSize) {}
     ~RawBuffer() { if (pBuf_) delete[] pBuf_; }
 
     uint8_t* getBuf() { return pBuf_; }
     uint32_t size()   { return size_; }
+    uint32_t getRealSize() { return realSize_; }
+    void     setSize(uint32_t size) { size_ = size; }
 
     void setDebugInfo(const char* pFile, int line) {}
 };
@@ -53,7 +57,7 @@ public:
     static Ptr make(uint32_t size) {
         return Ptr(new Buffer(size));
     }
-
+    
     static Ptr makeShallowCopy(const Ptr& rFrom) {
         Ptr sp_copy(new Buffer(*rFrom));
         return sp_copy;
@@ -61,7 +65,7 @@ public:
 
     void setDebugInfo(const char* pFile, int line) {}
 
-    uint32_t getRawSize() { return spRawBuf_->size(); }
+    uint32_t getRealSize() { return spRawBuf_->getRealSize(); }
     void     releaseRawBuffer() { if (spRawBuf_) spRawBuf_.reset(); }
     void     setAsShallowCopy(Buffer::Ptr& spBuf) {
         if (spBuf) {
@@ -70,6 +74,13 @@ public:
             position_ = spBuf->position_;
             spRawBuf_ = spBuf->spRawBuf_;
         }
+    }
+    void recycle(uint32_t size) {
+        if (spRawBuf_->getRealSize() < size) {
+            throw std::runtime_error("Recycling beyond the real size!");
+        }
+        size_ = size;
+        spRawBuf_->setSize(size);
     }
     
     uint32_t getOffset() const      { return offset_; }  
@@ -162,9 +173,14 @@ protected:
         offset_   = 0;
         size_     = size;
         position_ = 0;
-        if (size) {
-            spRawBuf_.reset(new RawBuffer(size));
-        }
+        spRawBuf_.reset(new RawBuffer(size, size));
+    }
+    
+    Buffer(uint32_t size, uint32_t realSize) {
+        offset_   = 0;
+        size_     = size;
+        position_ = 0;
+        spRawBuf_.reset(new RawBuffer(size, realSize));
     }
 
     uint32_t        offset_;
