@@ -2690,8 +2690,8 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             char *pch, *ech;
             int len;
 
-            meeting_id[0] = 0;
-            instance_id[0] = 0;
+            memset(meeting_id, 0, MAX_MEETING_ID_LEN);
+            memset(instance_id, 0, MAX_INSTANCE_ID_LEN);
 
             /* e=sip:LSurazski@fuze.com;transport=tls;ak=K07e263539dfd55f9;id=6669902;inst=5033486 */
             pch = strchr(member->sdpname,'i');
@@ -2735,15 +2735,17 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             }
 
             if (strlen(meeting_id) > 0) {
+                int max_len = strlen(meeting_id) > 8 ? 8 : strlen(meeting_id);
                 if (strlen(conference->meeting_id) > 0) {
                     if (strcmp(conference->meeting_id, meeting_id) != 0) {
+                        memset(conference->meeting_id, 0, MAX_MEETING_ID_LEN);
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR,
                                           "Conference member %s came in with meeting id %s previous meeting id %s\n",
                                           member->mname, meeting_id, conference->meeting_id);
-                        strncpy(conference->meeting_id, meeting_id, strlen(meeting_id));
+                        strncpy(conference->meeting_id, meeting_id, max_len);
                     }
                 } else {
-                    strncpy(conference->meeting_id, meeting_id, strlen(meeting_id));
+                    strncpy(conference->meeting_id, meeting_id, max_len);
                 }
             } else {
                 if (strlen(conference->meeting_id) == 0) {
@@ -2751,13 +2753,14 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                 }
             }
             if (strlen(instance_id) > 0) {
+                int max_len = strlen(instance_id) > 8 ? 8 : strlen(instance_id);
                 if (strlen(conference->instance_id) > 0) {
                     if (strcmp(conference->instance_id, instance_id) != 0) {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "Conference member %s came in with instance id %s previous instance id %s\n",
                                           member->mname, instance_id, conference->instance_id);
                     }
                 } else {
-                    strncpy(conference->instance_id, instance_id, strlen(instance_id));
+                    strncpy(conference->instance_id, instance_id, max_len);
                 }
             }
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "Meeting Id: %s Instance Id: %s Conference member's name: %s\n",
@@ -6762,7 +6765,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
     switch_time_t time_asleep_sum = 0;
     uint32_t behind = 0;
     uint32_t overflow_number = list->idx/MAX_NUMBER_OF_OUTPUT_NTHREADS;
-	switch_time_t status_output_period = PROCESSING_PERIOD;
+    switch_time_t status_output_period = PROCESSING_PERIOD;
 
     /*
      * There's an edge case where we might have 2 threads processing a single queue.  The last thread
@@ -6796,11 +6799,11 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
 
         /* luke todo put in a stop condition */
 
-		if (list->count == 0) {
-			status_output_period = PROCESSING_PERIOD_WHILE_IDLE;
-		} else {
-			status_output_period = PROCESSING_PERIOD;
-		}
+        if (list->count == 0) {
+            status_output_period = PROCESSING_PERIOD_WHILE_IDLE;
+        } else {
+            status_output_period = PROCESSING_PERIOD;
+        }
 
         if ((loop_now - loop_period_start) > status_output_period) {
             float ppp = 0;
@@ -6915,15 +6918,15 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                                           ols->member->id, list->idx, ols->member->conference->list_idx);
                         move_count += 1;
                     }
-					ols = ols->next;
+                    ols = ols->next;
                 }
                 release_conference_thread_list_lock(list->idx);
             }
             if (move_count > 0) {
-				/*
-				 * This lock is expensive as there is only one such lock shared across all threads.  
-				 * Grab this lock with extreme caution!
-				 */
+                /*
+                 * This lock is expensive as there is only one such lock shared across all threads.  
+                 * Grab this lock with extreme caution!
+                 */
                 if (get_conference_thread_lock(switch_thread_self())) {
                     if (conference_thread_list_lock(list->idx, tid)) {
                         int count = 0;
@@ -13394,6 +13397,9 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
             conference = NULL;
             goto end;
         }
+
+        memset(conference->meeting_id, 0, MAX_MEETING_ID_LEN);
+        memset(conference->instance_id, 0, MAX_INSTANCE_ID_LEN);
 
         conference->start_time = switch_epoch_time_now(NULL);
         conference->last_time_active = switch_time_now();
