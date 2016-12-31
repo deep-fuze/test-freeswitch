@@ -8114,15 +8114,19 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 
                 if (rtp_session->cng_pt) {
                     if (send_msg->header.pt != rtp_session->cng_pt) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "adjust pt(cn): %d -> %d\n",
-                                          send_msg->header.pt, rtp_session->cng_pt);
+                        if (rtp_session->adjust_cn_count == 0) {
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "adjust pt(cn): %d -> %d len=%u\n",
+                                              send_msg->header.pt, rtp_session->cng_pt, datalen);
+                        }
                         send_msg->header.pt = rtp_session->cng_pt;
                         adjusted_cn = SWITCH_TRUE;
                     }
                 } else {
                     if (send_msg->header.pt != 13) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "adjust pt(cn): %d -> %d\n",
-                                          send_msg->header.pt, rtp_session->cng_pt);
+                        if (rtp_session->adjust_cn_count == 0) {
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "adjust pt(cn): %d -> %d len=%u\n",
+                                              send_msg->header.pt, rtp_session->cng_pt, datalen);
+                        }
                         send_msg->header.pt = 13;
                         adjusted_cn = SWITCH_TRUE;
                     }
