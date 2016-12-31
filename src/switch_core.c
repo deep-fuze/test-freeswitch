@@ -2629,6 +2629,10 @@ SWITCH_DECLARE(switch_status_t) switch_core_destroy(void)
 	switch_core_session_hupall(SWITCH_CAUSE_SYSTEM_SHUTDOWN);
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CONSOLE, "Clean up modules.\n");
 
+	if (!switch_test_flag((&runtime), SCF_RESTART)) {
+		return SWITCH_STATUS_SUCCESS;
+	}
+
 	switch_loadable_module_shutdown();
 
 	switch_ssl_destroy_ssl_locks();
@@ -2636,6 +2640,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_destroy(void)
 	if (switch_test_flag((&runtime), SCF_USE_SQL)) {
 		switch_core_sqldb_stop();
 	}
+
 	switch_scheduler_task_thread_stop();
 
 	switch_rtp_shutdown();
