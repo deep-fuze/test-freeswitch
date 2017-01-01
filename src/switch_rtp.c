@@ -8007,19 +8007,6 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 	 *  - during an IVR session
 	 *  - when the CN packet is associated with a timeout
 	 */
-	if (*flags & SFF_CNG) {
-		if (!rtp_session->is_fuze_app) {
-			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "dropping CNG packet on session that isn't a fuze_app session\n");
-			send = 0;
-		} else if (*flags & SFF_TIMEOUT) {
-			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "dropping CNG packet associated with TIMEOUT\n");
-			send = 0;
-		} else if (*flags & SFF_IVR_FRAME) {
-			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "dropping CNG packet during IVR\n");
-			send = 0;
-		}
-	}
-
     if (*flags & SFF_CNG) {
         if (!rtp_session->is_fuze_app) {
             send = 0;
