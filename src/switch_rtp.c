@@ -8020,6 +8020,16 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 		}
 	}
 
+    if (*flags & SFF_CNG) {
+        if (!rtp_session->is_fuze_app) {
+            send = 0;
+        } else if (*flags & SFF_TIMEOUT) {
+            send = 0;
+        } else if (*flags & SFF_IVR_FRAME) {
+            send = 0;
+        }
+    }
+
     /* fuze */
     if (send) {
         if (rtp_session->use_webrtc_neteq) {
