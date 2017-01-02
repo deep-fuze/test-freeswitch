@@ -747,7 +747,7 @@ bool ConnectionImpl::Send(Buffer::Ptr spBuffer)
     return pTransceiver_->Send(spBuffer);
 }
 
-bool ConnectionImpl::Send(const unsigned char* buf, size_t size)
+bool ConnectionImpl::Send(const uint8_t* buf, size_t size)
 {
     if (IsActive() == false) {
         int64_t curr = GetTimeMs();
@@ -1209,12 +1209,14 @@ void ConnectionImpl::DeliverRateData(fuze::ConnectionImpl::RateData &rRate)
         if (wpObserver_.expired()) {
             MutexLock scoped(&conLock_);
             if (pObserver_) {
-                pObserver_->OnRateData(rRate.type_, rRate.rate_, rRate.delta_);
+                pObserver_->OnRateData(pAppContext_,
+                                       rRate.type_, rRate.rate_, rRate.delta_);
             }
         }
         else {
             if (ConnectionObserver::Ptr sp = wpObserver_.lock()) {
-                sp->OnRateData(rRate.type_, rRate.rate_, rRate.delta_);
+                sp->OnRateData(pAppContext_,
+                               rRate.type_, rRate.rate_, rRate.delta_);
             }
         }
     }

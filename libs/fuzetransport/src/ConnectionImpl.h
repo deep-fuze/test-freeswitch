@@ -107,7 +107,7 @@ public:
     virtual void SetRemoteAddressPerBuffer(bool enabled);
     virtual bool Start(ConnectionType eType, int mode = 0);
     virtual bool Send(Buffer::Ptr spBuffer);
-    virtual bool Send(const unsigned char* buf, size_t size);
+    virtual bool Send(const uint8_t* buf, size_t size);
     virtual bool GetConnectedType(ConnectionType& rType);
     virtual bool GetLocalAddress(string& rIP, uint16_t& rPort);
     virtual bool GetRemoteAddress(string& rIP, uint16_t& rPort);
@@ -284,6 +284,7 @@ private:
     
     vector<BufferQueue>      recycleQ_;
     MutexLock                rcqLock_;
+    
     std::atomic<uint16_t>    bufNum_;
     std::atomic<uint16_t>    bufAlloc[MAX_QUEUE_SIZE];
 };
@@ -298,7 +299,7 @@ public:
     
     virtual bool Start() { return false; }
     virtual bool Send(Buffer::Ptr spBuffer) { return false; }
-    virtual bool Send(const unsigned char* buf, size_t size) { return false; }
+    virtual bool Send(const uint8_t* buf, size_t size) { return false; }
     virtual void SetConnectionID(int connID) {}
     
     virtual void           Reset()    {}

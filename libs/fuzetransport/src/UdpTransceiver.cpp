@@ -489,7 +489,7 @@ bool UdpTransceiver::Send(Buffer::Ptr spBuffer)
     return true;
 }
 
-bool UdpTransceiver::Send(const unsigned char* buf, size_t size)
+bool UdpTransceiver::Send(const uint8_t* buf, size_t size)
 {
     if (IsActive() == false) {
         ELOG(GetStatusString());
@@ -500,7 +500,10 @@ bool UdpTransceiver::Send(const unsigned char* buf, size_t size)
         return false;
     }
 
-    onWriteEventInternal((char*)buf, size, Buffer::Ptr());
+    sockaddr_in remote = pConn_->GetRemoteAddress().SocketAddress();
+
+    SendPayload((char*)buf, size, remote);
+    
     return true;
 }
 
@@ -525,55 +528,57 @@ void UdpTransceiver::OnWriteEvent()
             }
         }
         
-        char* p_buf = (char*)sp_buf->getBuf();
-        long  size  = sp_buf->size();
-        onWriteEventInternal(p_buf, size, sp_buf);
+        sockaddr_in remote;
+        
+        if (!connectedUdp_) {
+            // first set connection remote as default remote address
+            remote = pConn_->GetRemoteAddress().SocketAddress();
+            if (pConn_->IsRemotePerBuffer()) {
+                Address addr;
+                if (NetworkBuffer::Ptr sp_net =
+                        fuze_dynamic_pointer_cast<NetworkBuffer>(sp_buf)) {
+                    addr.SetIP(sp_net->remoteIP_.c_str());
+                    addr.SetPort(sp_net->remotePort_);
+                    remote = addr.SocketAddress();
+                }
+            }
+        }
+        
+        SendPayload((char*)sp_buf->getBuf(), sp_buf->size(), remote);
     }
 }
 
-void UdpTransceiver::onWriteEventInternal(char* p_buf, long  size, Buffer::Ptr sp_buf)
+void UdpTransceiver::SendPayload(char* pData, long dataLen, sockaddr_in& rRemote)
 {
-    long sent = 0;
-    if (!p_buf || size == 0) {
+    if (!pData || !dataLen) {
         WLOG("0 bytes was requested to send - ignored");
         return;
     }
 
     if (pConn_->IsPayloadType(Connection::STUN)) {
-        if (stun::IsStun(p_buf, size)) {
-            MLOG(toStr(stun::GetType(p_buf, size)) << " " <<
-                 toStr(stun::GetMethod(p_buf, size)) <<
-                 " (" << size << "B)");
-            stun::PrintStun(p_buf, size);
+        if (stun::IsStun(pData, dataLen)) {
+            MLOG(toStr(stun::GetType(pData, dataLen)) << " " <<
+                 toStr(stun::GetMethod(pData, dataLen)) <<
+                 " (" << dataLen << "B)");
+            stun::PrintStun(pData, dataLen);
         }
     }
+
+    long sent = 0;
 
     if (connectedUdp_) {
-        sent = send(socket_, p_buf, size, 0);
+        sent = send(socket_, pData, dataLen, 0);
     }
     else {
-        // first set connection remote as default remote address
-        sockaddr_in remote = pConn_->GetRemoteAddress().SocketAddress();
-        
-        if (pConn_->IsRemotePerBuffer()) {
-            Address addr;
-            if (NetworkBuffer::Ptr sp_net =
-                    fuze_dynamic_pointer_cast<NetworkBuffer>(sp_buf)) {
-                addr.SetIP(sp_net->remoteIP_.c_str());
-                addr.SetPort(sp_net->remotePort_);
-                remote = addr.SocketAddress();
-            }
-        }
-        
-        sent = sendto(socket_, p_buf, size, 0,
-                      (sockaddr*)&remote, sizeof(sockaddr));
+        sent = sendto(socket_, pData, dataLen, 0,
+                      (sockaddr*)&rRemote, sizeof(sockaddr));
     }
 
-    if (sent == size) {
+    if (sent == dataLen) {
         pConn_->OnBytesSent((uint32_t)sent);
     }
     else if (sent > 0) {
-        WLOG("Only sent " << sent << "/" << size << "B");
+        WLOG("Only sent " << sent << "/" << dataLen << "B");
     }
     else { // -1 returned
         static int s_last_error;

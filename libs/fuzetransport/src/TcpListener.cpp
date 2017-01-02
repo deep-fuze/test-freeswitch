@@ -236,7 +236,7 @@ bool TcpListener::Send(Buffer::Ptr spBuffer)
     return false;
 }
 
-bool TcpListener::Send(const unsigned char* buf, size_t size)
+bool TcpListener::Send(const uint8_t* buf, size_t size)
 {
     ELOG("Sending is not allowed");
     return false;

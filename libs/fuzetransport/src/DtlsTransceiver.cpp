@@ -470,7 +470,7 @@ bool DtlsTransceiver::Send(Buffer::Ptr spBuffer)
     return true;
 }
 
-bool DtlsTransceiver::Send(const unsigned char* buf, size_t size)
+bool DtlsTransceiver::Send(const uint8_t* buf, size_t size)
 {
     if (IsActive() == false) {
         ELOG(GetStatusString());
@@ -488,7 +488,7 @@ bool DtlsTransceiver::Send(const unsigned char* buf, size_t size)
         return false;
     }
 
-    onWriteEventInternal((unsigned char*)buf, size);
+    EncryptAndSend((uint8_t*)buf, size);
     return true;
 }
 
@@ -756,15 +756,14 @@ void DtlsTransceiver::OnWriteEvent()
                 sendQ_.pop();
             }
 
-            if (sp_buf)
-            {
-                onWriteEventInternal(sp_buf->getBuf(), sp_buf->size());
+            if (sp_buf) {
+                EncryptAndSend(sp_buf->getBuf(), sp_buf->size());
             }
         }
     }
 }
 
-void DtlsTransceiver::onWriteEventInternal(uint8_t* p_buf, uint32_t buf_len)
+void DtlsTransceiver::EncryptAndSend(uint8_t* p_buf, uint32_t buf_len)
 {
 #ifdef DTLS_SRTP
     // encrypt sending buffer using srtp

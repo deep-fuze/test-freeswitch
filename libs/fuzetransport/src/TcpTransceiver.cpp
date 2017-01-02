@@ -842,7 +842,7 @@ bool TcpTransceiver::Send(Buffer::Ptr spBuffer)
     return true;
 }
 
-bool TcpTransceiver::Send(const unsigned char* buf, size_t size)
+bool TcpTransceiver::Send(const uint8_t* buf, size_t size)
 {
     Buffer::Ptr sp_buf = GetBuffer(size);
     memcpy(sp_buf->getBuf(), buf, size);

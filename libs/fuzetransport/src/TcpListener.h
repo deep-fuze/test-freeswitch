@@ -21,7 +21,7 @@ public:
     // Implement Transceiver Interfaces
     virtual bool Start();
     virtual bool Send(Buffer::Ptr spBuffer);
-    virtual bool Send(const unsigned char* buf, size_t size);
+    virtual bool Send(const uint8_t* buf, size_t size);
     virtual void SetConnectionID(int connID);
     virtual ConnectionType ConnType();
 

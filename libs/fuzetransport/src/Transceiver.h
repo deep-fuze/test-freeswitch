@@ -31,7 +31,7 @@ class Transceiver : public NotCopyable
 public:
     virtual bool Start() = 0;
     virtual bool Send(Buffer::Ptr spBuffer)  = 0;
-    virtual bool Send(const unsigned char* buf, size_t size) = 0;
+    virtual bool Send(const uint8_t* buf, size_t size) = 0;
     virtual void SetConnectionID(int connID) = 0;
     virtual ConnectionType ConnType()  = 0;
     

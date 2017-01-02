@@ -21,7 +21,7 @@ public:
     // Implement Transceiver Interfaces
     virtual bool Start();
     virtual bool Send(Buffer::Ptr spBuffer);
-    virtual bool Send(const unsigned char* buf, size_t size);
+    virtual bool Send(const uint8_t* buf, size_t size);
     virtual void SetConnectionID(int connID);
     virtual ConnectionType ConnType();
 
@@ -31,15 +31,15 @@ public:
 private:
     
     bool CreateLibEvent(uint16_t timeout);
-    
     bool HandleRemoteChange(const Address& rRecvAddr);
+    void SendPayload(char* pData, long dataLen, sockaddr_in& rRemote);
     
     // Interface for libevent callback
     static void OnLibEvent(evutil_socket_t sock, short what, void* pArg);
     void OnReadEvent();
     void OnWriteEvent();
     void OnTimeOutEvent();
-    void onWriteEventInternal(char* p_buf, long  size, Buffer::Ptr sp_buf);
+    
     
     int                 connID_;
     ConnectionImpl*     pConn_;

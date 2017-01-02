@@ -60,6 +60,21 @@ typedef struct {
 } __sockaddr_t;
 
 typedef void (*trace_cb_t)(int16_t level, const char *msg);
+    
+/*
+ enum RateType
+ {
+    RT_LOCAL_SEND  = 0
+    RT_LOCAL_RECV  = 1
+    RT_REMOTE_SEND = 2
+    RT_REMOTE_RECV = 3
+ };
+*/
+typedef void (*rate_cb_t)(void*    conn,
+                          uint16_t type, /* as shown above */
+                          uint16_t rateKbps,
+                          uint16_t arrivedTime);
+void fuze_transport_register_rate_cb(rate_cb_t rate_cb);
 
 extern void fuze_transport_init(int enable_server_mode);
 

@@ -97,7 +97,7 @@ public:
     // Implement Transceiver Interfaces
     virtual bool Start();
     virtual bool Send(Buffer::Ptr spBuffer);
-    virtual bool Send(const unsigned char* buf, size_t size);
+    virtual bool Send(const uint8_t* buf, size_t size);
     virtual void SetConnectionID(int connID);
     virtual ConnectionType ConnType();
     
@@ -127,9 +127,9 @@ private:
     static void OnLibEvent(evutil_socket_t sock, short what, void* pArg);
     void OnReadEvent();
     void OnWriteEvent();
-    void onWriteEventInternal(uint8_t* p_buf, uint32_t buf_len);
     void OnTimeOutEvent();
-    
+
+    void EncryptAndSend(uint8_t* p_buf, uint32_t buf_len);
     void SendData(Buffer::Ptr spData, const Address& rRemote);
     
     static const int    MAX_UDP_SIZE = 65535;

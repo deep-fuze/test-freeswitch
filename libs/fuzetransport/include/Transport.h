@@ -104,7 +104,8 @@ public:
     // rateKbps    : indicates bandwidth rate
     // arrivedTime : indicates report data arrival time (expected every second)
     //
-    virtual void OnRateData(RateType /*type*/,
+    virtual void OnRateData(void*    /*pContext*/,
+                            RateType /*type*/,
                             uint16_t /*rateKbps*/,
                             uint16_t /*arrivedTime*/) {}
     
@@ -207,7 +208,7 @@ public:
     
     // There may be some delay to send data
     virtual bool Send(Buffer::Ptr spBuffer) = 0;
-    virtual bool Send(const unsigned char* buf, size_t size) = 0;
+    virtual bool Send(const uint8_t* buf, size_t size) = 0;
     
     // Query the connection info
     virtual bool GetConnectedType(ConnectionType& rType) = 0;
