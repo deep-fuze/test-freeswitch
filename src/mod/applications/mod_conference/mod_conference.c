@@ -181,7 +181,6 @@ typedef enum {
     MFLAG_PAUSE_RECORDING = (1 << 21),
     MFLAG_ACTIVE_TALKER = (1 << 22),
     MFLAG_NOTIFY_ACTIVITY = (1 << 23),
-    MFLAG_LOG_STATS = (1 << 24),
     MFLAG_INDICATE_LOCK_MUTE = (1 << 25),
     MFLAG_INDICATE_UNLOCK_MUTE = (1 << 26),
     MFLAG_CAN_MUTE = (1 << 27),
@@ -358,7 +357,6 @@ typedef struct {
     int pending_event;
     int leadin_over;
     switch_io_flag_t io_flags;
-    switch_time_t last_stat_report_time_ms;
     switch_thread_id_t tid;
 
     switch_time_t rx_time, max_time, rx_period_start;
@@ -992,7 +990,6 @@ static void memberFlagToString(member_flag_t flag, char *str)
     if (flag & MFLAG_PAUSE_RECORDING) { strcat(str,"pause_recording "); }
     if (flag & MFLAG_ACTIVE_TALKER) { strcat(str,"active_talker "); }
     if (flag & MFLAG_NOTIFY_ACTIVITY) { strcat(str,"notify_activity "); }
-    if (flag & MFLAG_LOG_STATS) { strcat(str,"log_stats "); }
 
     if (flag & MFLAG_INDICATE_LOCK_MUTE) { strcat(str,"ind_lock_mute "); }
     if (flag & MFLAG_INDICATE_UNLOCK_MUTE) { strcat(str,"ind_unlock_mute "); }
@@ -2703,8 +2700,10 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                         len = MAX_MEMBERNAME_LEN - 10;
                     }
                     strncpy(member->mname, pch+4, len-4);
+                    switch_channel_set_variable(member->channel, "attendee_name", member->mname);
                 } else {
                     switch_snprintf(member->mname, sizeof(member->mname)-1, "m%d", member->id);
+                    switch_channel_set_variable(member->channel, "attendee_name", member->mname);
                 }
             }
             if ((pch = strstr(member->sdpname, "id=")) != 0) {
@@ -2726,12 +2725,15 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
 
             if (strstr(member->sdpname, "(chrome)") != 0) {
                 strncat(member->mname, "(chrome)", MAX_MEMBERNAME_LEN);
+                switch_channel_set_variable(member->channel, "attendee_name", member->mname);
             } else if (strstr(member->sdpname,"(mozilla)") != 0) {
                 strncat(member->mname, "(firefox)", MAX_MEMBERNAME_LEN);
+                switch_channel_set_variable(member->channel, "attendee_name", member->mname);
             }
 
             if (strlen(member->mname) == 0) {
                 switch_snprintf(member->mname, sizeof(member->mname)-1, "m%d", member->id);
+                switch_channel_set_variable(member->channel, "attendee_name", member->mname);
             }
 
             if (strlen(meeting_id) > 0) {
@@ -2743,6 +2745,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                                           "Conference member %s came in with meeting id %s previous meeting id %s\n",
                                           member->mname, meeting_id, conference->meeting_id);
                         strncpy(conference->meeting_id, meeting_id, max_len);
+                        switch_channel_set_variable(member->channel, "meeting", conference->meeting_id);
                     }
                 } else {
                     strncpy(conference->meeting_id, meeting_id, max_len);
@@ -2750,6 +2753,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             } else {
                 if (strlen(conference->meeting_id) == 0) {
                     switch_snprintf(conference->meeting_id, sizeof(conference->meeting_id)-1, "%s", conference->name);
+                    switch_channel_set_variable(member->channel, "meeting", conference->meeting_id);
                 }
             }
             if (strlen(instance_id) > 0) {
@@ -2761,6 +2765,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                     }
                 } else {
                     strncpy(conference->instance_id, instance_id, max_len);
+                    switch_channel_set_variable(member->channel, "meeting_instance", conference->instance_id);
                 }
             }
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "Meeting Id: %s Instance Id: %s Conference member's name: %s\n",
@@ -2768,9 +2773,11 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
         } else {
             if (strlen(conference->meeting_id) == 0) {
                 switch_snprintf(conference->meeting_id, sizeof(conference->meeting_id)-1, "%s", conference->name);
+                switch_channel_set_variable(member->channel, "meeting", conference->meeting_id);
             }
             if (strlen(member->mname) == 0) {
                 switch_snprintf(member->mname, sizeof(member->mname)-1, "m%d", member->id);
+                switch_channel_set_variable(member->channel, "attendee_name", member->mname);
             }
         }
 
@@ -5841,7 +5848,7 @@ static void check_agc_levels(conference_member_t *member)
 }
 
 
-#define MIN_STAT_REPORT_INTERVAL_MS 2 * 1000 //2 sec(s)
+#define MIN_STAT_REPORT_INTERVAL_MS 1 * 1000 /* 1 sec */
 #define STATS_LEADIN_TIME_MS (5 * 1000) //5secs; Initial time to ignore to compensate for media lag after signaling
 
 
@@ -5854,7 +5861,6 @@ void init_input_loop(input_loop_data_t *il, conference_member_t *member) {
     il->diff_level = 400;
     il->session = member->session;
     il->io_flags = SWITCH_IO_FLAG_NONE;
-    il->last_stat_report_time_ms = switch_micro_time_now() / 1000;
     il->tid = switch_thread_self();
     il->session = member->session;
     il->channel = switch_core_session_get_channel(il->session);
@@ -5999,30 +6005,8 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
         il->io_flags &= ~SWITCH_IO_FLAG_ACTIVE_TALKER;
     }
 
-#if 0
-    status = switch_core_session_read_frame_w_time(session, &il->read_frame, il->io_flags, 0, &send_time);
-#else
     status = switch_core_session_fast_read_frame_from_socket(session, &il->read_frame, il->io_flags, 0, &send_time);
     status = switch_core_session_fast_read_frame_from_jitterbuffer(session, &il->read_frame, il->io_flags, 0, &send_time);
-#endif
-
-    if (!il->leadin_over && il->read_frame) {
-        switch_time_t now = switch_micro_time_now();
-        if (now/1000 > il->last_stat_report_time_ms + STATS_LEADIN_TIME_MS) {
-            switch_clear_flag(il->read_frame, SFF_RTP_EVENT);
-            il->leadin_over = 1;
-        }
-    } else if (il->read_frame && ((il->read_frame->flags & SFF_RTP_EVENT) || il->pending_event)) {
-        switch_time_t now = switch_micro_time_now();
-        if (now/1000 > il->last_stat_report_time_ms + MIN_STAT_REPORT_INTERVAL_MS) {
-            switch_set_flag_locked(member, MFLAG_LOG_STATS);
-            il->last_stat_report_time_ms = now/1000;
-            il->pending_event = 0;
-        } else {
-            il->pending_event = 1;
-        }
-        switch_clear_flag(il->read_frame, SFF_RTP_EVENT);
-    }
 
     if (status == SWITCH_STATUS_FALSE || !il->read_frame || !il->read_frame->datalen) {
         /*
@@ -6514,7 +6498,7 @@ switch_bool_t release_conference_thread_lock() {
 
 
 
-#define PERIODIC_STATS_INTERVAL_MS (5 * 60 * 1000) //5 mins
+#define PERIODIC_STATS_INTERVAL_MS (1 * 60 * 1000) /* 1 min */
 
 switch_frame_t *process_file_play(conference_member_t *member,
                                   switch_frame_t *write_frame,
@@ -6651,6 +6635,8 @@ typedef enum {
 OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switch_timer_t *timer);
 OUTPUT_LOOP_RET process_participant_output_end_member(participant_thread_data_t *ols);
 SWITCH_DECLARE(void) switch_close_transport(switch_channel_t *channel);
+SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int level_in, int level_out, int active);
+SWITCH_DECLARE(void) switch_rtp_reset_rtp_stats(switch_channel_t *channel);
 
 /* marshall frames from the conference (or file or tts output) to the call leg */
 /* NB. this starts the input thread after some initial setup for the call leg */
@@ -7285,35 +7271,24 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         ols->monitor_ticks = 0;
     }
 
-    if (ols->check_ticks++ >= ols->ticks_per_stats_check) {
-        void *neteq_inst = switch_core_get_neteq_inst(member->session);
-        if (neteq_inst) {
-            WebRtcNetEQ_NetworkStatistics nwstats;
-            if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
-                    int val = nwstats.currentBufferSize;
-
-                if (val > RTP_EVENT_JB_SIZE_THRESHOLD_MS) {
-                    switch_core_ioctl_stats(member->session, SET_JB_SIZE, &val);
-                    switch_core_ioctl_stats(member->session, SET_EVENT_LONG_JB, NULL);
-                    switch_set_flag(member, MFLAG_LOG_STATS);
-                }
-            }
+    if (ols->ild->leadin_over) {
+        if (ols->check_ticks++ >= ols->ticks_per_stats_check) {
+            switch_rtp_update_rtp_stats(member->channel, member->score, -1 /* level_out */, member->one_of_active);
+            ols->check_ticks = 0;
         }
-        ols->check_ticks = 0;
+    } else {
+        if (ols->check_ticks++ >= 50) {
+            ols->ild->leadin_over = 1;
+            ols->check_ticks = 0;
+        }
     }
     
-    if (ols->ticks++ >= ols->ticks_per_interval || switch_test_flag(member, MFLAG_LOG_STATS)) {
-        if (switch_test_flag(member, MFLAG_LOG_STATS)) {
-            switch_bool_t do_event = SWITCH_TRUE;
-            switch_clear_flag_locked(member, MFLAG_LOG_STATS);
-            switch_core_ioctl_stats(member->session, UPDATE_PERIODIC_STATS, &do_event);
-            switch_core_log_periodic(member->session, SWITCH_FALSE, SWITCH_FALSE);
-        } else {
-            switch_bool_t do_event = SWITCH_FALSE;
-            switch_core_ioctl_stats(member->session, UPDATE_PERIODIC_STATS, &do_event);
-            ols->ticks = 0;
-            switch_core_log_periodic(member->session, SWITCH_TRUE, SWITCH_FALSE);
-        }
+    if (ols->ticks++ >= ols->ticks_per_interval) {
+        switch_bool_t do_event = SWITCH_FALSE;
+        switch_core_ioctl_stats(member->session, UPDATE_PERIODIC_STATS, &do_event);
+        switch_core_log_periodic(member->session, SWITCH_FALSE, SWITCH_FALSE);
+        switch_rtp_reset_rtp_stats(member->channel);
+        ols->ticks = 0;
     }
     
     if (switch_channel_test_flag(member->channel, CF_CONFERENCE_ADV)) {

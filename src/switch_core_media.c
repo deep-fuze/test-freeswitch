@@ -230,6 +230,16 @@ static const char* rtp_stat_name[RTP_MAX_STAT] =
     [RTP_JITTER] = "rtp_audio_rtcp_jitter_ms",
     [RTP_MAX_JITTER] = "rtp_audio_rtcp_max_jitter_ms",
     [RTP_CUR_JB_SIZE] = "rtp_audio_cur_jb_size",
+    [RTP_START_TIME] = "start_time",
+    [RTP_DURATION] = "duration",
+    [RTP_JITTER_BUFFER] = "event-jitter-buffer",
+    [RTP_ACTIVE_SPEAKER] = "event-speaker-selection",
+    [RTP_SEND_LEVEL] = "event-active-spk",
+    [RTP_RECV_LEVEL] = "event-active-mic",
+    [RTP_CUM_LOST] = "event-cum-lost",
+    [RTP_PER_LOST] = "event-lost",
+    [RTP_RECV_RATE] = "event-recv-rate",
+    [RTP_SEND_RATE] = "event-send-rate",
 };
 
 static const char* rtp_event_name[RTP_EVENT_MAX] =
@@ -1561,6 +1571,15 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
     switch_strftime_nocheck(start, &retsize, sizeof(start), fmt, &tm);
     set_periodic_stats_value(session, RTP_CURRENT_TIME, start, type);
 
+    switch_time_exp_lt(&tm, stats->call_start_time);
+    switch_strftime_nocheck(start, &retsize, sizeof(start), fmt, &tm);
+    set_periodic_stats_value(session, RTP_START_TIME, start, type);
+
+    if (event_trigger == SWITCH_FALSE) {
+        snprintf(value, sizeof(value), "%d", stats->duration);
+        set_periodic_stats_value(session, RTP_DURATION, value, type);
+    }
+
     if ((vval = switch_channel_get_variable(channel, "channel_type"))) {
         if (switch_channel_update_running_stats(channel, "channel_type", vval) < 0) {
             switch_channel_set_running_stats(channel, "channel_type", vval);
@@ -1571,6 +1590,18 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
         if (switch_channel_update_running_stats(channel, "conference_id", vval) < 0) {
             switch_channel_set_running_stats(channel, "conference_id", vval);
         }
+    }
+
+    if ((vval = switch_channel_get_variable(channel, "meeting"))) {
+		switch_channel_set_running_stats(channel, "meeting", vval);
+    }
+
+    if ((vval = switch_channel_get_variable(channel, "meeting_instance"))) {
+        switch_channel_set_running_stats(channel, "meeting_instance", vval);
+    }
+
+    if ((vval = switch_channel_get_variable(channel, "attendee_name"))) {
+        switch_channel_set_running_stats(channel, "attendee_name", vval);
     }
 
     if (stats->last_event) {
@@ -1619,15 +1650,15 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
     }
 
     if (event_trigger == SWITCH_FALSE || (event & RTP_EVENT_HIGH_CONSECUTIVE_PACKET_LOSS) ||
-                                (event & RTP_EVENT_LONG_JITTER_BUFFER)) {
+        (event & RTP_EVENT_LONG_JITTER_BUFFER)) {
         if ((event_trigger == SWITCH_TRUE) && (event & RTP_EVENT_HIGH_CONSECUTIVE_PACKET_LOSS))
             switch_core_media_set_rtp_event(session, RTP_EVENT_HIGH_CONSECUTIVE_PACKET_LOSS, type);
 
-                if (switch_rtp_get_webrtc_neteq(engine->rtp_session)) {
-                    WebRtcNetEQ_ProcessingActivity neteq_stats;
-                    void *neteq_inst = switch_core_get_neteq_inst(session);
+        if (switch_rtp_get_webrtc_neteq(engine->rtp_session)) {
+            WebRtcNetEQ_ProcessingActivity neteq_stats;
+            void *neteq_inst = switch_core_get_neteq_inst(session);
             if (neteq_inst) {
-                            WebRtcNetEQ_GetProcessingActivity(neteq_inst, &neteq_stats, 0);
+                WebRtcNetEQ_GetProcessingActivity(neteq_inst, &neteq_stats, 0);
                 snprintf(value, sizeof(value), "%d", neteq_stats.total_lost_count);
             } else {
                 snprintf(value, sizeof(value), "%d", stats->cumulative_lost);
@@ -1652,6 +1683,21 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
 
         snprintf(value, sizeof(value), "%u", switch_rtp_get_packets_received(engine->rtp_session));
         set_periodic_stats_value(session, RTP_PACKET_COUNT, value, type);
+    }
+
+    if (event_trigger == SWITCH_FALSE) {
+        if (strlen(stats->jitter) > 0) {
+            set_periodic_stats_value(session, RTP_JITTER_BUFFER, stats->jitter, type);
+        }
+        if (strlen(stats->recv_level) > 0) {
+            set_periodic_stats_value(session, RTP_RECV_LEVEL, stats->recv_level, type);
+        }
+        if (strlen(stats->send_level) > 0) {
+            set_periodic_stats_value(session, RTP_SEND_LEVEL, stats->send_level, type);
+        }
+        if (strlen(stats->active_speaker) > 0) {
+            set_periodic_stats_value(session, RTP_ACTIVE_SPEAKER, stats->active_speaker, type);
+        }
     }
 }
 
@@ -3313,20 +3359,20 @@ static void clear_pmaps(switch_rtp_engine_t *engine)
 
 switch_bool_t is_fuze_app(sdp_session_t *sdp, const char *r_sdp) {
     /* fuze app*/
-	if (sdp->sdp_subject) {
-		if (strstr(sdp->sdp_subject, "FuzeMeeting")) { return SWITCH_TRUE; }
-		if (strstr(sdp->sdp_subject, "chrome")) { return SWITCH_TRUE; }
-		if (strstr(sdp->sdp_subject, "mozilla")) { return SWITCH_TRUE; }
-	}
-	if (sdp->sdp_origin) {
-		/* firefox */
-		if (sdp->sdp_origin->o_username) {
-			if (strstr(sdp->sdp_origin->o_username, "ozilla")) { return SWITCH_TRUE; }
-			if (strstr(sdp->sdp_origin->o_username, "chrome")) { return SWITCH_TRUE; }
-			if (strstr(sdp->sdp_origin->o_username, "FuzeMeeting")) { return SWITCH_TRUE; }
-		}
-		/* either chrome OR passthrough freeswitch */
-	}
+    if (sdp->sdp_subject) {
+        if (strstr(sdp->sdp_subject, "FuzeMeeting")) { return SWITCH_TRUE; }
+        if (strstr(sdp->sdp_subject, "chrome")) { return SWITCH_TRUE; }
+        if (strstr(sdp->sdp_subject, "mozilla")) { return SWITCH_TRUE; }
+    }
+    if (sdp->sdp_origin) {
+        /* firefox */
+        if (sdp->sdp_origin->o_username) {
+            if (strstr(sdp->sdp_origin->o_username, "ozilla")) { return SWITCH_TRUE; }
+            if (strstr(sdp->sdp_origin->o_username, "chrome")) { return SWITCH_TRUE; }
+            if (strstr(sdp->sdp_origin->o_username, "FuzeMeeting")) { return SWITCH_TRUE; }
+        }
+        /* either chrome OR passthrough freeswitch */
+    }
     if (strstr(r_sdp, "experiments/rtp-hdrext/abs-send-time")) { return SWITCH_TRUE; }
     return SWITCH_FALSE;
 }
@@ -3334,19 +3380,19 @@ switch_bool_t is_fuze_app(sdp_session_t *sdp, const char *r_sdp) {
 const char * get_fuze_app_type(sdp_session_t *sdp, const char *r_sdp) {
     /* return false; */
     /* fuze app*/
-	if (sdp->sdp_subject) {
-		if (strstr(sdp->sdp_subject, "FuzeMeeting")) { return "FuzeMeeting"; }
-		if (strstr(sdp->sdp_subject, "chrome")) { return "chrome"; }
-		if (strstr(sdp->sdp_subject, "mozilla")) { return "mozilla"; }
-	}
-	if (sdp->sdp_origin) {
-		/* firefox */
-		if (sdp->sdp_origin->o_username) {
-			if (strstr(sdp->sdp_origin->o_username, "ozilla")) { return "mozilla"; }
-			if (strstr(sdp->sdp_origin->o_username, "chrome")) { return "chrome"; }
-			if (strstr(sdp->sdp_origin->o_username, "FuzeMeeting")) { return "FuzeMeeting"; }
-		}
-	}
+    if (sdp->sdp_subject) {
+        if (strstr(sdp->sdp_subject, "FuzeMeeting")) { return "FuzeMeeting"; }
+        if (strstr(sdp->sdp_subject, "chrome")) { return "chrome"; }
+        if (strstr(sdp->sdp_subject, "mozilla")) { return "mozilla"; }
+    }
+    if (sdp->sdp_origin) {
+        /* firefox */
+        if (sdp->sdp_origin->o_username) {
+            if (strstr(sdp->sdp_origin->o_username, "ozilla")) { return "mozilla"; }
+            if (strstr(sdp->sdp_origin->o_username, "chrome")) { return "chrome"; }
+            if (strstr(sdp->sdp_origin->o_username, "FuzeMeeting")) { return "FuzeMeeting"; }
+        }
+    }
     /* either chrome OR passthrough freeswitch */
     if (strstr(r_sdp, "experiments/rtp-hdrext/abs-send-time")) { return "chrome"; }
     return NULL;
@@ -3578,12 +3624,12 @@ SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *s
 
     /* set session name */
     if (is_fuze_app(sdp, r_sdp)) {
-		if (sdp->sdp_subject) {
-			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
-							  "setting fuze_app for this session subject:%s app_type:%s\n", sdp->sdp_subject, get_fuze_app_type(sdp, r_sdp));
-		}
+        if (sdp->sdp_subject) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                              "setting fuze_app for this session subject:%s app_type:%s\n", sdp->sdp_subject, get_fuze_app_type(sdp, r_sdp));
+        }
         switch_channel_set_variable(session->channel, "fuze_app", get_fuze_app_type(sdp, r_sdp));
-		switch_rtp_set_fuze_app(session->channel, SWITCH_TRUE);
+        switch_rtp_set_fuze_app(session->channel, SWITCH_TRUE);
     }
 
     /* set email */
@@ -8829,23 +8875,23 @@ SWITCH_DECLARE(void) switch_core_media_set_session_name(switch_core_session_t *s
         const char *uuid;
         switch_core_session_t *other_session;
 
-		if (sdp->sdp_subject) {
-			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
-							  "setting fuze_app for this session subject:%s app_type:%s\n", sdp->sdp_subject, get_fuze_app_type(sdp, r_sdp));
-		}
+        if (sdp->sdp_subject) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                              "setting fuze_app for this session subject:%s app_type:%s\n", sdp->sdp_subject, get_fuze_app_type(sdp, r_sdp));
+        }
         switch_channel_set_variable(session->channel, "fuze_app", get_fuze_app_type(sdp, r_sdp));
-		switch_rtp_set_fuze_app(session->channel, SWITCH_TRUE);
+        switch_rtp_set_fuze_app(session->channel, SWITCH_TRUE);
 
         if ((uuid = switch_channel_get_partner_uuid(session->channel)) &&
             (other_session = switch_core_session_locate(uuid))) {
             switch_channel_t *other_channel = switch_core_session_get_channel(other_session);
             if (other_channel) {
-				if (sdp->sdp_subject) {
-					switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(other_session), SWITCH_LOG_INFO,
-									  "setting fuze_app for this session as well subect:%s app_type%s\n", sdp->sdp_subject, get_fuze_app_type(sdp, r_sdp));
-				}
+                if (sdp->sdp_subject) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(other_session), SWITCH_LOG_INFO,
+                                      "setting fuze_app for this session as well subect:%s app_type%s\n", sdp->sdp_subject, get_fuze_app_type(sdp, r_sdp));
+                }
                 switch_channel_set_variable(session->channel, "fuze_app", get_fuze_app_type(sdp, r_sdp));
-				switch_rtp_set_fuze_app(other_channel, SWITCH_TRUE);
+                switch_rtp_set_fuze_app(other_channel, SWITCH_TRUE);
             }
             switch_core_session_rwunlock(other_session);
         }

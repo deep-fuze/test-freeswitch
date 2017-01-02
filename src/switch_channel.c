@@ -137,13 +137,16 @@ typedef enum {
 	LP_ORIGINATEE
 } switch_originator_type_t;
 
+#define RUNNING_STAT_KEY_LEN 48
+#define RUNNING_STAT_VALUE_LEN 976
+
 typedef struct {
-	char key[48];
-	char value[80];
+	char key[RUNNING_STAT_KEY_LEN];
+	char value[RUNNING_STAT_VALUE_LEN];
 	char mask;
 } running_stat_t;
 
-#define MAX_RUNNING_STATS 25 
+#define MAX_RUNNING_STATS 50
 
 struct switch_channel {
 	char *name;
@@ -5447,6 +5450,11 @@ SWITCH_DECLARE(void) switch_channel_publish_call_events(switch_channel_t *channe
 			break;
 		}
 		cur_idx = switch_get_next_running_stat(channel, cur_idx, &key, &value);
+#if 0
+		if (key && value) {
+			switch_log_printf(SWITCH_CHANNEL_CHANNEL_LOG(channel), SWITCH_LOG_DEBUG, "publish:%s->%s\n", key, value);
+		}
+#endif
 	}
 	channel->call_events_count++;
 

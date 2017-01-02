@@ -54,6 +54,7 @@
 #include <switch_ssl.h>
 #include "include/Transport_c.h"
 #include "include/ProtoBufIf.h"
+#include "interface/webrtc_neteq_if.h"
 
 /*
  * frequency for printing out packet stats
@@ -978,9 +979,9 @@ static switch_status_t rtp_sendto(switch_rtp_t *rtp_session, switch_socket_t *so
     if (rtp_session && rtp_session->rtp_conn && where) {
         return fuze_transport_socket_write(rtp_session->rtp_conn, (const uint8_t *) buf, *len);
     } 
-	return SWITCH_STATUS_SUCCESS;
+    return SWITCH_STATUS_SUCCESS;
 #ifdef OLD_TRANSPORT
-	else {
+    else {
         return switch_socket_sendto(sock, where, flags, buf, len);
     }
 #endif
@@ -1020,9 +1021,9 @@ static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t
         }
         return ret;
     }
-	return SWITCH_STATUS_SUCCESS;
+    return SWITCH_STATUS_SUCCESS;
 #ifdef OLD_TRANSPORT
-	else {
+    else {
         switch_status_t ret = switch_socket_recvfrom(from, sock, flags, buf, len);
         
 #ifdef CHECK_FOR_LARGE_PKTS
@@ -1051,9 +1052,9 @@ static switch_status_t rtcp_sendto(switch_rtp_t *rtp_session, switch_socket_t *s
     if (rtp_session && rtp_session->rtcp_conn && where) {
         return fuze_transport_socket_write(rtp_session->rtcp_conn, (const uint8_t *) buf, *len);
     }
-	return SWITCH_STATUS_SUCCESS;
+    return SWITCH_STATUS_SUCCESS;
 #ifdef OLD_TRANSPORT
-	else {
+    else {
         return switch_socket_sendto(sock, where, flags, buf, len);
     }
 #endif
@@ -1094,9 +1095,9 @@ static switch_status_t rtcp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_
         }
         return ret;
     }
-	return SWITCH_STATUS_SUCCESS;
+    return SWITCH_STATUS_SUCCESS;
 #ifdef OLD_TRANSPORT
-	else {
+    else {
         return switch_socket_recvfrom(from, sock, flags, buf, len);
     }
 #endif
@@ -1126,8 +1127,8 @@ SWITCH_DECLARE(void) switch_close_transport(switch_channel_t *channel) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session), SWITCH_LOG_INFO, "fuze transport close rtp connection\n");
             len = SWITCH_RTP_MAX_BUF_LEN;
             while (fuze_transport_socket_read(rtp_session->rtp_conn, &saddr, (uint8_t *) buf, &len) == TR_STATUS_SUCCESS) {
-				len = SWITCH_RTP_MAX_BUF_LEN;
-			}
+                len = SWITCH_RTP_MAX_BUF_LEN;
+            }
             fuze_transport_close_connection(rtp_session->rtp_conn);
             rtp_session->rtp_conn = NULL;
         } else {
@@ -1138,8 +1139,8 @@ SWITCH_DECLARE(void) switch_close_transport(switch_channel_t *channel) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session), SWITCH_LOG_INFO, "fuze transport close rtcp connection\n");
             len = SWITCH_RTP_MAX_BUF_LEN;
             while (fuze_transport_socket_read(rtp_session->rtcp_conn, &saddr, (uint8_t *) buf, &len) == TR_STATUS_SUCCESS) {
-				len = SWITCH_RTP_MAX_BUF_LEN;
-			}
+                len = SWITCH_RTP_MAX_BUF_LEN;
+            }
             fuze_transport_close_connection(rtp_session->rtcp_conn);
             rtp_session->rtcp_conn = NULL;
         } else {
@@ -4524,6 +4525,9 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     memset(rtp_session->stats.inbound.loss, 0, sizeof(rtp_session->stats.inbound.loss));
     rtp_session->stats.inbound.last_loss = 0;
     rtp_session->stats.inbound.last_processed_seq = -1;
+    rtp_session->stats.call_start_time = switch_time_now();
+    rtp_session->stats.time = 0;
+    rtp_session->stats.duration = 0;
 
     rtp_session->ready = 1;
     *new_rtp_session = rtp_session;
@@ -4555,6 +4559,15 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
 
     rtp_session->ts_ooo_count = 0;
     rtp_session->rtp_send_fail_count = 0;
+
+    rtp_session->stats.last_jitter = -1;
+    rtp_session->stats.last_recv_level = -1;
+    rtp_session->stats.last_send_level = -1;
+    rtp_session->stats.last_active_speaker = -1;
+    rtp_session->stats.last_recv_rate = -1;
+    rtp_session->stats.last_send_rate = -1;
+    rtp_session->stats.last_cumulative_lost = -1;
+    rtp_session->stats.last_lost_percent = -1;
 
     return SWITCH_STATUS_SUCCESS;
 }
@@ -7998,15 +8011,15 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
         send = 0;
     }
 
-	/*
-	 * Added support for comfort noise packets to enable the client to send "Comfort Noise" while muted to reduce both bandwidth
-	 * and processing on the conference node.  In some cases FS will generate Comfort Noise packets itself -- primarily when it tries
-	 * to read a packet but one isn't available (i.e. Timeout case).  Generally we do not want to send these are the far end may
-	 * not like these packets.  The cases when we don't want to send CN:
-	 *  - the session isn't one associated with a fuze client
-	 *  - during an IVR session
-	 *  - when the CN packet is associated with a timeout
-	 */
+    /*
+     * Added support for comfort noise packets to enable the client to send "Comfort Noise" while muted to reduce both bandwidth
+     * and processing on the conference node.  In some cases FS will generate Comfort Noise packets itself -- primarily when it tries
+     * to read a packet but one isn't available (i.e. Timeout case).  Generally we do not want to send these are the far end may
+     * not like these packets.  The cases when we don't want to send CN:
+     *  - the session isn't one associated with a fuze client
+     *  - during an IVR session
+     *  - when the CN packet is associated with a timeout
+     */
     if (*flags & SFF_CNG) {
         if (!rtp_session->is_fuze_app) {
             send = 0;
@@ -8863,6 +8876,75 @@ SWITCH_DECLARE(void) switch_rtp_set_webrtc_neteq(switch_rtp_t *rtp_session, swit
 SWITCH_DECLARE(switch_bool_t) switch_rtp_get_webrtc_neteq(switch_rtp_t *rtp_session)
 {
     return (rtp_session ? rtp_session->use_webrtc_neteq : SWITCH_FALSE);
+}
+
+SWITCH_DECLARE(void) switch_rtp_reset_rtp_stats(switch_channel_t *channel)
+{
+    switch_rtp_t *rtp_session;
+
+    rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session) {
+        return;
+    }
+
+    memset(rtp_session->stats.jitter, 0, sizeof(rtp_session->stats.jitter));
+    memset(rtp_session->stats.recv_level,0,sizeof(rtp_session->stats.recv_level));
+    memset(rtp_session->stats.send_level,0,sizeof(rtp_session->stats.send_level));
+    memset(rtp_session->stats.active_speaker,0,sizeof(rtp_session->stats.active_speaker));
+    rtp_session->stats.duration = 0;
+}
+
+#define rtp_stat_add_value(stat, type_str, value, last_value)   \
+    { \
+        int n = strlen(stat); \
+        if (value != last_value) { \
+            char tmp[128]; \
+            if (n > 0) { strncat(stat, ":", sizeof(stat)-n); }  \
+            switch_snprintf(tmp, 128, type_str ",%" PRId64 "", value, rtp_session->stats.time); \
+            strncat(stat, tmp, sizeof(stat)-(n+1)); \
+        } \
+        last_value = value; \
+    }
+
+SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int level_in, int level_out, int active)
+{
+    switch_rtp_t *rtp_session;
+    void *neteq_inst;
+    WebRtcNetEQ_NetworkStatistics nwstats;
+    int jbuf = -1;
+
+    rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session) {
+        return;
+    }
+
+    neteq_inst = switch_core_get_neteq_inst(rtp_session->session);
+    if (neteq_inst) {
+        if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
+            jbuf = nwstats.currentBufferSize;
+        }
+    }
+
+    if (jbuf != -1) {
+        rtp_stat_add_value(rtp_session->stats.jitter, "%d", jbuf, rtp_session->stats.last_jitter);
+    }
+
+    if (level_in > -1) {
+        rtp_stat_add_value(rtp_session->stats.recv_level, "%d", level_in, rtp_session->stats.last_recv_level);
+    }
+
+    if (level_out > -1) {
+        rtp_stat_add_value(rtp_session->stats.send_level, "%d", level_out, rtp_session->stats.last_send_level);
+    }
+
+    if (active > -1) {
+        rtp_stat_add_value(rtp_session->stats.active_speaker, "%d", active, rtp_session->stats.last_active_speaker);
+    }
+
+    rtp_session->stats.time += 1;
+    rtp_session->stats.duration += 1;
 }
 
 SWITCH_DECLARE(void) switch_rtp_set_event(switch_rtp_t *rtp_session, rtp_events_t event)
