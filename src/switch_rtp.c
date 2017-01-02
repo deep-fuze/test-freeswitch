@@ -489,6 +489,7 @@ struct switch_rtp {
     uint32_t ts_ooo_count;
     uint32_t rtp_send_fail_count;
     uint32_t adjust_cn_count;
+    switch_time_t last_adjust_cn_count;
     switch_time_t last_ivr_send_time;
     uint32_t in_cn_period;
 };
@@ -4569,6 +4570,8 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->stats.last_cumulative_lost = -1;
     rtp_session->stats.last_lost_percent = -1;
 
+    rtp_session->last_adjust_cn_count = switch_time_now();
+
     return SWITCH_STATUS_SUCCESS;
 }
 
@@ -8032,6 +8035,9 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 
     /* fuze */
     if (send) {
+        switch_time_t cn_delta = (switch_time_now() - rtp_session->last_adjust_cn_count)/(1000*1000); /* seconds */
+        switch_bool_t log_cn = (rtp_session->adjust_cn_count == 0 && cn_delta > 10);
+
         if (rtp_session->use_webrtc_neteq) {
             /* this is the case where we have a jitter buffer and we're just generating our own sequence numbers */
             send_msg->header.seq = htons(++rtp_session->seq);
@@ -8103,55 +8109,62 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 ret = (int) bytes;
                 goto end;
             }
-            else if (out_of_order && (*flags & SFF_CNG) != 0) {
-                if (rtp_session->adjust_cn_count == 0) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "start adjust sequence number (cn): %u -> %u\n",
-                                      seq_no_from_rtp, rtp_session->last_bridge_seq[0] + 1);
-                    adjusted_cn = SWITCH_TRUE;
-                }
-                seq_no_from_rtp = rtp_session->last_bridge_seq[0] + 1;
-            }
 
             if (*flags & SFF_CNG) {
+                uint16_t oseq, aseq;
+                uint32_t ots, ats;
+                uint8_t opt, apt;
 
+                oseq = seq_no_from_rtp;
+                aseq = seq_no_from_rtp;
+                if (out_of_order) {
+                    seq_no_from_rtp = rtp_session->last_bridge_seq[0] + 1;
+                    aseq = seq_no_from_rtp;
+                    adjusted_cn = SWITCH_TRUE;
+                }
+
+                ots = this_ts;
+                ats = this_ts;
                 if (this_ts == rtp_session->last_write_ts) {
-                    if (rtp_session->adjust_cn_count == 0) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "start adjust ts(cn): %u -> %u s=%d\n",
-                                          this_ts, this_ts + 160, seq_no_from_rtp);
-                    }
                     this_ts += 160;
                     send_msg->header.ts = htonl(this_ts);
+                    ats = this_ts;
                     adjusted_cn= SWITCH_TRUE;
                 }
 
                 send_msg->header.m = 0;
 
+                opt = send_msg->header.pt;
+                apt = send_msg->header.pt;
                 if (rtp_session->cng_pt) {
                     if (send_msg->header.pt != rtp_session->cng_pt) {
-                        if (rtp_session->adjust_cn_count == 0) {
-                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "start adjust pt(cn): %d -> %d len=%u\n",
-                                              send_msg->header.pt, rtp_session->cng_pt, datalen);
-                        }
                         send_msg->header.pt = rtp_session->cng_pt;
+                        apt = send_msg->header.pt;
                         adjusted_cn = SWITCH_TRUE;
                     }
                 } else {
                     if (send_msg->header.pt != 13) {
-                        if (rtp_session->adjust_cn_count == 0) {
-                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "start adjust pt(cn): %d -> %d len=%u\n",
-                                              send_msg->header.pt, rtp_session->cng_pt, datalen);
-                        }
                         send_msg->header.pt = 13;
+                        apt = send_msg->header.pt;
                         adjusted_cn = SWITCH_TRUE;
                     }
                 }
+
+                if (log_cn) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "start cn adjust pt: %d -> %d sq: %u -> %u ts: %u -> %u len=%u\n",
+                                      opt, apt, oseq, aseq, ots, ats, datalen);
+                }
+
                 if (adjusted_cn) {
+                    rtp_session->last_adjust_cn_count = switch_time_now();
                     rtp_session->adjust_cn_count +=1;
                 } else {
+                    rtp_session->last_adjust_cn_count = switch_time_now();
                     rtp_session->adjust_cn_count = 0;
                 }
             } else {
                 if (rtp_session->adjust_cn_count > 0) {
+                    rtp_session->last_adjust_cn_count = switch_time_now();
                     rtp_session->adjust_cn_count = 0;
                 }
             }
@@ -8195,13 +8208,13 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
         }
 
         if (*flags & SFF_CNG) {
-            if (rtp_session->in_cn_period == 0) {
+            if (rtp_session->in_cn_period == 0 && cn_delta > 10) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "start CN period pt:%d seq:%u ts:%u\n",
                                   send_msg->header.pt, ntohs(send_msg->header.seq), ntohl(send_msg->header.ts));
             }
             rtp_session->in_cn_period += 1;
         } else {
-            if (rtp_session->in_cn_period > 0) {
+            if (rtp_session->in_cn_period > 0 && cn_delta > 10) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "stop CN period pt:%d seq:%u ts:%u after:%u pkts\n",
                                   send_msg->header.pt, ntohs(send_msg->header.seq), ntohl(send_msg->header.ts), rtp_session->in_cn_period);
                 rtp_session->in_cn_period = 0;
