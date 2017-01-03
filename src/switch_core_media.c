@@ -1698,6 +1698,12 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
         if (strlen(stats->active_speaker) > 0) {
             set_periodic_stats_value(session, RTP_ACTIVE_SPEAKER, stats->active_speaker, type);
         }
+        if (strlen(stats->recv_rate) > 0) {
+            set_periodic_stats_value(session, RTP_RECV_RATE, stats->recv_rate, type);
+        }
+        if (strlen(stats->send_rate) > 0) {
+            set_periodic_stats_value(session, RTP_SEND_RATE, stats->send_rate, type);
+        }
     }
 }
 

@@ -8902,9 +8902,12 @@ SWITCH_DECLARE(void) switch_rtp_reset_rtp_stats(switch_channel_t *channel)
     }
 
     memset(rtp_session->stats.jitter, 0, sizeof(rtp_session->stats.jitter));
-    memset(rtp_session->stats.recv_level,0,sizeof(rtp_session->stats.recv_level));
-    memset(rtp_session->stats.send_level,0,sizeof(rtp_session->stats.send_level));
-    memset(rtp_session->stats.active_speaker,0,sizeof(rtp_session->stats.active_speaker));
+    memset(rtp_session->stats.recv_level, 0, sizeof(rtp_session->stats.recv_level));
+    memset(rtp_session->stats.send_level, 0, sizeof(rtp_session->stats.send_level));
+    memset(rtp_session->stats.active_speaker, 0, sizeof(rtp_session->stats.active_speaker));
+    memset(rtp_session->stats.send_rate, 0, sizeof(rtp_session->stats.send_rate));
+    memset(rtp_session->stats.recv_rate, 0, sizeof(rtp_session->stats.recv_rate));
+
     rtp_session->stats.duration = 0;
 }
 
@@ -8926,6 +8929,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
     void *neteq_inst;
     WebRtcNetEQ_NetworkStatistics nwstats;
     int jbuf = -1;
+	uint16_t local_send, local_recv;
 
     rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
 
@@ -8954,6 +8958,12 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
 
     if (active > -1) {
         rtp_stat_add_value(rtp_session->stats.active_speaker, "%d", active, rtp_session->stats.last_active_speaker);
+    }
+
+    if (rtp_session->rtp_conn) {
+        fuze_transport_get_rates(rtp_session->rtp_conn, &local_send, &local_recv);
+        rtp_stat_add_value(rtp_session->stats.send_rate, "%d", local_send, rtp_session->stats.last_send_rate);
+        rtp_stat_add_value(rtp_session->stats.recv_rate, "%d", local_recv, rtp_session->stats.last_recv_rate);
     }
 
     rtp_session->stats.time += 1;

@@ -59,6 +59,9 @@ struct connection_wrap_t
     Connection::Ptr       conn_;
     FuzeQ<TransportEvent> evq_;
     __sockaddr_t          last_from_addr_;
+
+    uint16_t rateKbps[4];
+    uint16_t arrivedTime[4];
 };
 
 /* End: Static Declarations */
@@ -73,12 +76,7 @@ public:
     virtual void OnRateData(void*    pContext,
                             RateType type,
                             uint16_t rateKbps,
-                            uint16_t arrivedTime) {
-        if (g_rate_callback) {
-            g_rate_callback(pContext, type, rateKbps, arrivedTime);
-        }
-    }
-
+                            uint16_t arrivedTime);
     static TransportPoll& GetInstance() { return inst; }
     
 private:
@@ -86,6 +84,23 @@ private:
 };
 
 TransportPoll TransportPoll::inst;
+
+void TransportPoll::OnRateData(void *pContext,
+			RateType type,
+			uint16_t rateKbps,
+			uint16_t arrivedTime) {
+    if (g_rate_callback) {
+        g_rate_callback(pContext, type, rateKbps, arrivedTime);
+    } else {
+        connection_wrap_t *conn_wrap = static_cast<connection_wrap_t *> (pContext);
+
+	if (conn_wrap) {
+	    conn_wrap->rateKbps[type-RT_LOCAL_SEND] = rateKbps;
+	    conn_wrap->arrivedTime[type-RT_LOCAL_SEND] = arrivedTime;
+	}
+    }
+}
+
 
 void TransportPoll::OnDataReceived(void* pContext, Buffer::Ptr spBuffer)
 {
@@ -326,9 +341,7 @@ void* fuze_transport_tbase_create_connection(void *tbase, connection_type_t conn
                 conn->SetAppContext(conn_wrap);
                 conn->RegisterObserver(&TransportPoll::GetInstance());
                 
-                if (g_rate_callback) {
-                    conn->EnableRateReport(true);
-                }
+		conn->EnableRateReport(true);
                 
                 return conn_wrap;
             } 
@@ -430,6 +443,21 @@ transport_status_t fuze_transport_socket_poll(void *conn, int timeout_us)
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
+
+transport_status_t fuze_transport_get_rates(void *conn, uint16_t *local_send, uint16_t *local_recv)
+{
+    if (!conn) {
+        return TR_STATUS_FALSE;
+    }
+
+    connection_wrap_t *conn_wrap = (connection_wrap_t *) conn;
+
+    *local_send = conn_wrap->rateKbps[RT_LOCAL_SEND];
+    *local_recv = conn_wrap->rateKbps[RT_LOCAL_RECV];
+    
+    return TR_STATUS_SUCCESS;
+}
+
 
 transport_status_t fuze_transport_socket_read(void *conn, __sockaddr_t *from, 
                                               uint8_t *buf, size_t *bytes)

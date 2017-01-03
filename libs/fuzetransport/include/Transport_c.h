@@ -131,7 +131,10 @@ extern int fuze_udp_port_available(uint16_t port, const char* pIP);
 extern int fuze_reserve_udp_port(uint32_t holdTimeMs, uint16_t port, const char* pIP);
     
 extern void fuze_release_udp_port(uint16_t port);
-    
+
+/* read local rates from transport */
+extern transport_status_t fuze_transport_get_rates(void *conn, uint16_t *local_send, uint16_t *local_recv);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
