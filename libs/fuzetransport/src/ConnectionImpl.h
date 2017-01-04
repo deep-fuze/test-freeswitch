@@ -20,6 +20,7 @@ namespace fuze {
 
 using std::ostringstream;
 using std::queue;
+using core::RawMemory;
     
 struct StatData
 {
@@ -268,22 +269,26 @@ private: // separate work thread for heavy lifting such as video/screenshare
 private:
     enum QueueSizeType
     {
-        SHALLOW_COPY,
+        BUFFER_SHELL,
         SIZE_64, SIZE_256, SIZE_1024, SIZE_2048,
         SIZE_32000, SIZE_65000, SIZE_262000,
         MAX_QUEUE_SIZE
     };
 
-    typedef queue<NetworkBuffer*> BufferQueue;
+    typedef queue<void*> BufferQueue;
     
     static uint32_t SizeArray[MAX_QUEUE_SIZE];
     
-    static void    HandleReleasedBuffer(NetworkBuffer* pBuf);
-    void           AddBuffer(NetworkBuffer* pBuf);
-    QueueSizeType  GetSizeType(uint32_t bufSize);
+    static void         HandleReleasedBuffer(NetworkBuffer* pBuf);
+    static void         HandleReleasedMemory(RawMemory* pMem);
     
-    vector<BufferQueue>      recycleQ_;
-    MutexLock                rcqLock_;
+    void                AddBuffer(NetworkBuffer* pBuf);
+    void                AddMemory(RawMemory* pMem);
+    QueueSizeType       GetSizeType(uint32_t bufSize);
+    NetworkBuffer::Ptr  GetBufferShell();
+    
+    BufferQueue              bufPool_[MAX_QUEUE_SIZE];
+    MutexLock                poolLock_;
     
     std::atomic<uint16_t>    bufNum_;
     std::atomic<uint16_t>    bufAlloc[MAX_QUEUE_SIZE];

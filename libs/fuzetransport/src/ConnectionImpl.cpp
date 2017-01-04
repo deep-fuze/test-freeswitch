@@ -238,7 +238,6 @@ ConnectionImpl::ConnectionImpl(int connID)
     SetName("");
     
     for (int i = 0; i < MAX_QUEUE_SIZE; ++i) {
-        recycleQ_.push_back(BufferQueue());
         bufAlloc[i] = 0;
     }
 }
@@ -441,19 +440,24 @@ void ConnectionImpl::Reset()
         {
             memset(buf_free, 0, sizeof(buf_free));
             
-            MutexLock scoped(&rcqLock_);
+            MutexLock scoped(&poolLock_);
             for (int i = 0; i < MAX_QUEUE_SIZE; ++i) {
-                while (!recycleQ_[i].empty()) {
+                while (!bufPool_[i].empty()) {
                     buf_free[i]++;
                     buf_cnt++;
-                    delete recycleQ_[i].front();
-                    recycleQ_[i].pop();
+                    if (i == BUFFER_SHELL) {
+                        delete (NetworkBuffer*)bufPool_[i].front();
+                    }
+                    else {
+                        delete (RawMemory*)bufPool_[i].front();
+                    }
+                    bufPool_[i].pop();
                 }
             }
         }
         
         MLOG("MemoryStat: " <<
-             "shallow (" << buf_free[SHALLOW_COPY] << "/" << bufAlloc[SHALLOW_COPY] <<
+             "shallow (" << buf_free[BUFFER_SHELL] << "/" << bufAlloc[BUFFER_SHELL] <<
              ") 64 (" << buf_free[SIZE_64] << "/" << bufAlloc[SIZE_64] <<
              ") 256 (" << buf_free[SIZE_256] << "/" << bufAlloc[SIZE_256] <<
              ") 1024 (" << buf_free[SIZE_1024] << "/" << bufAlloc[SIZE_1024] <<
@@ -1723,90 +1727,90 @@ ConnectionImpl::QueueSizeType ConnectionImpl::GetSizeType(uint32_t bufSize)
 uint32_t ConnectionImpl::SizeArray[ConnectionImpl::MAX_QUEUE_SIZE]
     = { 0, 64, 256, 1024, 2048, 32000, 65000, 262000 };
     
-NetworkBuffer::Ptr ConnectionImpl::GetBuffer(uint32_t bufSize)
+NetworkBuffer::Ptr ConnectionImpl::GetBufferShell()
 {
     NetworkBuffer::Ptr sp_buf;
+    NetworkBuffer*     p_buf = 0;
     
-    NetworkBuffer* p_buf = 0;
-    
-    QueueSizeType size_type = GetSizeType(bufSize);
-    
-    if (size_type != MAX_QUEUE_SIZE) {
-        MutexLock scoped(&rcqLock_);
-        if (!recycleQ_[size_type].empty()) {
-            p_buf = recycleQ_[size_type].front();
-            recycleQ_[size_type].pop();
+    {
+        MutexLock scoped(&poolLock_);
+        if (!bufPool_[BUFFER_SHELL].empty()) {
+            p_buf = (NetworkBuffer*)bufPool_[BUFFER_SHELL].front();
+            bufPool_[BUFFER_SHELL].pop();
         }
     }
     
     if (!p_buf) {
+        MLOG("Requested shallow copy - creating shallow num: " << ++bufNum_);
+        p_buf = new NetworkBuffer; // create empty buffer shell
+        p_buf->appID_ = ID(); // mark the connection ID for release
+        bufAlloc[BUFFER_SHELL]++;
+    }
+    
+    sp_buf.reset(p_buf, HandleReleasedBuffer);
+    
+    return sp_buf;
+}
+    
+NetworkBuffer::Ptr ConnectionImpl::GetBuffer(uint32_t bufSize)
+{
+    RawMemory::Ptr sp_mem;
+    RawMemory* p_mem = 0;
+    
+    QueueSizeType size_type = GetSizeType(bufSize);
+    
+    if (size_type != MAX_QUEUE_SIZE) {
+        MutexLock scoped(&poolLock_);
+        if (!bufPool_[size_type].empty()) {
+            p_mem = (RawMemory*)bufPool_[size_type].front();
+            bufPool_[size_type].pop();
+        }
+    }
+    
+    if (!p_mem) {
         MLOG("Requested " << bufSize << "B - creating buffer (" <<
-             SizeArray[size_type] << "B) num: " << ++bufNum_ );
+             SizeArray[size_type] << "B) num: " << ++bufNum_);
         uint32_t real_size =
             (size_type != MAX_QUEUE_SIZE ? SizeArray[size_type] : bufSize);
-        p_buf = new NetworkBuffer(bufSize, real_size);
-        p_buf->appID_ = ID(); // mark the connection ID for release
+        p_mem = new RawMemory(bufSize, real_size);
+        p_mem->setAppID(ID()); // mark the connection ID for release
         bufAlloc[size_type]++;
     }
-
-    if (p_buf) {
-        p_buf->recycle(bufSize);
-        sp_buf.reset(p_buf, HandleReleasedBuffer);
+    else {
+        p_mem->setSize(bufSize);
     }
+    
+    sp_mem.reset(p_mem, HandleReleasedMemory);
+
+    NetworkBuffer::Ptr sp_buf = GetBufferShell();
+    sp_buf->init(sp_mem);
     
     return sp_buf;
 }
 
 NetworkBuffer::Ptr ConnectionImpl::GetBuffer(Buffer::Ptr spBuf)
 {
-    NetworkBuffer::Ptr sp_buf;
-    
-    NetworkBuffer* p_buf = 0;
-    
-    {
-        MutexLock scoped(&rcqLock_);
-        if (!recycleQ_[SHALLOW_COPY].empty()) {
-            p_buf = recycleQ_[SHALLOW_COPY].front();
-            recycleQ_[SHALLOW_COPY].pop();
-        }
-    }
-    
-    if (!p_buf) {
-        MLOG("Requested shallow copy - creating shallow num: " << ++bufNum_);
-        p_buf = new NetworkBuffer(spBuf);
-        p_buf->appID_ = ID(); // mark the connection ID for release
-        bufAlloc[SHALLOW_COPY]++;
-    }
-    else {
-        p_buf->setAsShallowCopy(spBuf);
-    }
-    
-    if (p_buf) {
-        sp_buf.reset(p_buf, HandleReleasedBuffer);
-    }
-    
+    NetworkBuffer::Ptr sp_buf = GetBufferShell();
+    sp_buf->setAsShallowCopy(spBuf);
     return sp_buf;
 }
     
 void ConnectionImpl::AddBuffer(NetworkBuffer* pBuf)
 {
-    if (!pBuf->bShallowCopy_) {
-        QueueSizeType size_type = GetSizeType(pBuf->getRealSize());
-        if (size_type != MAX_QUEUE_SIZE) {
-            pBuf->rewind();
-            pBuf->setOffset(0);
-            MutexLock scoped(&rcqLock_);
-            recycleQ_[size_type].push(pBuf);
-        }
-        else {
-            // release buffer that isn't expected
-            delete pBuf;
-        }
+    pBuf->reset();
+    MutexLock scoped(&poolLock_);
+    bufPool_[BUFFER_SHELL].push(pBuf);
+}
+    
+void ConnectionImpl::AddMemory(RawMemory* pMem)
+{
+    QueueSizeType size_type = GetSizeType(pMem->getRealSize());
+    if (size_type != MAX_QUEUE_SIZE) {
+        MutexLock scoped(&poolLock_);
+        bufPool_[size_type].push(pMem);
     }
-    else {
-        pBuf->releaseRawBuffer();
-        MutexLock scoped(&rcqLock_);
-        recycleQ_[SHALLOW_COPY].push(pBuf);
+    else { // release buffer that isn't expected
+        delete pMem;
     }
 }
     
@@ -1824,9 +1828,30 @@ void ConnectionImpl::HandleReleasedBuffer(NetworkBuffer* pBuf)
         p->AddBuffer(pBuf);
     }
     else {
-        _WLOG_("deleting " << (pBuf->bShallowCopy_ ? "shallow " : "") <<
-               "buf " << pBuf->getRealSize() << "B on inactive c" << pBuf->appID_);
+        _MLOG_("deleting buffer shell on inactive c" << pBuf->appID_);
         delete pBuf;
+    }
+}
+
+void ConnectionImpl::HandleReleasedMemory(RawMemory* pMem)
+{
+    // retrieve connection ID
+    int app_id = pMem->getAppID();
+    
+    if (app_id == INVALID_ID) {
+        _WLOG_("invalid app id");
+        delete pMem;
+        return;
+    }
+    
+    if (ConnectionImpl* p =
+            ResourceMgr::GetInstance()->GetConnection(app_id)) {
+        p->AddMemory(pMem);
+    }
+    else {
+        _MLOG_("deleting raw memory " << pMem->getRealSize() <<
+               "B on inactive c" << app_id);
+        delete pMem;
     }
 }
     

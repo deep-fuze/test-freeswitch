@@ -27,24 +27,26 @@
 namespace fuze {
 namespace core {
 
-struct RawBuffer
+struct RawMemory
 {
-    typedef fuze_shared_ptr<RawBuffer> Ptr;
+    typedef fuze_shared_ptr<RawMemory> Ptr;
 
     uint8_t* pBuf_;
     uint32_t size_;
     uint32_t realSize_;
+    int      appId_;
 
-    RawBuffer(uint32_t size, uint32_t realSize)
-        : pBuf_(new uint8_t[realSize]), size_(size), realSize_(realSize) {}
-    ~RawBuffer() { if (pBuf_) delete[] pBuf_; }
+    RawMemory(uint32_t size, uint32_t realSize)
+        : pBuf_(new uint8_t[realSize]), size_(size), realSize_(realSize), appId_(-1) {}
+    ~RawMemory() { if (pBuf_) delete[] pBuf_; }
 
     uint8_t* getBuf() { return pBuf_; }
     uint32_t size()   { return size_; }
     uint32_t getRealSize() { return realSize_; }
     void     setSize(uint32_t size) { size_ = size; }
-
-    void setDebugInfo(const char* pFile, int line) {}
+    void     setDebugInfo(const char* pFile, int line) {}
+    int      getAppID() { return appId_; }
+    void     setAppID(int appId) { appId_ = appId; }
 };
 
 #define MAKE make
@@ -65,9 +67,19 @@ public:
 
     void setDebugInfo(const char* pFile, int line) {}
 
-    uint32_t getRealSize() { return spRawBuf_->getRealSize(); }
-    void     releaseRawBuffer() { if (spRawBuf_) spRawBuf_.reset(); }
-    void     setAsShallowCopy(Buffer::Ptr& spBuf) {
+    void init(RawMemory::Ptr spMem) {
+        size_     = spMem->size();
+        spRawBuf_ = spMem;
+    }
+    
+    void reset() {
+        position_ = 0;
+        offset_   = 0;
+        size_     = 0;
+        spRawBuf_.reset();
+    }
+    
+    void setAsShallowCopy(Buffer::Ptr& spBuf) {
         if (spBuf) {
             offset_   = spBuf->offset_;
             size_     = spBuf->size_;
@@ -75,18 +87,11 @@ public:
             spRawBuf_ = spBuf->spRawBuf_;
         }
     }
-    void recycle(uint32_t size) {
-        if (spRawBuf_->getRealSize() < size) {
-            throw std::runtime_error("Recycling beyond the real size!");
-        }
-        size_ = size;
-        spRawBuf_->setSize(size);
-    }
     
     uint32_t getOffset() const      { return offset_; }  
     uint8_t* getBuf()               { return spRawBuf_->pBuf_ + offset_; }
     const uint8_t* getBuf() const   { return spRawBuf_->pBuf_ + offset_; }
-    RawBuffer::Ptr getRawBuf()      { return spRawBuf_; }
+    RawMemory::Ptr getRawBuf()      { return spRawBuf_; }
 
     uint32_t size() const           { return size_;   } 
     void     setSize(uint32_t size) { size_ = size;   }
@@ -155,9 +160,6 @@ public:
         return (uint8_t*)(spRawBuf_->pBuf_ + offset_ + position_ - _typeSize);
     }
 
-    void rewind() { position_ = 0; }
-    void setOffset(uint32_t offset) { offset_ = offset; }
-
     virtual ~Buffer() {}
 
 protected:
@@ -173,20 +175,19 @@ protected:
         offset_   = 0;
         size_     = size;
         position_ = 0;
-        spRawBuf_.reset(new RawBuffer(size, size));
+        spRawBuf_.reset(new RawMemory(size, size));
     }
     
-    Buffer(uint32_t size, uint32_t realSize) {
+    Buffer() {
         offset_   = 0;
-        size_     = size;
+        size_     = 0;
         position_ = 0;
-        spRawBuf_.reset(new RawBuffer(size, realSize));
     }
 
     uint32_t        offset_;
     uint32_t        size_;
     uint32_t        position_;
-    RawBuffer::Ptr  spRawBuf_;
+    RawMemory::Ptr  spRawBuf_;
 };
 
 } // namespace core

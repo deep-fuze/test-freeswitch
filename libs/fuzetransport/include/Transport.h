@@ -19,7 +19,7 @@ using std::list;
 using std::map;
 
 #ifdef NO_FUZECORE
-#include <Buffer.h>
+#include "Buffer.h"
 #else
 #include <fuze/core/Buffer.h> // fuze_shared_ptr header in fuzememory.h
 #endif
@@ -49,11 +49,10 @@ struct NetworkBuffer : public Buffer
     
     // Variables added for buffer optimization
     int      appID_;
-    bool     bShallowCopy_; // indicate internal raw buffer is owned by other buffer
     
     // constructor create a new buffer
     //
-    NetworkBuffer(uint32_t size, uint32_t realSize);
+    NetworkBuffer();
     
     // constructor for creating a "shallow copy" of buffer into network buffer
     //
