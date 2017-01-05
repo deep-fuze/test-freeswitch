@@ -2698,6 +2698,10 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
         rtp_session->fir_countdown--;
     }
 
+#if 0
+	/*
+	 * Fuze: the way we operate we generally don't ever want to produce CNG packets
+	 */
     if (rtp_session->flags[SWITCH_RTP_FLAG_AUTO_CNG] && rtp_session->send_msg.header.ts && rtp_session->cng_pt &&
         rtp_session->timer.samplecount >= (rtp_session->last_write_samplecount + (rtp_session->samples_per_interval * 60))) {
         uint8_t data[10] = { 0 };
@@ -2714,6 +2718,7 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
             rtp_session->last_write_samplecount = rtp_session->timer.samplecount;
         }
     }
+#endif
 
     if (rtp_session->rtcp_sock_output &&
         switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_ENABLE_RTCP) && !switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_RTCP_PASSTHRU)
