@@ -6494,6 +6494,7 @@ static int using_ice(switch_rtp_t *rtp_session)
     return 0;
 }
 
+// #define TRACE_READ 1
 static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_type,
                            payload_map_t **pmapP, switch_frame_flag_t *flags, switch_io_flag_t io_flags)
 {
@@ -6513,6 +6514,11 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
     int hot_socket = 0;
     int read_loops = 0;
     switch_bool_t sent_digits;
+#ifdef TRACE_READ
+    char trace_buffer[1024];
+
+    memset(trace_buffer, 0, 1024);
+#endif
 
     if (!switch_rtp_ready(rtp_session)) {
         return -1;
@@ -6553,9 +6559,22 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                 (rtp_session->read_pollfd || rtp_session->rtp_conn)) {
 
                 if ((rtp_session->rtp_conn && (switch_status_t) fuze_transport_socket_poll(rtp_session->rtp_conn, 0) == SWITCH_STATUS_SUCCESS) ||
-                        (!rtp_session->rtp_conn && switch_poll(rtp_session->read_pollfd, 1, &fdr, 0) == SWITCH_STATUS_SUCCESS)) {
+                    (!rtp_session->rtp_conn && switch_poll(rtp_session->read_pollfd, 1, &fdr, 0) == SWITCH_STATUS_SUCCESS)) {
 
                     status = read_rtp_packet(rtp_session, &bytes, flags, SWITCH_FALSE);
+
+#ifdef TRACE_READ
+                    if (((rtp_session->cng_pt && rtp_session->recv_msg.header.pt == rtp_session->cng_pt) || rtp_session->recv_msg.header.pt == 13)) {
+                        strncat(trace_buffer, "read_cng,", 1024);
+                    } else {
+                        strncat(trace_buffer, "read_normal,", 1024);
+                    }
+                    if (status == SWITCH_STATUS_SUCCESS) {
+                        strncat(trace_buffer, "read_success,", 1024);
+                    } else {
+                        strncat(trace_buffer, "read_fail,", 1024);
+                    }
+#endif
                     
 #ifdef CHECK_FOR_LARGE_PKTS
                     if (bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
@@ -6577,6 +6596,9 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
 
                     /* switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_DEBUG, "Initial (%i) %d\n", status, bytes); */
                     if (status != SWITCH_STATUS_FALSE) {
+#ifdef TRACE_READ
+                        strncat(trace_buffer, "pretrigger,", 1024);
+#endif
                         read_pretriggered = 1;
                     }
 
@@ -6661,10 +6683,26 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
 
         if (poll_status == SWITCH_STATUS_SUCCESS) {
             if (read_pretriggered) {
+#ifdef TRACE_READ
+                strncat(trace_buffer, "pretrigger_reset,", 1024);
+#endif
                 read_pretriggered = 0;
             } else {
 
                 status = read_rtp_packet(rtp_session, &bytes, flags, SWITCH_TRUE);
+
+#ifdef TRACE_READ
+                if (((rtp_session->cng_pt && rtp_session->recv_msg.header.pt == rtp_session->cng_pt) || rtp_session->recv_msg.header.pt == 13)) {
+                    strncat(trace_buffer, "read_cng2,", 1024);
+                } else {
+                    strncat(trace_buffer, "read_normal2,", 1024);
+                }
+                if (status == SWITCH_STATUS_SUCCESS) {
+                    strncat(trace_buffer, "read_success2,", 1024);
+                } else {
+                    strncat(trace_buffer, "read_fail2,", 1024);
+                }
+#endif
 
 #ifdef CHECK_FOR_LARGE_PKTS
                 if (bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
@@ -6963,6 +7001,9 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
         }
 
         if (!bytes && poll_loop) {
+#ifdef TRACE_READ
+            strncat(trace_buffer, "recvfrom1,", 1024);
+#endif
             goto recvfrom;
         }
 
@@ -7005,11 +7046,23 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
 
         /* ignore packets not meant for us unless the auto-adjust window is open */
         if (bytes) {
+            /*
+             * If a call starts muted it will only send comfort noise.  This ensures that we don't send any packets
+             * to the conference node (if this is an anchor node) for this call until it gets a packet other than
+             * comfort noise.  This doesn't work so ... ifdef this out.  A subsequent change below put a CN check around
+             * the autoadj decrement so we'll stay in the autoadj window.
+             */
+#if 0
             if (rtp_session->flags[SWITCH_RTP_FLAG_AUTOADJ]) {
                 if (((rtp_session->cng_pt && rtp_session->recv_msg.header.pt == rtp_session->cng_pt) || rtp_session->recv_msg.header.pt == 13)) {
+#ifdef TRACE_READ
+            strncat(trace_buffer, "recvfrom2,", 1024);
+#endif
                     goto recvfrom;
                 }
-            } else if (!(rtp_session->rtp_bugs & RTP_BUG_ACCEPT_ANY_PACKETS) && !switch_cmp_addr(rtp_session->from_addr, rtp_session->remote_addr)
+            } else 
+#endif
+                if (!(rtp_session->rtp_bugs & RTP_BUG_ACCEPT_ANY_PACKETS) && !switch_cmp_addr(rtp_session->from_addr, rtp_session->remote_addr)
                     && !rtp_session->rtp_conn) {
                 goto recvfrom;
 
@@ -7067,8 +7120,10 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
         }
 
         if (bytes && rtp_session->autoadj_window) {
-            if (--rtp_session->autoadj_window == 0) {
-                switch_rtp_clear_flag(rtp_session, SWITCH_RTP_FLAG_AUTOADJ);
+            if (!(((rtp_session->cng_pt && rtp_session->recv_msg.header.pt == rtp_session->cng_pt) || rtp_session->recv_msg.header.pt == 13))) {
+                if (--rtp_session->autoadj_window == 0) {
+                    switch_rtp_clear_flag(rtp_session, SWITCH_RTP_FLAG_AUTOADJ);
+                }
             }
         }
 
@@ -7133,6 +7188,9 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
 
             rtp_session->recv_msg.header.pt = (uint32_t) rtp_session->cng_pt ? rtp_session->cng_pt : SWITCH_RTP_CNG_PAYLOAD;
             *flags |= (SFF_CNG | SFF_TIMEOUT);
+#ifdef TRACE_READ
+            strncat(trace_buffer, "timeout1,", 1024);
+#endif
             *payload_type = (switch_payload_t) rtp_session->recv_msg.header.pt;
             ret = 2 + rtp_header_len;
             goto end;
@@ -7151,12 +7209,18 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
         case RESULT_GOTO_TIMERCHECK:
             if (do_cng_dtmf) {
                 *flags |= SFF_TIMEOUT;
+#ifdef TRACE_READ
+                strncat(trace_buffer, "timeout2,", 1024);
+#endif
                 do_cng = do_cng_dtmf;
             }
             goto timer_check;
         case RESULT_CONTINUE:
             if (do_cng_dtmf) {
                 *flags |= SFF_TIMEOUT;
+#ifdef TRACE_READ
+                strncat(trace_buffer, "timeout3,", 1024);
+#endif
                 do_cng = do_cng_dtmf;
             }
             goto result_continue;
@@ -7206,7 +7270,7 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "PT=%u\n", rtp_session->recv_msg.header.pt);
             */
 
-            *flags |= (SFF_CNG | SFF_TIMEOUT);
+            *flags |= (SFF_CNG);
             *payload_type = (switch_payload_t) rtp_session->recv_msg.header.pt;
             ret = 2 + rtp_header_len;
             rtp_session->stats.inbound.skip_packet_count++;
@@ -7242,6 +7306,9 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                 }
 
                 *flags |= SFF_TIMEOUT;
+#ifdef TRACE_READ
+                strncat(trace_buffer, "timeout4,", 1024);
+#endif
                 rtp_session->cng_count++;
                 return_cng_frame();
             }
@@ -7294,6 +7361,13 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
 #endif
 
     READ_DEC(rtp_session);
+
+#ifdef TRACE_READ
+    if (*flags & SFF_CNG) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "rtp_commone_read: CNG %s%s\n",
+                          (*flags & SFF_TIMEOUT ? "timeout " : ""), trace_buffer);
+    }
+#endif
 
     return ret;
 }
