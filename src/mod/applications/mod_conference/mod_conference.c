@@ -2998,7 +2998,7 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
                 conference->member_lists[eMemberListTypes_Listeners] = member;
 
                 clear_member_state_locked(member, MFLAG_TALKING);
-                switch_set_flag(member, MFLAG_NOTIFY_ACTIVITY);
+                // switch_set_flag(member, MFLAG_NOTIFY_ACTIVITY);
 
                 member = last->next;
             } else {
@@ -3010,7 +3010,7 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
                 conference->member_lists[eMemberListTypes_Speakers] = member_next;
 
                 clear_member_state_locked(member, MFLAG_TALKING);
-                switch_set_flag(member, MFLAG_NOTIFY_ACTIVITY);
+                // switch_set_flag(member, MFLAG_NOTIFY_ACTIVITY);
 
                 member = member_next;
             }

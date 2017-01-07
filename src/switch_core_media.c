@@ -2138,6 +2138,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_read_frame(switch_core_session
         }
 
         if (engine->read_frame.datalen == 0 && switch_get_dont_wait_for_packets(session->channel)) {
+            switch_set_flag((&engine->read_frame), SFF_TIMEOUT);
             goto end;
         }
 
@@ -2208,6 +2209,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_read_frame(switch_core_session
             /* return CNG for now */
             *frame = &engine->read_frame;
             switch_set_flag((*frame), SFF_CNG);
+            switch_set_flag((*frame), SFF_TIMEOUT);
             (*frame)->datalen = engine->read_impl.encoded_bytes_per_packet;
             memset((*frame)->data, 0, (*frame)->datalen);
             switch_goto_status(SWITCH_STATUS_SUCCESS, end);

@@ -450,7 +450,7 @@ read_again:
                 }
             }
         }
-        
+
         if (status == SWITCH_STATUS_INUSE) {
             *frame = &runtime.dummy_cng_frame;
             return SWITCH_STATUS_SUCCESS;
@@ -924,6 +924,8 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
 
         if (status == SWITCH_STATUS_INUSE) {
             *frame = &runtime.dummy_cng_frame;
+            switch_set_flag(*frame, SFF_TIMEOUT);
+            /* Luke TBD: yield in path */
             switch_yield(20000);
             return SWITCH_STATUS_SUCCESS;
         }
@@ -947,6 +949,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "%s has no read codec.\n", switch_channel_get_name(session->channel));
             switch_channel_hangup(session->channel, SWITCH_CAUSE_INCOMPATIBLE_DESTINATION);
             *frame = &runtime.dummy_cng_frame;
+            switch_set_flag(*frame, SFF_TIMEOUT);
             return SWITCH_STATUS_FALSE;
         }
 
@@ -1875,6 +1878,9 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
     } else {
         if (flag & SFF_CNG) {
             switch_set_flag((*frame), SFF_CNG);
+        }
+        if (flag & SFF_TIMEOUT) {
+            switch_set_flag((*frame), SFF_TIMEOUT);
         }
         if (session->bugs) {
             switch_media_bug_t *bp;

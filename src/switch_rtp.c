@@ -2699,9 +2699,9 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
     }
 
 #if 0
-	/*
-	 * Fuze: the way we operate we generally don't ever want to produce CNG packets
-	 */
+    /*
+     * Fuze: the way we operate we generally don't ever want to produce CNG packets
+     */
     if (rtp_session->flags[SWITCH_RTP_FLAG_AUTO_CNG] && rtp_session->send_msg.header.ts && rtp_session->cng_pt &&
         rtp_session->timer.samplecount >= (rtp_session->last_write_samplecount + (rtp_session->samples_per_interval * 60))) {
         uint8_t data[10] = { 0 };
@@ -5692,6 +5692,8 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
     *bytes = sizeof(rtp_msg_t);
     sync = 0;
 
+    memset(&rtp_session->recv_msg, 0, sizeof(rtp_session->recv_msg));
+
     status = rtp_recvfrom(rtp_session, rtp_session->from_addr, rtp_session->sock_input, 0, (void *) &rtp_session->recv_msg, bytes);
     ts = ntohl(rtp_session->recv_msg.header.ts);
 
@@ -6235,7 +6237,7 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
 
         }
     }
-    
+
     return status;
 }
 
@@ -6663,7 +6665,7 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
             } else {
 
                 status = read_rtp_packet(rtp_session, &bytes, flags, SWITCH_TRUE);
-                
+
 #ifdef CHECK_FOR_LARGE_PKTS
                 if (bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "read_rtp_packet len too large:%zu status=%x\n",
@@ -7186,7 +7188,6 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
             uint8_t *data = (uint8_t *) RTP_BODY(rtp_session);
 
             sent_digits = do_2833(rtp_session);
-
             if (sent_digits) {
                 *flags |= SFF_RFC2833;
             }
@@ -7205,7 +7206,7 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "PT=%u\n", rtp_session->recv_msg.header.pt);
             */
 
-            *flags |= SFF_CNG;
+            *flags |= (SFF_CNG | SFF_TIMEOUT);
             *payload_type = (switch_payload_t) rtp_session->recv_msg.header.pt;
             ret = 2 + rtp_header_len;
             rtp_session->stats.inbound.skip_packet_count++;
@@ -7291,7 +7292,7 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                           bytes, ret);
     }
 #endif
-    
+
     READ_DEC(rtp_session);
 
     return ret;
@@ -7973,7 +7974,17 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
         }
     }
 
-    if (!switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_VIDEO)) {
+    if (*flags & SFF_CNG) {
+        if (!rtp_session->is_fuze_app) {
+            send = 0;
+        } else if (*flags & SFF_TIMEOUT) {
+            send = 0;
+        } else if (*flags & SFF_IVR_FRAME) {
+            send = 0;
+        }
+    }
+
+    if (send && !switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_VIDEO)) {
         uint16_t this_seq = ntohs(send_msg->header.seq);
         this_ts = ntohl(send_msg->header.ts);
 
@@ -7989,8 +8000,8 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             if (send_msg->header.pt != rtp_session->payload) {
                 if (rtp_session->ts_ooo_count == 0) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
-                                      "%s dropping because of lower timestamp and sequence number curr=(%d,%u) prev=(%d,%u) pt=%d\n",
-                                      rtp_session->rtp_conn_name, this_seq, this_ts, rtp_session->last_seq, rtp_session->last_write_ts, send_msg->header.pt);
+                                      "%s dropping because of lower timestamp and sequence number curr=(%d,%u) prev=(%d,%u) pt=%d len=%u cn=%d\n",
+                                      rtp_session->rtp_conn_name, this_seq, this_ts, rtp_session->last_seq, rtp_session->last_write_ts, send_msg->header.pt, datalen, (*flags & SFF_CNG) != 0);
                 }
                 rtp_session->ts_ooo_count += 1;
                 send = 0;
@@ -7998,8 +8009,8 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 if (rtp_session->write_count > 1) {
                     if (rtp_session->ts_ooo_count == 0) {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
-                                          "%s out of order TS because of lower timestamp and sequence number curr=(%d,%u) prev=(%d,%u) pt=%d\n",
-                                          rtp_session->rtp_conn_name, this_seq, this_ts, rtp_session->last_seq, rtp_session->last_write_ts, send_msg->header.pt);
+                                          "%s out of order TS because of lower timestamp and sequence number curr=(%d,%u) prev=(%d,%u) pt=%d len=%u cn=%d\n",
+                                          rtp_session->rtp_conn_name, this_seq, this_ts, rtp_session->last_seq, rtp_session->last_write_ts, send_msg->header.pt, datalen, (*flags & SFF_CNG) != 0);
                     }
                     rtp_session->ts_ooo_count += 1;
                 }
@@ -8007,8 +8018,8 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
         } else {
             if (rtp_session->ts_ooo_count > 1) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
-                                  "%s out of order TS back to normal curr=(%d,%u) prev=(%d,%u) pt=%d\n",
-                                  rtp_session->rtp_conn_name, this_seq, this_ts, rtp_session->last_seq, rtp_session->last_write_ts, send_msg->header.pt);
+                                  "%s out of order TS back to normal curr=(%d,%u) prev=(%d,%u) pt=%d len=%u cn=%d after %d packets\n",
+                                  rtp_session->rtp_conn_name, this_seq, this_ts, rtp_session->last_seq, rtp_session->last_write_ts, send_msg->header.pt, datalen, (*flags & SFF_CNG) != 0, rtp_session->ts_ooo_count);
             }
             rtp_session->ts_ooo_count = 0;
         }
@@ -8017,25 +8028,6 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
     if (rtp_session->flags[SWITCH_RTP_FLAG_PAUSE]) {
         rtp_session->total_bad_sent += 1;
         send = 0;
-    }
-
-    /*
-     * Added support for comfort noise packets to enable the client to send "Comfort Noise" while muted to reduce both bandwidth
-     * and processing on the conference node.  In some cases FS will generate Comfort Noise packets itself -- primarily when it tries
-     * to read a packet but one isn't available (i.e. Timeout case).  Generally we do not want to send these are the far end may
-     * not like these packets.  The cases when we don't want to send CN:
-     *  - the session isn't one associated with a fuze client
-     *  - during an IVR session
-     *  - when the CN packet is associated with a timeout
-     */
-    if (*flags & SFF_CNG) {
-        if (!rtp_session->is_fuze_app) {
-            send = 0;
-        } else if (*flags & SFF_TIMEOUT) {
-            send = 0;
-        } else if (*flags & SFF_IVR_FRAME) {
-            send = 0;
-        }
     }
 
     /* fuze */
