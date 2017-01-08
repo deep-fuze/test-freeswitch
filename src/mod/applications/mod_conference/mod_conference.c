@@ -2533,7 +2533,8 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
         if (new_write_codec == NULL)
         {
             /* add new conference write codec, allocate new conference entry */
-            if (ceo_write_new_wc(&conference->ceo, impl.codec_id, impl.impl_id, impl.ianacode) != SWITCH_STATUS_SUCCESS) {
+            if (ceo_write_new_wc(&conference->ceo, &member->write_codec, switch_core_session_get_write_codec(member->session),
+                                 impl.codec_id, impl.impl_id, impl.ianacode) != SWITCH_STATUS_SUCCESS) {
                 switch_mutex_unlock(conference->member_mutex);
                 unlock_member(member);
                 switch_mutex_unlock(member->audio_out_mutex);
@@ -2970,7 +2971,8 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     
 static void conference_reconcile_member_lists(conference_obj_t *conference) {
     conference_member_t *member = NULL, *last = NULL;
-    
+    uint32_t g722cnt = 0, g711ucnt = 0, g711acnt = 0;
+
     switch_mutex_lock(conference->mutex);
     switch_mutex_lock(conference->member_mutex);
     
@@ -3015,6 +3017,15 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
                 member = member_next;
             }
         } else {
+            if (!member->one_of_active) {
+                if (member->orig_read_impl.ianacode == 9) {
+                    g722cnt += 1;
+                } else if (member->orig_read_impl.ianacode == 0) {
+                    g711ucnt += 1;
+                } else if (member->orig_read_impl.ianacode == 8) {
+                    g711acnt += 1;
+                }
+            }
             last = member;
             member = member->next;
         }
@@ -3037,6 +3048,16 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
              * in an effort to send less packets when we're muted */
             member->frame_max = 1;
 
+            if (!member->one_of_active) {
+                if (member->orig_read_impl.ianacode == 9) {
+                    g722cnt += 1;
+                } else if (member->orig_read_impl.ianacode == 0) {
+                    g711ucnt += 1;
+                } else if (member->orig_read_impl.ianacode == 8) {
+                    g711acnt += 1;
+                }
+            }
+
             if (last) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, 
                                   "Moving member %d from listeners to speakers\n", member->id);
@@ -3055,10 +3076,22 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
                 member = member_next;
             }
         } else {
+            if (member->orig_read_impl.ianacode == 9) {
+                g722cnt += 1;
+            } else if (member->orig_read_impl.ianacode == 0) {
+                g711ucnt += 1;
+            } else if (member->orig_read_impl.ianacode == 8) {
+                g711acnt += 1;
+            }
             last = member;
             member = member->next;
         }
     }
+
+    ceo_set_listener_count(&conference->ceo, 9, g722cnt);
+    ceo_set_listener_count(&conference->ceo, 0, g711ucnt);
+    ceo_set_listener_count(&conference->ceo, 8, g711acnt);
+
     switch_mutex_unlock(conference->member_mutex);
     switch_mutex_unlock(conference->mutex);
 }
@@ -4123,11 +4156,15 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         }
     }
     for (i = 0; i < MAX_ACTIVE_TALKERS; ++i) {
+        uint32_t codec;
         if (conference->last_active_talkers[i] == NULL)
             break;
 
         conference->last_active_talkers[i]->one_of_active = SWITCH_FALSE;
         conference->last_active_talkers[i]->last_time_active = now;
+        codec = conference->last_active_talkers[i]->orig_read_impl.ianacode;
+
+        ceo_set_listener_count_incr(&conference->ceo, codec, 1);
 
         for (j = 0; j < MAX_ACTIVE_TALKERS; ++j) {
             if (temp_active_talkers[j] == NULL)
@@ -7202,6 +7239,9 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
     return NULL;
 }
 
+SWITCH_DECLARE(switch_status_t) switch_core_session_send_conference_frame(switch_core_session_t *session, switch_frame_t *frame,
+                                                                          switch_io_flag_t flags, int stream_id, switch_time_t *timed);
+
 switch_status_t accumulate_and_send(participant_thread_data_t *ol, switch_frame_t *from_frame,
                                     switch_frame_t *to_frame, switch_time_t *before_send_time) {
 
@@ -7236,8 +7276,9 @@ switch_status_t accumulate_and_send(participant_thread_data_t *ol, switch_frame_
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "member %d sending frame w/ %d bytes (from frame %d bytes) eq:%d cnt:%d max:%d\n",
                               member->id, to_frame->datalen, from_frame->datalen, equal, ol->frame_cnt, member->frame_max);
         }
-        if (switch_core_session_write_enc_frame(member->session, to_frame,
-                                                SWITCH_IO_FLAG_NONE, 0, before_send_time) != SWITCH_STATUS_SUCCESS) {
+
+        if (switch_core_session_send_conference_frame(member->session, to_frame,
+                                                      SWITCH_IO_FLAG_NONE, 0, before_send_time) != SWITCH_STATUS_SUCCESS) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "member %d failed to write_enc_frame\n", member->id);
             return SWITCH_STATUS_FALSE;
         } else {
@@ -7521,11 +7562,16 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             }
             
             /* if we're the first to see this frame then encode it */
+            //#define USE_BUFFER
+#ifdef USE_BUFFER
             if (!meo_frame_encoded(&member->meo)) {
                 switch_frame_t *frame = NULL;
                 ols->write_frame.samples = ols->write_frame.datalen / 2;
                 ols->write_frame.timestamp = timer->samplecount;
                 
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
+                                  "member %d shouldn't get here!\n", member->id);
+
                 if ((ols->write_frame.datalen = (uint32_t)meo_read_buffer(&member->meo, ols->write_frame.data, ols->bytes))) {
                     
                     if (switch_core_session_enc_frame(member->session, &ols->write_frame, SWITCH_IO_FLAG_NONE, 0,
@@ -7553,7 +7599,9 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
                     switch_mutex_unlock(member->meo.cwc->codec_mutex);
                     break;
                 }
-            } else {
+            } else
+#endif
+                {
                 member->meo.shared_copy_cnt += 1;
                 member->meo.cwc->rd_cnt += 1;
             }
@@ -11953,7 +12001,6 @@ static int setup_media(conference_member_t *member, conference_obj_t *conference
     if (member->read_resampler) {
         switch_resample_destroy(&member->read_resampler);
     }
-
 
     switch_core_session_get_read_impl(member->session, &member->orig_read_impl);
     member->native_rate = read_impl.samples_per_second;

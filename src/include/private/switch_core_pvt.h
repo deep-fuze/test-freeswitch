@@ -342,7 +342,21 @@ struct switch_session_manager {
 
 extern struct switch_session_manager session_manager;
 
+#if 1
+struct switch_conference_encoder_state {
+  switch_buffer_t *raw_write_buffer;
+  switch_frame_t raw_write_frame;
+  switch_frame_t enc_write_frame;
+  uint8_t raw_write_buf[SWITCH_RECOMMENDED_BUFFER_SIZE];
+  uint8_t enc_write_buf[SWITCH_RECOMMENDED_BUFFER_SIZE];
+  switch_codec_t write_codec;
+  const switch_codec_implementation_t *write_impl;
+  switch_audio_resampler_t *write_resampler;
+};
 
+extern struct switch_conference_encoder_state conference_encoder_state;
+
+#endif
 
 switch_status_t switch_core_sqldb_start(switch_memory_pool_t *pool, switch_bool_t manage);
 void switch_core_sqldb_stop(void);

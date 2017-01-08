@@ -38,7 +38,6 @@
 #include "interface/webrtc_neteq_if.h"
 #include "interface/webrtc_neteq_internal.h"
 
-
 SWITCH_DECLARE(switch_status_t) switch_core_session_write_video_frame(switch_core_session_t *session, switch_frame_t *frame, switch_io_flag_t flags,
                                                                       int stream_id)
 {
@@ -2982,6 +2981,270 @@ SWITCH_DECLARE(switch_status_t) switch_core_ioctl_stats(switch_core_session_t *s
         return session->endpoint_interface->stats_ioctl(session, cmd, arg); 
 
     return SWITCH_STATUS_FALSE;
+}
+
+typedef struct switch_conference_encoder_state conference_encoder_state_t;
+
+SWITCH_DECLARE(conference_encoder_state_t *) switch_core_conference_encode_alloc(switch_memory_pool_t *pool)
+{
+    return switch_core_alloc(pool, sizeof(conference_encoder_state_t));
+}
+
+SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_init(conference_encoder_state_t *encoder_state, switch_codec_t *write_codec, switch_memory_pool_t *pool)
+{
+    switch_status_t status = SWITCH_STATUS_SUCCESS;
+
+    encoder_state->raw_write_frame.data = encoder_state->raw_write_buf;
+    encoder_state->raw_write_frame.buflen = sizeof(encoder_state->raw_write_buf);
+
+    encoder_state->enc_write_frame.data = encoder_state->enc_write_buf;
+    encoder_state->enc_write_frame.buflen = sizeof(encoder_state->enc_write_buf);
+
+    encoder_state->raw_write_buffer = NULL;
+    encoder_state->write_resampler = NULL;
+
+    switch_core_codec_copy(write_codec, &encoder_state->write_codec, pool);
+    encoder_state->write_impl = encoder_state->write_codec.implementation;
+
+    switch_core_codec_reset(&encoder_state->write_codec);
+
+    return status;
+}
+
+SWITCH_DECLARE(void) switch_core_conference_encode_destroy(conference_encoder_state_t *encoder_state)
+{
+    if (encoder_state->write_resampler) {
+        switch_resample_destroy(&encoder_state->write_resampler);
+    }
+    if (encoder_state->raw_write_buffer) {
+        switch_buffer_destroy(&encoder_state->raw_write_buffer);
+    }
+    switch_core_codec_destroy(&encoder_state->write_codec);
+}
+
+//#define TRACE_ENCODE
+
+SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_frame(conference_encoder_state_t *encoder_state, switch_frame_t *frame,
+                                                                    switch_io_flag_t flags, switch_frame_t **ret_enc_frame)
+{
+    switch_status_t status = SWITCH_STATUS_FALSE;
+    switch_frame_t *enc_frame = NULL, *write_frame = frame;
+    unsigned int flag = 0, do_resample = 0, resample = 0;
+    switch_frame_flag_t before_flags = frame->flags;
+#ifdef TRACE_ENCODE
+    char debug_path[1024];
+    char tmp[128];
+    memset(debug_path, 0, 1024);
+#endif
+
+    switch_assert(frame != NULL);
+
+    // frame->codec = &encoder_state->write_codec;
+
+    if (frame->codec == NULL || frame->codec->implementation == NULL) {
+#ifdef TRACE_ENCODE
+        strncat(debug_path, "no_frame_codec,", 1024);
+#endif
+        goto done;
+    }
+
+    switch_assert(frame->codec != NULL);
+    switch_assert(frame->codec->implementation != NULL);
+
+#ifdef TRACE_ENCODE
+    switch_snprintf(debug_path, sizeof(debug_path), "(%s,%d,%d)->(%s,%d),",
+                    frame->codec->implementation->iananame, frame->datalen, frame->codec->implementation->actual_samples_per_second,
+                    encoder_state->write_impl->iananame, encoder_state->write_impl->actual_samples_per_second);
+#endif
+
+    if (frame->codec->implementation->actual_samples_per_second != encoder_state->write_impl->actual_samples_per_second) {
+        do_resample = TRUE;
+#ifdef TRACE_ENCODE
+        strncat(debug_path, "resample,", 1024);
+#endif
+    }
+
+    encoder_state->raw_write_frame.datalen = encoder_state->raw_write_frame.buflen;
+    frame->codec->cur_frame = frame;
+    encoder_state->write_codec.cur_frame = frame;
+    status = switch_core_codec_decode(frame->codec,
+                                      &encoder_state->write_codec,
+                                      frame->data,
+                                      frame->datalen,
+                                      encoder_state->write_impl->actual_samples_per_second,
+                                      encoder_state->raw_write_frame.data,
+                                      &encoder_state->raw_write_frame.datalen,
+                                      &encoder_state->raw_write_frame.rate,
+                                      &frame->flags);
+    frame->codec->cur_frame = NULL;
+    encoder_state->write_codec.cur_frame = NULL;
+    if (do_resample && status == SWITCH_STATUS_SUCCESS) {
+        status = SWITCH_STATUS_RESAMPLE;
+    }
+
+#ifdef TRACE_ENCODE
+    switch_snprintf(tmp, 128, "ret:%d,", status);
+    strncat(debug_path, tmp, 1023);
+#endif
+
+    switch (status) {
+    case SWITCH_STATUS_RESAMPLE:
+        resample++;
+        write_frame = &encoder_state->raw_write_frame;
+        write_frame->rate = frame->codec->implementation->actual_samples_per_second;
+        if (!encoder_state->write_resampler) {
+#ifdef TRACE_ENCODE
+            strncat(debug_path, "resample_create,", 1024);
+#endif
+            status = switch_resample_create(&encoder_state->write_resampler,
+                                            frame->codec->implementation->actual_samples_per_second,
+                                            encoder_state->write_impl->actual_samples_per_second,
+                                            encoder_state->write_impl->decoded_bytes_per_packet,
+                                            SWITCH_RESAMPLE_QUALITY, 1);
+            if (status != SWITCH_STATUS_SUCCESS) {
+                goto done;
+            }
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Activating write resampler\n");
+        }
+        break;
+    case SWITCH_STATUS_SUCCESS:
+#ifdef TRACE_ENCODE
+        strncat(debug_path, "decode_success,", 1024);
+#endif
+        encoder_state->raw_write_frame.samples = encoder_state->raw_write_frame.datalen / sizeof(int16_t);
+        encoder_state->raw_write_frame.timestamp = frame->timestamp;
+        encoder_state->raw_write_frame.rate = frame->rate;
+        encoder_state->raw_write_frame.m = frame->m;
+        encoder_state->raw_write_frame.ssrc = frame->ssrc;
+        encoder_state->raw_write_frame.seq = frame->seq;
+        encoder_state->raw_write_frame.payload = frame->payload;
+        encoder_state->raw_write_frame.flags = 0;
+        write_frame = &encoder_state->raw_write_frame;
+        break;
+    case SWITCH_STATUS_BREAK:
+        status = SWITCH_STATUS_SUCCESS;
+        goto error;
+    case SWITCH_STATUS_NOOP:
+        if (encoder_state->write_resampler) {
+            switch_resample_destroy(&encoder_state->write_resampler);
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Deactivating write resampler\n");
+        }
+        write_frame = frame;
+        status = SWITCH_STATUS_SUCCESS;
+        break;
+    default:
+        if (status == SWITCH_STATUS_NOT_INITALIZED) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Codec init error!\n");
+            goto error;
+        }
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Codec %s decoder error!\n",
+                          frame->codec->codec_interface->interface_name);
+        goto error;
+    }
+
+    if (encoder_state->write_resampler) {
+        short *data = write_frame->data;
+        if (encoder_state->write_resampler) {
+#ifdef TRACE_ENCODE
+            strncat(debug_path, "resampling,", 1024);
+#endif
+            switch_resample_process(encoder_state->write_resampler, data, write_frame->datalen / 2);
+            memcpy(data, encoder_state->write_resampler->to, encoder_state->write_resampler->to_len * 2);
+            write_frame->samples = encoder_state->write_resampler->to_len;
+            write_frame->datalen = write_frame->samples * 2;
+            write_frame->rate = encoder_state->write_resampler->to_rate;
+        }
+    }
+
+    if (write_frame->datalen < encoder_state->write_impl->decoded_bytes_per_packet) {
+#ifdef TRACE_ENCODE
+        switch_snprintf(tmp, 128, "change_datalen:%d->%d,", write_frame->datalen, (encoder_state->write_impl->decoded_bytes_per_packet));
+        strncat(debug_path, tmp, 1023);
+#endif
+        memset(write_frame->data, 255, encoder_state->write_impl->decoded_bytes_per_packet - write_frame->datalen);
+        write_frame->datalen = encoder_state->write_impl->decoded_bytes_per_packet;
+    }
+
+    enc_frame = write_frame;
+    encoder_state->enc_write_frame.datalen = encoder_state->enc_write_frame.buflen;
+    encoder_state->write_codec.cur_frame = frame;
+    frame->codec->cur_frame = frame;
+    status = switch_core_codec_encode(&encoder_state->write_codec,
+                                      frame->codec,
+                                      enc_frame->data,
+                                      enc_frame->datalen,
+                                      encoder_state->write_impl->actual_samples_per_second,
+                                      encoder_state->enc_write_frame.data,
+                                      &encoder_state->enc_write_frame.datalen,
+                                      &encoder_state->enc_write_frame.rate,
+                                      &flag);
+#ifdef TRACE_ENCODE
+    switch_snprintf(tmp, 128, "encode:(%d,%d)->(%d,%d)=%d,",
+                    enc_frame->datalen, encoder_state->write_impl->actual_samples_per_second,
+                    encoder_state->enc_write_frame.datalen, encoder_state->enc_write_frame.rate,
+                    status);
+    strncat(debug_path, tmp, 1023);
+#endif
+
+    encoder_state->write_codec.cur_frame = NULL;
+    frame->codec->cur_frame = NULL;
+    switch (status) {
+    case SWITCH_STATUS_RESAMPLE:
+        resample++;
+        break;
+    case SWITCH_STATUS_SUCCESS:
+        encoder_state->enc_write_frame.codec = &encoder_state->write_codec;
+        encoder_state->enc_write_frame.samples = enc_frame->datalen / sizeof(int16_t);
+        encoder_state->enc_write_frame.payload = encoder_state->write_impl->ianacode;
+        enc_frame->timestamp = 0;
+        encoder_state->enc_write_frame.m = 0;
+        encoder_state->enc_write_frame.ssrc = 0;
+        encoder_state->enc_write_frame.seq = 0;
+        encoder_state->enc_write_frame.flags = 0;
+        *ret_enc_frame = &encoder_state->enc_write_frame;
+        break;
+    case SWITCH_STATUS_NOOP:
+        enc_frame->codec = &encoder_state->write_codec;
+        enc_frame->samples = enc_frame->datalen / sizeof(int16_t);
+        enc_frame->timestamp = 0;
+        enc_frame->m = 0;
+        enc_frame->seq = frame->seq;
+        enc_frame->ssrc = frame->ssrc;
+        enc_frame->payload = enc_frame->codec->implementation->ianacode;
+        write_frame = enc_frame;
+        status = SWITCH_STATUS_SUCCESS;
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "nothing to do - wrong!\n");
+        *ret_enc_frame = NULL;
+        break;
+    case SWITCH_STATUS_NOT_INITALIZED:
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Codec init error!\n");
+        *ret_enc_frame = NULL;
+        goto error;
+    default:
+        *ret_enc_frame = NULL;
+        goto error;
+    }
+    if (before_flags & SFF_IVR_FRAME) {
+        switch_set_flag(write_frame, SFF_IVR_FRAME);
+    }
+
+ done:
+    /* nothing */
+ error:
+    /* nothing */
+
+#ifdef TRACE_ENCODE
+    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "%s\n", debug_path);
+#endif
+
+    return status;
+}
+
+
+SWITCH_DECLARE(switch_status_t) switch_core_session_send_conference_frame(switch_core_session_t *session, switch_frame_t *frame,
+                                                                          switch_io_flag_t flags, int stream_id, switch_time_t *timed)
+{
+    return perform_write_timed(session, frame, flags, stream_id, timed);
 }
 
 /* For Emacs:
