@@ -117,7 +117,8 @@ void cwc_destroy(conference_write_codec_t *cwc) {
     }
 #endif
     if (cwc->encoder) {
-      switch_core_conference_encode_destroy(cwc->encoder);
+        switch_core_conference_encode_destroy(cwc->encoder);
+        switch_core_codec_destroy(&cwc->frame_codec);
     }
 }
 
