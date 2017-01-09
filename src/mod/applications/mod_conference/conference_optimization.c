@@ -207,8 +207,8 @@ switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t
                               encode_status, (ret_enc_frame ? "set" : "null"));
         }
     }
-
     switch_mutex_unlock(cwc->codec_mutex);
+
     return ret;
 }
 
@@ -242,19 +242,22 @@ switch_bool_t cwc_write_and_copy_buffer(conference_write_codec_t *cwc, conferenc
     if (cwc0->frames[cwc->write_idx].written && cwc0->frames[cwc->write_idx].encoded) {
         cwc_set_frame(cwc, cwc->write_idx, &cwc0->frames[cwc->write_idx].frame);
     }
-
     switch_mutex_unlock(cwc->codec_mutex);
+
     return ret;
 }
 
 
 
 switch_bool_t cwc_set_frame(conference_write_codec_t *cwc, uint32_t read_idx, switch_frame_t *frame) {
+    switch_mutex_lock(cwc->codec_mutex);
     if (switch_frame_copy(frame, &cwc->frames[read_idx].frame, frame->datalen) == SWITCH_STATUS_SUCCESS) {
       //switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "cwc_set_frame: idx(%d) bytes(%d)\n", read_idx, frame->datalen);
         cwc->frames[read_idx].encoded = SWITCH_TRUE;
+	switch_mutex_unlock(cwc->codec_mutex);
         return SWITCH_TRUE;
     } else {
+	switch_mutex_unlock(cwc->codec_mutex);
         return SWITCH_FALSE;
     }
 }
