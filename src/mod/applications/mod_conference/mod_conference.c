@@ -6839,6 +6839,8 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
 
             if (list->count) {
                 ppp = list->process_avg[list->process_avg_idx]/list->count;
+            } else {
+                list->process_avg[list->process_avg_idx] = 20000;
             }
 
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
@@ -13047,7 +13049,7 @@ static conference_obj_t *conference_find(char *name, char *domain)
 }
 
 #define MAX_PARTICIPANTS_PER_THREAD 400
-#define MAX_PARTICIPANTS_PER_OTHREAD 400
+#define MAX_PARTICIPANTS_PER_OTHREAD 600
 
 /* create a new conferene with a specific profile */
 static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_core_session_t *session, switch_memory_pool_t *pool)
