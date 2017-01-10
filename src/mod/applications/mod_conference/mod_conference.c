@@ -7244,6 +7244,8 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
     return NULL;
 }
 
+#define CONFERENCE_PARTICIPANT_LIMIT_BEFORE_ACCUMULATION 1000
+
 SWITCH_DECLARE(switch_status_t) switch_core_session_send_conference_frame(switch_core_session_t *session, switch_frame_t *frame,
                                                                           switch_io_flag_t flags, int stream_id, switch_time_t *timed);
 
@@ -7253,11 +7255,15 @@ switch_status_t accumulate_and_send(participant_thread_data_t *ol, switch_frame_
     conference_member_t *member = ol->member;
     switch_bool_t send = SWITCH_FALSE;
     switch_bool_t equal = SWITCH_FALSE;
+    uint32_t participant_count = ol->member->conference->count;
+    uint32_t frame_max = 1;
 
     if (!from_frame) { return SWITCH_STATUS_FALSE; }
 
+    frame_max = (participant_count > CONFERENCE_PARTICIPANT_LIMIT_BEFORE_ACCUMULATION) ? member->frame_max : 1;
+
     /* add data to acc_frame */
-    if (member->frame_max <= 1 && ol->frame_cnt == 0) {
+    if (frame_max <= 1 && ol->frame_cnt == 0) {
         /* just send! */
         to_frame = from_frame;
         send = SWITCH_TRUE;
@@ -7271,7 +7277,7 @@ switch_status_t accumulate_and_send(participant_thread_data_t *ol, switch_frame_
             }
             ol->frame_cnt += 1;
         }
-        if (ol->frame_cnt >= member->frame_max) {
+        if (ol->frame_cnt >= frame_max) {
             send = SWITCH_TRUE;
         }
     }
@@ -7279,7 +7285,7 @@ switch_status_t accumulate_and_send(participant_thread_data_t *ol, switch_frame_
     if (send) {
         if (to_frame->datalen < 160) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "member %d sending frame w/ %d bytes (from frame %d bytes) eq:%d cnt:%d max:%d\n",
-                              member->id, to_frame->datalen, from_frame->datalen, equal, ol->frame_cnt, member->frame_max);
+                              member->id, to_frame->datalen, from_frame->datalen, equal, ol->frame_cnt, frame_max);
         }
 
         if (switch_core_session_send_conference_frame(member->session, to_frame,
