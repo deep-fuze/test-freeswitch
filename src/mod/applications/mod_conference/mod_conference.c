@@ -460,6 +460,7 @@ static struct {
     uint32_t conference_thread_lock_tid;
 
     uint16_t max_participants_per_thread;
+    uint16_t max_participants_per_othread;
     uint16_t min_sleep_per_thread;
 } globals;
 
@@ -4184,13 +4185,15 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
 
             if (switch_test_flag(conference->last_active_talkers[i], MFLAG_RUNNING)) {
                 /* we're ready to start consuming from the common audio source again */
-                meo_reset_idx(&conference->last_active_talkers[i]->meo);
-                if (strlen(conference->last_active_talkers[i]->mname) > 0) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(conference->last_active_talkers[i]->session), SWITCH_LOG_INFO,
-                                      "Meeting Id: %s Instance Id: %s stop speaking %s/%u score %u energy %u\n",
-                                      conference->meeting_id, conference->instance_id,
-                                      conference->last_active_talkers[i]->mname, conference->last_active_talkers[i]->id,
-                                      conference->last_active_talkers[i]->score_iir, conference->last_active_talkers[i]->score);
+                if (switch_test_flag(conference->last_active_talkers[i], MFLAG_RUNNING)) {
+                    meo_reset_idx(&conference->last_active_talkers[i]->meo);
+                    if (strlen(conference->last_active_talkers[i]->mname) > 0) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(conference->last_active_talkers[i]->session), SWITCH_LOG_INFO,
+                                          "Meeting Id: %s Instance Id: %s stop speaking %s/%u score %u energy %u\n",
+                                          conference->meeting_id, conference->instance_id,
+                                          conference->last_active_talkers[i]->mname, conference->last_active_talkers[i]->id,
+                                          conference->last_active_talkers[i]->score_iir, conference->last_active_talkers[i]->score);
+                    }
                 }
             
             }
@@ -13044,6 +13047,7 @@ static conference_obj_t *conference_find(char *name, char *domain)
 }
 
 #define MAX_PARTICIPANTS_PER_THREAD 400
+#define MAX_PARTICIPANTS_PER_OTHREAD 400
 
 /* create a new conferene with a specific profile */
 static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_core_session_t *session, switch_memory_pool_t *pool)
@@ -13123,6 +13127,7 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
     uint16_t history_reset_time_period = 500;
     uint16_t stop_entry_tone_participants = 50;
     uint16_t max_participants_per_thread = MAX_PARTICIPANTS_PER_THREAD;
+    uint16_t max_participants_per_othread = MAX_PARTICIPANTS_PER_OTHREAD;
     uint16_t min_sleep_per_thread = 5000;
     char *begin_sound = NULL;
 
@@ -13379,6 +13384,8 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
                 stop_entry_tone_participants = strtol(val, NULL, 0);
             } else if (!strcasecmp(var, "max-participants-per-thread") && !zstr(val)) {
                 max_participants_per_thread = strtol(val, NULL, 0);
+            } else if (!strcasecmp(var, "max-participants-per-othread") && !zstr(val)) {
+                max_participants_per_othread = strtol(val, NULL, 0);
             } else if (strcasecmp(var, "min-sleep-per-thread") && !zstr(val)) {
                 min_sleep_per_thread = strtol(val, NULL, 0);
             }
@@ -13728,6 +13735,9 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
         if (globals.max_participants_per_thread != max_participants_per_thread) {
             globals.max_participants_per_thread = max_participants_per_thread;
         }
+        if (globals.max_participants_per_othread != max_participants_per_othread) {
+            globals.max_participants_per_othread = max_participants_per_othread;
+        }
         if (globals.min_sleep_per_thread != min_sleep_per_thread) {
             globals.min_sleep_per_thread = min_sleep_per_thread;
         }
@@ -13801,10 +13811,12 @@ static int conference_list_add(conference_obj_t *conference, participant_thread_
     switch_bool_t first;
     int idx;
     uint16_t max_participants_per_thread;
+    uint16_t max_participants_per_othread;
     uint16_t min_sleep_per_thread;
 
     switch_mutex_lock(globals.conference_mutex);
     max_participants_per_thread = globals.max_participants_per_thread;
+    max_participants_per_othread = globals.max_participants_per_othread;
     min_sleep_per_thread = globals.min_sleep_per_thread;
     switch_mutex_unlock(globals.conference_mutex);
 
@@ -13857,9 +13869,16 @@ static int conference_list_add(conference_obj_t *conference, participant_thread_
         }
     } else {
         for (idx = conference->list_idx; idx < MAX_NUMBER_OF_OUTPUT_THREADS; idx += MAX_NUMBER_OF_OUTPUT_NTHREADS) {
-            if (globals.conference_thread[idx].count < max_participants_per_thread) {
-                lowest = idx;
-                break;
+            if (idx < MAX_NUMBER_OF_OUTPUT_NTHREADS) {
+                if (globals.conference_thread[idx].count < max_participants_per_thread) {
+                    lowest = idx;
+                    break;
+                }
+            } else {
+                if (globals.conference_thread[idx].count < max_participants_per_othread) {
+                    lowest = idx;
+                    break;
+                }
             }
         }
     }
@@ -14511,6 +14530,7 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_conference_load)
     }
 
     globals.max_participants_per_thread = MAX_PARTICIPANTS_PER_THREAD;
+    globals.max_participants_per_othread = MAX_PARTICIPANTS_PER_OTHREAD;
     globals.min_sleep_per_thread = 5000;
 
     /* Subscribe to presence request events */

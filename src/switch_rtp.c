@@ -303,6 +303,7 @@ typedef struct ts_normalize_s {
 
 #define MAX_EMAIL_LEN 1024
 #define MAX_PHONE_LEN 100
+//#define TRACE_READ 1
 
 struct switch_rtp {
     /*
@@ -492,6 +493,10 @@ struct switch_rtp {
     switch_time_t last_adjust_cn_count;
     switch_time_t last_ivr_send_time;
     uint32_t in_cn_period;
+#ifdef TRACE_READ
+    int trace_cnt;
+    char trace_buffer[1024];
+#endif
 };
 
 struct switch_rtcp_report_block {
@@ -4577,6 +4582,11 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
 
     rtp_session->last_adjust_cn_count = switch_time_now();
 
+#ifdef TRACE_READ
+    memset(rtp_session->trace_buffer, 0, 1024);
+    rtp_session->trace_cnt = 0;
+#endif
+
     return SWITCH_STATUS_SUCCESS;
 }
 
@@ -6494,7 +6504,7 @@ static int using_ice(switch_rtp_t *rtp_session)
     return 0;
 }
 
-// #define TRACE_READ 1
+//#define TRACE_READ 1
 static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_type,
                            payload_map_t **pmapP, switch_frame_flag_t *flags, switch_io_flag_t io_flags)
 {
@@ -6574,6 +6584,11 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                     } else {
                         strncat(trace_buffer, "read_fail,", 1024);
                     }
+                    {
+                        char tmpbuf[32];
+                        switch_snprintf(tmpbuf, 32, "(%" PRId64 "),", bytes);
+                        strncat(trace_buffer, tmpbuf, 1023);
+                    }
 #endif
                     
 #ifdef CHECK_FOR_LARGE_PKTS
@@ -6617,17 +6632,15 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                 }
             }
 
-            if (rtp_session->use_webrtc_neteq == SWITCH_FALSE) {
-                /* indicate to the caller that there is more data waiting in the socket */
-                if (hot_socket) {
-                    *flags |= SFF_HOT_READ;
-                }
-                /* if there's no more data waiting, wait for the next timer ... though this is a little weird as it
-                 * delays the current packet by 20ms!
-                 */
-                if (!rtp_session->dontwait && !hot_socket) {
-                    switch_core_timer_next(&rtp_session->timer);
-                }
+            /* indicate to the caller that there is more data waiting in the socket */
+            if (hot_socket) {
+                *flags |= SFF_HOT_READ;
+            }
+            /* if there's no more data waiting, wait for the next timer ... though this is a little weird as it
+             * delays the current packet by 20ms!
+             */
+            if (!rtp_session->dontwait && !hot_socket) {
+                switch_core_timer_next(&rtp_session->timer);
             }
         }
 
@@ -6701,6 +6714,11 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                     strncat(trace_buffer, "read_success2,", 1024);
                 } else {
                     strncat(trace_buffer, "read_fail2,", 1024);
+                }
+                {
+                    char tmpbuf[32];
+                    switch_snprintf(tmpbuf, 32, "(%"PRId64"),", bytes);
+                    strncat(trace_buffer, tmpbuf, 1023);
                 }
 #endif
 
@@ -7355,7 +7373,7 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
     
 #ifdef CHECK_FOR_LARGE_PKTS
     if (bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_commone_read len too large:%zu ret=%d\n",
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_common_read len too large:%zu ret=%d\n",
                           bytes, ret);
     }
 #endif
@@ -7363,9 +7381,12 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
     READ_DEC(rtp_session);
 
 #ifdef TRACE_READ
-    if (*flags & SFF_CNG) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "rtp_commone_read: CNG %s%s\n",
-                          (*flags & SFF_TIMEOUT ? "timeout " : ""), trace_buffer);
+    if (bytes == 0) {
+        if (strncmp(rtp_session->trace_buffer, trace_buffer, 1024) != 0) {
+            strncpy(rtp_session->trace_buffer, trace_buffer, 1024);
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "rtp_common_read (%s): CNG %s%s\n",
+                              rtp_session->rtp_conn_name, (*flags & SFF_TIMEOUT ? "timeout " : ""), trace_buffer);
+        }
     }
 #endif
 
@@ -9000,7 +9021,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
     void *neteq_inst;
     WebRtcNetEQ_NetworkStatistics nwstats;
     int jbuf = -1;
-	uint16_t local_send, local_recv;
+    uint16_t local_send, local_recv;
 
     rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
 

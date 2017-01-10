@@ -247,17 +247,15 @@ switch_bool_t cwc_write_and_copy_buffer(conference_write_codec_t *cwc, conferenc
     return ret;
 }
 
-
-
 switch_bool_t cwc_set_frame(conference_write_codec_t *cwc, uint32_t read_idx, switch_frame_t *frame) {
     switch_mutex_lock(cwc->codec_mutex);
     if (switch_frame_copy(frame, &cwc->frames[read_idx].frame, frame->datalen) == SWITCH_STATUS_SUCCESS) {
-      //switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "cwc_set_frame: idx(%d) bytes(%d)\n", read_idx, frame->datalen);
+        // switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "cwc_set_frame: idx(%d) bytes(%d)\n", read_idx, frame->datalen);
         cwc->frames[read_idx].encoded = SWITCH_TRUE;
-	switch_mutex_unlock(cwc->codec_mutex);
+        switch_mutex_unlock(cwc->codec_mutex);
         return SWITCH_TRUE;
     } else {
-	switch_mutex_unlock(cwc->codec_mutex);
+        switch_mutex_unlock(cwc->codec_mutex);
         return SWITCH_FALSE;
     }
 }
@@ -453,7 +451,7 @@ switch_bool_t meo_set_frame(conf_member_encoder_optimization_t *meo, switch_fram
 }
 
 void meo_reset_idx(conf_member_encoder_optimization_t *meo) {
-    meo->read_idx = meo->cwc->write_idx;
+    meo->read_idx = meo->cwc ? meo->cwc->write_idx : 0;
 }
 
 switch_bool_t meo_file_exists(conf_member_encoder_optimization_t *meo, char *fname) {

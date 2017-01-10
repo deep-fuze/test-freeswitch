@@ -457,8 +457,6 @@ read_again:
         
         if (!SWITCH_READ_ACCEPTABLE(status) || !session->read_codec || !switch_core_codec_ready(session->read_codec)) {
             *frame = NULL;
-            switch_mutex_unlock(session->read_codec->mutex);
-            switch_mutex_unlock(session->codec_read_mutex);
             return SWITCH_STATUS_FALSE;
         }
         
@@ -469,7 +467,6 @@ read_again:
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "%s has no read codec.\n", switch_channel_get_name(session->channel));
             switch_channel_hangup(session->channel, SWITCH_CAUSE_INCOMPATIBLE_DESTINATION);
             *frame = &runtime.dummy_cng_frame;
-            switch_mutex_unlock(session->read_codec->mutex);
             switch_mutex_unlock(session->codec_read_mutex);
             return SWITCH_STATUS_FALSE;
         }
