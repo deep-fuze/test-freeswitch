@@ -240,6 +240,11 @@ static const char* rtp_stat_name[RTP_MAX_STAT] =
     [RTP_PER_LOST] = "event-lost",
     [RTP_RECV_RATE] = "event-recv-rate",
     [RTP_SEND_RATE] = "event-send-rate",
+    [RTP_MOS] = "event-mos",
+    [RTP_R] = "event-r",
+    [RTP_VARIANCE] = "event-variance",
+    [RTP_FLAWS] = "event-flaws",
+
 };
 
 static const char* rtp_event_name[RTP_EVENT_MAX] =
@@ -1593,7 +1598,7 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
     }
 
     if ((vval = switch_channel_get_variable(channel, "meeting"))) {
-		switch_channel_set_running_stats(channel, "meeting", vval);
+        switch_channel_set_running_stats(channel, "meeting", vval);
     }
 
     if ((vval = switch_channel_get_variable(channel, "meeting_instance"))) {
@@ -1653,7 +1658,6 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
         (event & RTP_EVENT_LONG_JITTER_BUFFER)) {
         if ((event_trigger == SWITCH_TRUE) && (event & RTP_EVENT_HIGH_CONSECUTIVE_PACKET_LOSS))
             switch_core_media_set_rtp_event(session, RTP_EVENT_HIGH_CONSECUTIVE_PACKET_LOSS, type);
-
         if (switch_rtp_get_webrtc_neteq(engine->rtp_session)) {
             WebRtcNetEQ_ProcessingActivity neteq_stats;
             void *neteq_inst = switch_core_get_neteq_inst(session);
@@ -1703,6 +1707,21 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
         }
         if (strlen(stats->send_rate) > 0) {
             set_periodic_stats_value(session, RTP_SEND_RATE, stats->send_rate, type);
+        }
+        if (strlen(stats->lost_percent) > 0) {
+            set_periodic_stats_value(session, RTP_PER_LOST, stats->lost_percent, type);
+        }
+        if (strlen(stats->r) > 0) {
+            set_periodic_stats_value(session, RTP_R, stats->r, type);
+        }
+        if (strlen(stats->variance) > 0) {
+            set_periodic_stats_value(session, RTP_VARIANCE, stats->variance, type);
+        }
+        if (strlen(stats->flaws) > 0) {
+            set_periodic_stats_value(session, RTP_FLAWS, stats->flaws, type);
+        }
+        if (strlen(stats->mos) > 0) {
+            set_periodic_stats_value(session, RTP_MOS, stats->mos, type);
         }
     }
 }

@@ -685,6 +685,10 @@ typedef enum {
     RTP_PER_LOST,
     RTP_RECV_RATE,
     RTP_SEND_RATE,
+    RTP_MOS,
+    RTP_R,
+    RTP_VARIANCE,
+    RTP_FLAWS,
     RTP_MAX_STAT
 } rtp_periodic_stat_t;
 
@@ -748,6 +752,10 @@ typedef struct {
     char jitter[RTP_STATS_STR_SIZE];
     char cumulative_lost_e[RTP_STATS_STR_SIZE];
     char lost_percent[RTP_STATS_STR_SIZE];
+    char mos[RTP_STATS_STR_SIZE];
+    char r[RTP_STATS_STR_SIZE];
+    char variance[RTP_STATS_STR_SIZE];
+    char flaws[RTP_STATS_STR_SIZE];
 
     uint16_t last_recv_rate;
     uint16_t last_send_rate;
@@ -757,6 +765,10 @@ typedef struct {
     int last_jitter;
     int last_cumulative_lost;
     float last_lost_percent;
+    float last_mos;
+    float last_r;
+    float last_variance;
+    uint64_t last_flaws;
 
     uint64_t time;
     int duration;

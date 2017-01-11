@@ -4579,6 +4579,10 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->stats.last_send_rate = -1;
     rtp_session->stats.last_cumulative_lost = -1;
     rtp_session->stats.last_lost_percent = -1;
+    rtp_session->stats.last_mos = -1;
+    rtp_session->stats.last_r = -1;
+    rtp_session->stats.last_variance = -1;
+    rtp_session->stats.last_flaws = -1;
 
     rtp_session->last_adjust_cn_count = switch_time_now();
 
@@ -6010,7 +6014,6 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
             } else if (!(rtp_session->stats.last_event & RTP_EVENT_HIGH_DRIFT)) {
                 rtp_session->stats.rtcp.last_drift = drift_ms;
             }
-
             if (drift_ms > rtp_session->stats.rtcp.max_drift)
                 rtp_session->stats.rtcp.max_drift = drift_ms;
 
@@ -7291,6 +7294,9 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
             *flags |= (SFF_CNG);
             *payload_type = (switch_payload_t) rtp_session->recv_msg.header.pt;
             ret = 2 + rtp_header_len;
+
+            /* When CN is flowing this will cause 1: loss in the stats report and 2: lots of consecutive loss events */
+#if 0
             rtp_session->stats.inbound.skip_packet_count++;
             rtp_session->stats.period_skip_packet_count++;
             rtp_session->stats.consecutive_skip_packet++;
@@ -7301,6 +7307,7 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                 rtp_session->stats.last_period_skip_packet = rtp_session->stats.period_skip_packet_count;
                 rtp_session->stats.last_period_received =  rtp_session->stats.period_received;
             }
+#endif
             goto end;
         }
 
@@ -8999,6 +9006,11 @@ SWITCH_DECLARE(void) switch_rtp_reset_rtp_stats(switch_channel_t *channel)
     memset(rtp_session->stats.active_speaker, 0, sizeof(rtp_session->stats.active_speaker));
     memset(rtp_session->stats.send_rate, 0, sizeof(rtp_session->stats.send_rate));
     memset(rtp_session->stats.recv_rate, 0, sizeof(rtp_session->stats.recv_rate));
+    memset(rtp_session->stats.lost_percent, 0, sizeof(rtp_session->stats.lost_percent));
+    memset(rtp_session->stats.mos, 0, sizeof(rtp_session->stats.mos));
+    memset(rtp_session->stats.r, 0, sizeof(rtp_session->stats.r));
+    memset(rtp_session->stats.variance, 0, sizeof(rtp_session->stats.variance));
+    memset(rtp_session->stats.flaws, 0, sizeof(rtp_session->stats.flaws));
 
     rtp_session->stats.duration = 0;
 }
@@ -9034,14 +9046,39 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
         if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
             jbuf = nwstats.currentBufferSize;
         }
+    } else {
+        jbuf = rtp_session->stats.rtcp.jitter;
     }
 
+    /*
+     * switch_rtp.c:2459 audio stat 49.00 467/947 flaws: 480 mos: 2.52 v: 444.73 15.47/444.73
+     */
     if (jbuf != -1) {
         rtp_stat_add_value(rtp_session->stats.jitter, "%d", jbuf, rtp_session->stats.last_jitter);
     }
 
     if (level_in > -1) {
         rtp_stat_add_value(rtp_session->stats.recv_level, "%d", level_in, rtp_session->stats.last_recv_level);
+    }
+
+    if (rtp_session->stats.inbound.mos) {
+        rtp_stat_add_value(rtp_session->stats.mos, "%0.2f", rtp_session->stats.inbound.mos, rtp_session->stats.last_mos);
+    }
+
+    if (rtp_session->stats.inbound.R) {
+        rtp_stat_add_value(rtp_session->stats.r, "%0.2f", rtp_session->stats.inbound.R, rtp_session->stats.last_r);
+    }
+
+    if (rtp_session->stats.inbound.variance) {
+        rtp_stat_add_value(rtp_session->stats.variance, "%0.2f", rtp_session->stats.inbound.variance, rtp_session->stats.last_variance);
+    }
+
+    if (rtp_session->stats.inbound.flaws) {
+        rtp_stat_add_value(rtp_session->stats.flaws, "%0ld", rtp_session->stats.inbound.flaws, rtp_session->stats.last_flaws);
+    }
+
+    if (rtp_session->stats.inbound.lossrate) {
+        rtp_stat_add_value(rtp_session->stats.lost_percent, "%0.2f", rtp_session->stats.inbound.lossrate, rtp_session->stats.last_lost_percent);
     }
 
     if (level_out > -1) {
