@@ -722,7 +722,7 @@ typedef enum {
 } stats_ioctl_cmd_t;
 
 
-#define RTP_STATS_STR_SIZE 1024
+#define RTP_STATS_STR_SIZE 2048
 
 typedef struct {
     switch_rtp_numbers_t inbound;

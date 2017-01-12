@@ -9017,14 +9017,11 @@ SWITCH_DECLARE(void) switch_rtp_reset_rtp_stats(switch_channel_t *channel)
 
 #define rtp_stat_add_value(stat, type_str, value, last_value)   \
     { \
-        int n = strlen(stat); \
         if (value != last_value) { \
-            char tmp[128]; \
-            if (n > 0) { strncat(stat, ":", sizeof(stat)-n); }  \
-            switch_snprintf(tmp, 128, type_str ",%" PRId64 "", value, rtp_session->stats.time); \
-            strncat(stat, tmp, sizeof(stat)-(n+1)); \
-        } \
-        last_value = value; \
+          if (strlen(stat) > 0) switch_snprintf(stat, sizeof(stat), "%s:", stat); \
+          switch_snprintf(stat, sizeof(stat), "%s" type_str ",%" PRId64 "", stat, value, rtp_session->stats.time); \
+          last_value = value; \
+        }\
     }
 
 SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int level_in, int level_out, int active)
@@ -9069,9 +9066,11 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
         rtp_stat_add_value(rtp_session->stats.r, "%0.2f", rtp_session->stats.inbound.R, rtp_session->stats.last_r);
     }
 
+#if 0
     if (rtp_session->stats.inbound.variance) {
         rtp_stat_add_value(rtp_session->stats.variance, "%0.2f", rtp_session->stats.inbound.variance, rtp_session->stats.last_variance);
     }
+#endif
 
     if (rtp_session->stats.inbound.flaws) {
         rtp_stat_add_value(rtp_session->stats.flaws, "%0ld", rtp_session->stats.inbound.flaws, rtp_session->stats.last_flaws);

@@ -138,7 +138,7 @@ typedef enum {
 } switch_originator_type_t;
 
 #define RUNNING_STAT_KEY_LEN 48
-#define RUNNING_STAT_VALUE_LEN 976
+#define RUNNING_STAT_VALUE_LEN (RTP_STATS_STR_SIZE-RUNNING_STAT_KEY_LEN)
 
 typedef struct {
 	char key[RUNNING_STAT_KEY_LEN];
