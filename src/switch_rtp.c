@@ -1,4 +1,4 @@
-/*
+ /*
  * FreeSWITCH Modular Media Switching Software Library / Soft-Switch Application
  * Copyright (C) 2005-2014, Anthony Minessale II <anthm@freeswitch.org>
  *
@@ -419,8 +419,7 @@ struct switch_rtp {
     switch_rtp_bug_flag_t rtp_bugs;
     switch_rtp_stats_t stats;
     int rtcp_interval;
-    uint8_t send_rtcp;
-    uint8_t send_rtcp_custom;
+    uint32_t send_rtcp;
     switch_time_t next_rtcp_send;
     switch_bool_t rtcp_fresh_frame;
     uint8_t been_active_talker;
@@ -530,25 +529,6 @@ struct switch_rtcp_sr_head {
         unsigned oc:32;
 };
 
-#if SWITCH_BYTE_ORDER == __BIG_ENDIAN
-struct switch_rtcp_s_desc_head {
-       unsigned v:2;
-       unsigned padding:1;
-       unsigned sc:5;
-       unsigned pt:8;
-       unsigned length:16;
-};
-
-#else /*  BIG_ENDIAN */
-struct switch_rtcp_s_desc_head {
-       unsigned sc:5;
-       unsigned padding:1;
-       unsigned v:2;
-       unsigned pt:8;
-       unsigned length:16;
-};
-#endif
-
 struct switch_rtcp_s_desc_trunk {
        unsigned ssrc:32;
        unsigned cname:8;
@@ -566,7 +546,7 @@ struct switch_rtcp_s_desc_priv_extn {
 
 struct switch_rtcp_report {
     struct switch_rtcp_source sr_source; //report block; Only one needed
-    struct switch_rtcp_s_desc_head sr_desc_head; //Start of SDES
+    switch_rtcp_hdr_t sr_desc_head;
     char items[1];
 };
 
@@ -590,6 +570,18 @@ struct switch_rtcp_app_specific {
     unsigned name:32;
     char data[1];
 };
+
+#define APP_RX_NUM_STATS 10
+
+typedef struct switch_rtcp_app_rx_congestion {
+    unsigned ssrc:32;
+    unsigned name:32;
+    uint16_t degraded;
+    uint16_t jitter;
+    uint16_t lost_percent;
+    uint16_t pad;
+    uint16_t rx[APP_RX_NUM_STATS];
+} switch_rtcp_app_rx_congestion_t;
 
 typedef enum {
     RESULT_CONTINUE,
@@ -2683,6 +2675,78 @@ static void check_jitter(switch_rtp_t *rtp_session)
     }
 }
 
+
+static int add_rx_congestion(switch_rtp_t *rtp_session, void *body, switch_rtcp_hdr_t *pHeader)
+{
+    switch_rtcp_app_rx_congestion_t *rx_congestion = (switch_rtcp_app_rx_congestion_t *) body;
+    int i, pad, nbytes = sizeof(switch_rtcp_app_rx_congestion_t);
+
+    pHeader->version = 2;
+    pHeader->p = 0;
+    pHeader->count = 1;
+
+    pHeader->type = 204;
+
+    rx_congestion->ssrc = htonl(rtp_session->ssrc);
+    rx_congestion->name = htonl(0x66757a72);
+
+    rx_congestion->jitter = htons(rtp_session->stats.last_jitter);
+    rx_congestion->degraded = htons(rtp_session->stats.rx_congestion_state);
+    rx_congestion->lost_percent = htons(rtp_session->stats.jb_period_lost_percent);
+
+    for (i = 0; i < APP_RX_NUM_STATS; i++) {
+        int idx = rtp_session->stats.recv_rate_history_idx - (i+1);
+        idx = (idx < 0) ? idx + RTP_STATS_RATE_HISTORY : idx;
+        rx_congestion->rx[i] = htons(rtp_session->stats.recv_rate_history[idx]);
+    }
+
+    /*Make sure the total length is aligned with 32-bit boundary; Pad it with NULL bytes*/
+    pad = nbytes % 4;
+    if (pad) {
+        pad = 4 - pad;
+        memset(((char *) body) + nbytes, 0, pad);
+        nbytes += pad;
+    }
+
+    pHeader->length = htons((u_short)(nbytes / 4));
+
+    return nbytes + 4;
+}
+
+static int add_cname(switch_rtp_t *rtp_session, void *body, switch_rtcp_hdr_t *pHeader)
+{
+    struct switch_rtcp_s_desc_trunk *cname_item = (struct switch_rtcp_s_desc_trunk *)body;
+    char bufa[30];
+    int nbytes, pad;
+    const char *str_cname;
+
+    pHeader->version = 0x02;
+    pHeader->p = 0;
+    pHeader->count = 1;
+    pHeader->type = 202;
+
+    cname_item->ssrc = htonl(rtp_session->ssrc);
+    cname_item->cname = 0x1;
+
+    str_cname = switch_get_addr(bufa, sizeof(bufa), rtp_session->rtcp_local_addr);
+    cname_item->length = (uint8_t)strlen(str_cname);
+    memcpy ((char*)cname_item->text, str_cname, strlen(str_cname));
+
+    nbytes = sizeof(struct switch_rtcp_s_desc_trunk)+cname_item->length;
+
+    /*Make sure the total length is aligned with 32-bit boundary; Pad it with NULL bytes*/
+    pad = nbytes % 4;
+    if (pad) {
+        pad = 4 - pad;
+        memset(((char *) body) + nbytes, 0, pad);
+        nbytes += pad;
+    }
+
+    pHeader->length = htons((u_short)(nbytes / 4));
+
+    return nbytes;
+}
+
 static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
 {
     int ret = 0;
@@ -2726,31 +2790,31 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
 #endif
 
     if (rtp_session->rtcp_sock_output &&
-        switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_ENABLE_RTCP) && !switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_RTCP_PASSTHRU)
-        && (rtp_session->send_rtcp || rtp_session->send_rtcp_custom)) {
+        switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_ENABLE_RTCP) &&
+        !switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_RTCP_PASSTHRU)
+        && rtp_session->send_rtcp) {
 
         switch_size_t rtcp_bytes = 0;
         switch_bool_t reset_period_data = SWITCH_TRUE;
-        int num_chop_slots = NUM_ARRAY_ELEMS(rtp_session->stats.jb_period_chop_events);
 
-        if (rtp_session->send_rtcp) {
+        if (rtp_session->send_rtcp & SWITCH_RTCP_NORMAL) {
             struct switch_rtcp_report *rep = NULL;
-            const char* str_cname=NULL;
-            int recv_interval, exp_interval, cycles, exp_total;
+            int recv_interval, exp_interval, cycles, exp_total, nbytes;
             switch_time_t delay_since_last;
-            uint16_t dlsr_msw, dlsr_lsw;
-            struct switch_rtcp_s_desc_trunk *cname_item;
-            struct switch_rtcp_s_desc_priv_extn *priv_item;
+            int16_t dlsr_msw, dlsr_lsw;
+            switch_rtcp_hdr_t *pHeader = &rtp_session->rtcp_send_msg.header;
+            switch_rtcp_hdr_t *pHeaderRXC;
 
-            rtp_session->rtcp_send_msg.header.version = 2;
-            rtp_session->rtcp_send_msg.header.p = 0;
-            rtp_session->rtcp_send_msg.header.count = 1;
+            pHeader->version = 2;
+            pHeader->p = 0;
+            pHeader->count = 1;
 
+            memset(rtp_session->rtcp_send_msg.body, 0, sizeof(rtp_session->rtcp_send_msg.body));
 
             if (!rtp_session->stats.outbound.period_packet_count) {
                 struct switch_rtcp_receiverinfo *rr = (struct switch_rtcp_receiverinfo *) rtp_session->rtcp_send_msg.body;
 
-                rtp_session->rtcp_send_msg.header.type = 201;
+                pHeader->type = 201;
 
                 rr->ssrc = htonl(rtp_session->ssrc);
                 rep = &rr->reports;
@@ -2758,7 +2822,7 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
             } else {
                 struct switch_rtcp_senderinfo *sr = (struct switch_rtcp_senderinfo*) rtp_session->rtcp_send_msg.body;
                 switch_time_t when;
-                rtp_session->rtcp_send_msg.header.type = 200;
+                pHeader->type = 200;
 
                 sr->ssrc = htonl(rtp_session->ssrc);
 
@@ -2820,135 +2884,37 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
             rep->sr_source.lsr = htonl (rep->sr_source.lsr);
             rep->sr_source.lsr_delay = (dlsr_msw << 16) | ((uint16_t) ((dlsr_lsw * 65536u) / 1000));
             rep->sr_source.lsr_delay = htonl (rep->sr_source.lsr_delay);
-            rep->sr_desc_head.v = 0x02;
-            rep->sr_desc_head.padding = 0;
-            rep->sr_desc_head.sc = 2;
-            rep->sr_desc_head.pt = 202;
+
+            pHeader->length = htons((sizeof(struct switch_rtcp_senderinfo)
+                                     - sizeof(struct switch_rtcp_report)
+                                     + sizeof(struct switch_rtcp_source))/4);
+
             rtp_session->stats.cumulative_lost = exp_total - rtp_session->total_received;
 
-            cname_item = (struct switch_rtcp_s_desc_trunk *) (rep->items);
-            cname_item->ssrc = htonl(rtp_session->ssrc);
-            cname_item->cname = 0x1;
-            {
-                char bufa[30];
-                str_cname = switch_get_addr(bufa, sizeof(bufa), rtp_session->rtcp_local_addr);
+            /* Source Description */
+            nbytes = add_cname(rtp_session, (void *)((char *)&rep->sr_desc_head + sizeof(switch_rtcp_hdr_t)), &rep->sr_desc_head);
 
-                cname_item->length = strlen(str_cname);
-                memcpy ((char*)cname_item->text, str_cname, strlen(str_cname));
+            rtcp_bytes += (nbytes);
+
+            pHeaderRXC = (switch_rtcp_hdr_t *) (((char *) pHeader) + rtcp_bytes);
+
+            if (rtp_session->stats.time > RTP_STATS_RATE_HISTORY) {
+                nbytes = add_rx_congestion(rtp_session, (void *)((char *)pHeaderRXC + sizeof(switch_rtcp_hdr_t)), pHeaderRXC);
+                rtcp_bytes += (nbytes);
             }
 
-            rep->sr_desc_head.length = STRUCT_ELEM_OFFSET(struct switch_rtcp_s_desc_trunk, text) + cname_item->length;
-
-            priv_item = (struct switch_rtcp_s_desc_priv_extn *) (rep->items + rep->sr_desc_head.length);
-            priv_item->ssrc = cname_item->ssrc;
-            priv_item->priv = 0x8;
-            {
-                rtcp_app_extn_t app_extn;
-                char *ptr = priv_item->prefix_and_value;
-                int rem_len, i;
-
-                priv_item->prefix_length = 4;
-                strncpy(ptr, "fuze", priv_item->prefix_length);
-                ptr += priv_item->prefix_length;
-
-                rem_len = sizeof(rtp_session->rtcp_send_msg.body) - (ptr - rtp_session->rtcp_send_msg.body);
-
-                app_extn.jb_depth = rtp_session->stats.jb_cur_size;
-                app_extn.late_and_lost_percent = rtp_session->stats.jb_period_lost_percent;
-                app_extn.been_active_talker = rtp_session->been_active_talker;
-                for (i = 0; i < num_chop_slots; i++) {
-                    app_extn.chop_events[i] = rtp_session->stats.jb_period_chop_events[i];
-                }
-
-                if (protos_encode_rtcp_app_extn(&app_extn, ptr, &rem_len) < 0) {
-                    priv_item->prefix_length = 0;
-                    priv_item->length = 0;
-
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "Error in encoding the rtcp extn using proto buf.\n");
-                } else {
-                    priv_item->length = rem_len;
-                    rep->sr_desc_head.length += STRUCT_ELEM_OFFSET(struct switch_rtcp_s_desc_priv_extn, prefix_and_value) +
-                                                            priv_item->length + priv_item->prefix_length;
-                }
+            if (rtcp_write(rtp_session, rtcp_bytes) != SWITCH_STATUS_SUCCESS) {
+                reset_period_data = SWITCH_FALSE;
             }
+        } else if (rtp_session->send_rtcp & SWITCH_RTCP_RX_CONGESTION && rtp_session->stats.time > RTP_STATS_RATE_HISTORY) {
+            memset(rtp_session->rtcp_send_msg.body, 0, sizeof(rtp_session->rtcp_send_msg.body));
 
-            rtcp_bytes += rep->sr_desc_head.length;
-            rep->sr_desc_head.length = htonl(rep->sr_desc_head.length);
-
-            rtp_session->send_rtcp = 0;
-
-            {
-                /*Make sure the total length is aligned with 32-bit boundary; Pad it with NULL bytes*/
-                int pad = rtcp_bytes % 4;
-                if (pad) {
-                    pad = 4 - pad;
-                    memset(((char *) &rtp_session->rtcp_send_msg.header) + rtcp_bytes, 0, pad);
-                    rtcp_bytes += pad;
-                }
-            }
-            rtp_session->rtcp_send_msg.header.length = htons((u_short)(rtcp_bytes / 4) - 1);
+            rtcp_bytes = add_rx_congestion(rtp_session, rtp_session->rtcp_send_msg.body, &rtp_session->rtcp_send_msg.header);
 
             if (rtcp_write(rtp_session, rtcp_bytes) != SWITCH_STATUS_SUCCESS) {
                 reset_period_data = SWITCH_FALSE;
             }
         }
-
-        /*
-         * this is a fuze custom rtcp packet (MQT-5147)
-         * this generates a second rtcp packet
-         */
-#if 1
-        if (rtp_session->send_rtcp_custom) {
-            int rem_len, i;
-            rtcp_app_extn_t app_extn;
-            struct switch_rtcp_app_specific *app = (struct switch_rtcp_app_specific *) rtp_session->rtcp_send_msg.body;
-
-            rtcp_bytes = sizeof(switch_rtcp_hdr_t) + STRUCT_ELEM_OFFSET(struct switch_rtcp_app_specific, data);
-
-            rtp_session->rtcp_send_msg.header.version = 2;
-            rtp_session->rtcp_send_msg.header.p = 0;
-            rtp_session->rtcp_send_msg.header.count = 1; //for subtype
-
-            rtp_session->rtcp_send_msg.header.type = 204;
-
-            app->ssrc = htonl(rtp_session->ssrc);
-            app->name = htonl(0x66757a65);
-
-            app_extn.jb_depth = rtp_session->stats.jb_cur_size;
-            app_extn.late_and_lost_percent = rtp_session->stats.jb_period_lost_percent;
-            app_extn.been_active_talker = rtp_session->been_active_talker;
-            for (i = 0; i < num_chop_slots; i++) {
-                app_extn.chop_events[i] = rtp_session->stats.jb_period_chop_events[i];
-                if (app_extn.chop_events[i]) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_DEBUG10, "Qos Updates chop_events[%d]=%u\n", i, app_extn.chop_events[i]);
-                }
-            }
-
-            rem_len = sizeof(rtp_session->rtcp_send_msg.body) - sizeof(struct switch_rtcp_app_specific);
-            if (protos_encode_rtcp_app_extn(&app_extn, app->data, &rem_len) < 0) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "Error in encoding the rtcp extn using proto buf.\n");
-            } else {
-                rtcp_bytes += rem_len;
-            }
-
-            rtp_session->send_rtcp_custom = 0;
-
-            {
-                /*Make sure the total length is aligned with 32-bit boundary. Pad it with NULL bytes*/
-                int pad = rtcp_bytes % 4;
-                if (pad) {
-                    pad = 4 - pad;
-                    memset(((char *) &rtp_session->rtcp_send_msg.header) + rtcp_bytes, 0, pad);
-                    rtcp_bytes += pad;
-                }
-            }
-            rtp_session->rtcp_send_msg.header.length = htons((u_short)(rtcp_bytes / 4) - 1);
-
-            if (rtcp_write(rtp_session, rtcp_bytes) != SWITCH_STATUS_SUCCESS) {
-                reset_period_data = SWITCH_FALSE;
-            }
-        }
-#endif
 
         if (reset_period_data == SWITCH_TRUE) {
             rtp_session->stats.inbound.period_packet_count = 0;
@@ -2980,7 +2946,7 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
     }
 
  end:
-
+    rtp_session->send_rtcp = 0;
     return ret;
 }
 
@@ -4585,6 +4551,10 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->stats.last_flaws = -1;
 
     rtp_session->last_adjust_cn_count = switch_time_now();
+
+    rtp_session->stats.recv_rate_history_idx = 0;
+    rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
+    memset(rtp_session->stats.recv_rate_history, 0, sizeof(uint16_t)*RTP_STATS_RATE_HISTORY);
 
 #ifdef TRACE_READ
     memset(rtp_session->trace_buffer, 0, 1024);
@@ -9092,6 +9062,51 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
         fuze_transport_get_rates(rtp_session->rtp_conn, &local_send, &local_recv);
         rtp_stat_add_value(rtp_session->stats.send_rate, "%d", local_send, rtp_session->stats.last_send_rate);
         rtp_stat_add_value(rtp_session->stats.recv_rate, "%d", local_recv, rtp_session->stats.last_recv_rate);
+        if (local_send == 0 || local_recv == 0) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "bad local send(%d) or recv(%d)\n",
+                              local_send, local_recv);
+        }
+        rtp_session->stats.recv_rate_history[rtp_session->stats.recv_rate_history_idx] = local_recv;
+        rtp_session->stats.recv_rate_history_idx = (rtp_session->stats.recv_rate_history_idx + 1) % RTP_STATS_RATE_HISTORY;
+        if (neteq_inst && rtp_session->stats.time > RTP_STATS_RATE_HISTORY) {
+            if (!rtp_session->in_cn_period) {
+                if (rtp_session->stats.ignore_rate_period > 0) {
+                    rtp_session->stats.ignore_rate_period -= 1;
+                } else {
+                    float delta = 0.0;
+                    if (rtp_session->stats.rx_congestion_state == RTP_RX_CONGESTION_GOOD) {
+                        for (int i = 0; i < RTP_STATS_RATE_HISTORY_BAD; i++) {
+                            int idx = rtp_session->stats.recv_rate_history_idx - (i+1);
+                            idx = (idx < 0) ? (idx + RTP_STATS_RATE_HISTORY) : idx;
+                            delta += abs(rtp_session->stats.recv_rate_history[idx] - 68);
+                        }
+                        delta = delta / (float)RTP_STATS_RATE_HISTORY_BAD;
+                        if ((delta > 2.5 || jbuf > 750)) {
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "Transition to bad rx congrestion state: delta:%f\n",
+                                              delta);
+                            rtp_session->send_rtcp |=  (SWITCH_RTCP_NORMAL | SWITCH_RTCP_RX_CONGESTION);
+                            rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_BAD;
+                        }
+                    } else {
+                        for (int i = 0; i < RTP_STATS_RATE_HISTORY_GOOD; i++) {
+                            int idx = rtp_session->stats.recv_rate_history_idx - (i+1);
+                            idx = (idx < 0) ? (idx + RTP_STATS_RATE_HISTORY) : idx;
+                            delta += abs(rtp_session->stats.recv_rate_history[idx] - 68);
+                        }
+                        delta = delta / (float)RTP_STATS_RATE_HISTORY_GOOD;
+                        if (delta < 2 && jbuf < 500) {
+                            delta = 0;
+                            rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
+                            rtp_session->send_rtcp |=  (SWITCH_RTCP_NORMAL | SWITCH_RTCP_RX_CONGESTION);
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "Transition to bad good congrestion state: delta:%f\n",
+                                              delta);
+                        }
+                    }
+                }
+            } else {
+                rtp_session->stats.ignore_rate_period = RTP_STATS_RATE_HISTORY;
+            }
+        }
     }
 
     rtp_session->stats.time += 1;
@@ -9149,7 +9164,6 @@ SWITCH_DECLARE(void) switch_rtp_set_send_rtcp(switch_rtp_t *rtp_session, int val
 {
     if (rtp_session) {
         rtp_session->send_rtcp = val;
-        rtp_session->send_rtcp_custom = val;
     }
 }
 

@@ -721,8 +721,15 @@ typedef enum {
     SET_ACTIVE_TALKER_FLAG,
 } stats_ioctl_cmd_t;
 
-
 #define RTP_STATS_STR_SIZE 2048
+#define RTP_STATS_RATE_HISTORY 60
+#define RTP_STATS_RATE_HISTORY_BAD 5
+#define RTP_STATS_RATE_HISTORY_GOOD 20
+
+typedef enum {
+	RTP_RX_CONGESTION_GOOD,
+	RTP_RX_CONGESTION_BAD
+} rtp_rx_congestion_state_t;
 
 typedef struct {
     switch_rtp_numbers_t inbound;
@@ -769,6 +776,11 @@ typedef struct {
     float last_r;
     float last_variance;
     uint64_t last_flaws;
+
+    uint16_t recv_rate_history[RTP_STATS_RATE_HISTORY];
+    int recv_rate_history_idx;
+    rtp_rx_congestion_state_t rx_congestion_state;
+    uint16_t ignore_rate_period;
 
     uint64_t time;
     int duration;

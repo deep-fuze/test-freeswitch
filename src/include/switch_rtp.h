@@ -51,6 +51,11 @@ SWITCH_BEGIN_EXTERN_C
 //#define SWITCH_RTP_CRYPTO_KEY_32 "AES_CM_128_HMAC_SHA1_32"
 #define SWITCH_RTP_CRYPTO_KEY_80 "AES_CM_128_HMAC_SHA1_80"
 
+typedef enum {
+    SWITCH_RTCP_NORMAL        = 0x01,
+    SWITCH_RTCP_FUZE          = 0x02,
+    SWITCH_RTCP_RX_CONGESTION = 0x04
+} switch_rtp_rtcp_type_t;
 
 typedef enum {
 	SWITCH_RTP_CRYPTO_SEND,

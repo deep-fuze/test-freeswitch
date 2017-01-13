@@ -309,6 +309,7 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
     switch_thread_id_t tid = switch_thread_self();
     char description_a[MAX_DESCRIPTION_LEN];
     char description_b[MAX_DESCRIPTION_LEN];
+    switch_time_t next_wake_up;
 
     char description_tmp[MAX_DESCRIPTION_LEN];
     int hot_read = 0;
@@ -434,12 +435,11 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
     /* Set the log filter callback, that gets called to filter the logs
            at the end of the session */
     switch_core_set_log_filter_cb(session_a, bridge_can_log_key);
-    interval_ms = read_impl.microseconds_per_packet / 1000;
+    interval_ms = read_impl.microseconds_per_packet / (2*1000);
     ticks_per_interval = PERIODIC_STATS_INTERVAL_MS / interval_ms;
     ticks_per_stats_check = MIN_STAT_REPORT_INTERVAL_MS / interval_ms;
     ticks_per_heartbeat = DEFAULT_MIN_HEARTBEAT_INTERVAL_MS / interval_ms;
     bridge_filter_dtmf = switch_true(switch_channel_get_variable(chan_a, "bridge_filter_dtmf"));
-
 
     switch_set_rtcp_passthru(chan_a);
     switch_set_rtcp_passthru(chan_b);
@@ -447,11 +447,15 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
     /* move wait to here */
     switch_set_dont_wait_for_packets(chan_a);
     if (switch_core_timer_init(&timer, "soft", interval_ms, read_impl.samples_per_packet, switch_core_session_get_pool(session_a)) != SWITCH_STATUS_SUCCESS) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), SWITCH_LOG_ERROR, "Failed to create timer for channel: %dms %d samples!\n", interval_ms, read_impl.samples_per_packet);
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), SWITCH_LOG_ERROR,
+                          "Failed to create timer for channel: %dms %d samples!\n", interval_ms, read_impl.samples_per_packet);
         goto end_of_bridge_loop;
     } else {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), SWITCH_LOG_INFO, "audio_bridge_thread_timer: %dms %d samples\n", interval_ms, read_impl.samples_per_packet);
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), SWITCH_LOG_INFO,
+                          "audio_bridge_thread_timer: %dms %d samples\n", interval_ms, read_impl.samples_per_packet);
     }
+
+    next_wake_up = switch_time_now() + (interval_ms*1000);
 
     for (;;) {
         switch_channel_state_t b_state;
@@ -792,7 +796,20 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
                 }
             }
             if (!hot_read) {
-                switch_core_timer_next(&timer);
+                switch_time_t current_time = switch_time_now();
+                switch_time_t wake_up_delta = (current_time < next_wake_up) ? (next_wake_up - current_time) : 0;
+
+                if (current_time < next_wake_up) {
+                    if (wake_up_delta > 1000) {
+                        switch_sleep(wake_up_delta);
+                    } else {
+                        /* don't sleep! */
+                    }
+                } else {
+                    /* don't sleep */
+                }
+                // switch_core_timer_next(&timer);
+                next_wake_up += (interval_ms*1000);
             }
         } else {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), SWITCH_LOG_DEBUG, "%s ending bridge by request from read function\n", switch_channel_get_name(chan_a));

@@ -579,7 +579,7 @@ read_again:
                 if (!session->rtcp_interval) {
                     switch_core_ioctl_stats(session, GET_RTCP_INTERVAL, &session->rtcp_interval);
                 } else if (++session->total_reads % session->rtcp_interval == 0) {
-                    int val;
+                    uint32_t val;
                     if (session->neteq_inst) {
                         WebRtcNetEQ_NetworkStatistics nwstats;
                         void *neteq_internal = switch_core_get_neteq_inst(session);
@@ -598,7 +598,7 @@ read_again:
                     session->total_lost = 0;
                     
                     
-                    val = 1;
+                    val = SWITCH_RTCP_NORMAL;
                     switch_core_ioctl_stats(session, SET_SEND_RTCP, &val);
                 }
                 
