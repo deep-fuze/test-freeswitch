@@ -278,6 +278,12 @@ typedef struct switch_ivr_bridge_data switch_ivr_bridge_data_t;
 #define MIN_STAT_REPORT_INTERVAL_MS 1 * 1000 //1 sec(s)
 #define STATS_LEADIN_TIME_MS (5 * 1000) //5secs; Initial time to ignore to compensate for media lag after signaling
 
+#ifdef SIMULATE_DELAY
+#define DEBUG_LEVEL SWITCH_LOG_INFO
+#else
+#define DEBUG_LEVEL SWITCH_LOG_DEBUG10
+#endif
+
 static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
 {
     switch_ivr_bridge_data_t *data = obj;
@@ -312,7 +318,7 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
     switch_time_t next_wake_up;
 
     char description_tmp[MAX_DESCRIPTION_LEN];
-    int hot_read = 0;
+    int hot_read = 0, hot_read_cnt = 0;
 
     switch_timer_t timer;
 
@@ -706,11 +712,17 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
         if (SWITCH_READ_ACCEPTABLE(status)) {
 
             if (read_frame->flags & SFF_HOT_READ && hot_read == 0) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), SWITCH_LOG_DEBUG10, "Hot read start\n");
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), DEBUG_LEVEL, "Hot read start\n");
                 hot_read = 1;
+                hot_read_cnt = 1;
             } else if (hot_read > 0) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), SWITCH_LOG_DEBUG10, "Hot read stop\n");
-                hot_read = 0;
+                if (read_frame->flags & SFF_HOT_READ) {
+                    hot_read_cnt += 1;
+                } else {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), DEBUG_LEVEL, "Hot read stop after %d reads\n", hot_read_cnt);
+                    hot_read_cnt = 0;
+                    hot_read = 0;
+                }
             }
 
             if (read_frame->flags & SFF_RTP_EVENT) {
@@ -798,8 +810,15 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
             if (!hot_read) {
                 switch_time_t current_time = switch_time_now();
                 switch_time_t wake_up_delta = (current_time < next_wake_up) ? (next_wake_up - current_time) : 0;
-
+#ifdef SIMULATE_DELAY
+                int rand_delay = rand() % 100000;
+#endif
                 if (current_time < next_wake_up) {
+#ifdef SIMULATE_DELAY
+                    if (rand_delay > 20000 && rand_delay < 60000) {
+                        wake_up_delta += rand_delay;
+                    }
+#endif
                     if (wake_up_delta > 1000) {
                         switch_sleep(wake_up_delta);
                     } else {

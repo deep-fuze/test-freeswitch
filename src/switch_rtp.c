@@ -9022,6 +9022,9 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
      */
     if (jbuf != -1) {
         rtp_stat_add_value(rtp_session->stats.jitter, "%d", jbuf, rtp_session->stats.last_jitter);
+        if (rtp_session->stats.duration % 10 == 0) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "jitter buffer size:%d\n", jbuf);
+        }
     }
 
     if (level_in > -1) {

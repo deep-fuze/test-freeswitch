@@ -7189,20 +7189,28 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             switch_time_t current_time = switch_time_now();
             switch_time_t wake_up_delta = (current_time < next_wake_up) ? (next_wake_up - current_time) : 0;
             switch_time_t time_asleep;
+#ifdef SIMULATE_DELAY
+            int rand_delay = rand() % 100000;
+#endif
 
             if (current_time < next_wake_up) {
                 switch_time_t delta2;
                 if (wake_up_delta > 1000) {
+#ifdef SIMULATE_DELAY
+                    if (rand_delay > 20000 && rand_delay < 60000) {
+                        wake_up_delta += rand_delay;
+                    }
+#endif
                     switch_sleep(wake_up_delta);
                     delta2 = switch_time_now() - current_time;
                     if (wake_up_delta > 0 && (delta2 - wake_up_delta) > 10000) {
-                        if (behind == 0) {
+                        if (behind == 0 && list->count) {
                             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "output loop %d count=%d overslept sleep_target=%" PRId64 " actual=%" PRId64 "\n",
                                               list->idx, list->count, wake_up_delta, delta2);
                         }
                         behind += 1;
                     } else {
-                        if (behind > 1) {
+                        if (behind > 1 && list->count) {
                             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "output loop %d count=%d caught up after %d cycles\n",
                                               list->idx, list->count, behind);
                         }
@@ -7218,7 +7226,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                     time_asleep = 0;
                 }
             } else {
-                if (behind == 0) {
+                if (behind == 0 && list->count) {
                     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "output loop %d count=%d falling behind, skipping sleep delta=%" PRId64 "\n",
                                       list->idx, list->count, wake_up_delta);
                 }
