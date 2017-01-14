@@ -781,6 +781,10 @@ struct conference_member {
     switch_bool_t fuze_app;
     uint8_t frame_max_on_mute;
     uint8_t frame_max;
+
+    uint8_t ianacode;
+    uint8_t codec_id;
+    uint8_t impl_id;
 };
 
 typedef enum {
@@ -2521,6 +2525,10 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
         /* get a pointer to the codec implementation */
         impl = member->orig_read_impl;
 
+        member->ianacode = impl.ianacode;
+        member->codec_id = impl.codec_id;
+        member->impl_id = impl.impl_id;
+
         /* Check to see if this codec already exists for this conference */
         for (new_write_codec = conference->ceo.cwc[0]; new_write_codec; new_write_codec = new_write_codec->next) {
             if ((new_write_codec->codec_id == impl.codec_id) && (new_write_codec->impl_id == impl.impl_id)){
@@ -2973,7 +2981,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     
 static void conference_reconcile_member_lists(conference_obj_t *conference) {
     conference_member_t *member = NULL, *last = NULL;
-    uint32_t g722cnt = 0, g711ucnt = 0, g711acnt = 0;
+    uint32_t g722cnt = 0, g711ucnt = 0, g711acnt = 0, othercnt = 0;
 
     switch_mutex_lock(conference->mutex);
     switch_mutex_lock(conference->member_mutex);
@@ -3072,12 +3080,14 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
             if (member->one_of_active) {
                 continue;
             }
-            if (member->orig_read_impl.ianacode == 9) {
+            if (member->ianacode == 9) {
                 g722cnt += 1;
-            } else if (member->orig_read_impl.ianacode == 0) {
+            } else if (member->ianacode == 0) {
                 g711ucnt += 1;
-            } else if (member->orig_read_impl.ianacode == 8) {
+            } else if (member->ianacode == 8) {
                 g711acnt += 1;
+            } else {
+                othercnt += 1;
             }
         }
     }
@@ -3085,9 +3095,9 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
     if ((conference->g711ucnt != g711ucnt) || (conference->g711acnt != g711acnt) ||
         (conference->g722cnt != g722cnt)) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
-                          "Conference (%s) listener counts changed 0:%u -> %u 8:%u -> %u 9:%u -> %u\n",
+                          "Conference (%s) listener counts changed 0:%u -> %u 8:%u -> %u 9:%u -> %u othercnt:%u\n",
                           conference->meeting_id, conference->g711ucnt, g711ucnt, conference->g711acnt, g711acnt,
-                          conference->g722cnt, g722cnt);
+                          conference->g722cnt, g722cnt, othercnt);
     }
 
     conference->g711acnt = g711acnt;
@@ -3097,6 +3107,12 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
     ceo_set_listener_count(&conference->ceo, 9, g722cnt);
     ceo_set_listener_count(&conference->ceo, 0, g711ucnt);
     ceo_set_listener_count(&conference->ceo, 8, g711acnt);
+
+    if (othercnt > 0) {
+        ceo_set_listener_count_incr(&conference->ceo, 9, 1);
+        ceo_set_listener_count_incr(&conference->ceo, 0, 1);
+        ceo_set_listener_count_incr(&conference->ceo, 8, 1);
+    }
 
     switch_mutex_unlock(conference->member_mutex);
     switch_mutex_unlock(conference->mutex);
@@ -4168,7 +4184,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
 
         conference->last_active_talkers[i]->one_of_active = SWITCH_FALSE;
         conference->last_active_talkers[i]->last_time_active = now;
-        codec = conference->last_active_talkers[i]->orig_read_impl.ianacode;
+        codec = conference->last_active_talkers[i]->ianacode;
 
         ceo_set_listener_count_incr(&conference->ceo, codec, 1);
 
@@ -7634,30 +7650,36 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
                                   member->conference->g711ucnt, member->conference->g711acnt, member->conference->g722cnt,
                                   member->meo.read_idx, meo_frame_written(&member->meo), meo_frame_encoded(&member->meo));
 
-                if (member->orig_read_impl.ianacode == 0) {
+                if (member->ianacode == 0) {
                     codec_cnt = member->conference->g711ucnt;
-                } else if (member->orig_read_impl.ianacode == 8) {
+                } else if (member->ianacode == 8) {
                     codec_cnt = member->conference->g711acnt;
-                } else if (member->orig_read_impl.ianacode == 9) {
+                } else if (member->ianacode == 9) {
                     codec_cnt = member->conference->g722cnt;
                 }
 
                 if (!meo_encoder_exists(&member->meo) || codec_cnt == 0) {
                     if (!meo_encoder_exists(&member->meo)) {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR,
-                                          "frame not encoded because cwc thinks we have no encoder codec=%d cnt=%d\n", member->orig_read_impl.ianacode, codec_cnt);
+                                          "frame not encoded because cwc thinks we have no encoder codec=%d cnt=%d\n", member->ianacode, codec_cnt);
                     }
                     if (codec_cnt == 0) {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
-                                          "frame not encoded because cwc thinks we have no listeners codec=%d cnt=%d\n", member->orig_read_impl.ianacode, codec_cnt);
+                                          "frame not encoded because cwc thinks we have no listeners codec=%d cnt=%d\n", member->ianacode, codec_cnt);
                         /* force an encode */
-                        ceo_set_listener_count(&member->conference->ceo, member->orig_read_impl.ianacode, 1);
+                        if (member->ianacode == 0 || member->ianacode == 8 || member->ianacode == 9) {
+                            ceo_set_listener_count(&member->conference->ceo, member->ianacode, 1);
+                        } else {
+                            ceo_set_listener_count_incr(&member->conference->ceo, 0, 1);
+                            ceo_set_listener_count_incr(&member->conference->ceo, 8, 1);
+                            ceo_set_listener_count_incr(&member->conference->ceo, 9, 1);
+                        }
                     }
                 }
                 if (!meo_frame_written(&member->meo)) {
                     /* well this is unfortunate */
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR,
-                                      "frame not encoded because no frame was written codec=%d cnt=%d\n", member->orig_read_impl.ianacode, codec_cnt);
+                                      "frame not encoded because no frame was written codec=%d cnt=%d\n", member->ianacode, codec_cnt);
                 }
                 if (!meo_frame_encoded(&member->meo)) {
                     /* now try to force an encode */

@@ -8127,7 +8127,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 
             diff = (now - rtp_session->last_ivr_send_time)/1000;
 
-            if (diff > 100) {
+            if (diff > 500) {
                 uint32_t old_ts = ntohl(send_msg->header.ts);
                 uint32_t new_ts = old_ts + ((diff/20)-1) * datalen;
                 send_msg->header.ts = htonl(new_ts);
@@ -8439,10 +8439,11 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             if ((now - rtp_session->time_of_last_ts_check) > 10000000) {
                 switch_time_t delta = (now - rtp_session->time_of_first_ts)/1000; // ms
                 uint64_t delta_ts = (this_ts - rtp_session->first_ts)/8; // ms
-                if (abs(delta_ts - delta) >= 20) {
+                uint64_t difference = abs(delta_ts - delta);
+                if (difference >= 60) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
-                                      "Timestamp delta:%" PRId64 " vs Time delta:%" PRId64 " first=%u curr=%u\n",
-                                      delta_ts, delta, rtp_session->first_ts, this_ts);
+                                      "Timestamp delta %" PRId64 " [ts delta:%" PRId64 " vs time delta:%" PRId64 "] first=%u curr=%u\n",
+                                      difference, delta_ts, delta, rtp_session->first_ts, this_ts);
                 }
                 rtp_session->time_of_last_ts_check = now;
             }
