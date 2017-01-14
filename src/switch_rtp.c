@@ -1,4 +1,4 @@
- /*
+/*
  * FreeSWITCH Modular Media Switching Software Library / Soft-Switch Application
  * Copyright (C) 2005-2014, Anthony Minessale II <anthm@freeswitch.org>
  *
@@ -450,6 +450,10 @@ struct switch_rtp {
     switch_bool_t is_fuze_app;
     switch_bool_t is_ivr;
     switch_bool_t last_write_ts_set;
+
+    switch_time_t time_of_first_ts;
+    switch_time_t time_of_last_ts_check;
+    uint32_t first_ts;
 
     uint32_t high_drift_packets;
     uint32_t high_drift_log_suppress;
@@ -8423,6 +8427,27 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
         }
         rtp_session->stats.outbound.period_packet_count++;
         rtp_session->last_write_ts = this_ts;
+
+        if (!rtp_session->last_write_ts_set || rtp_session->flags[SWITCH_RTP_FLAG_RESET]) {
+            rtp_session->time_of_first_ts = switch_time_now();
+            rtp_session->time_of_last_ts_check = rtp_session->time_of_first_ts;
+            rtp_session->first_ts = this_ts;
+        }
+
+        if (rtp_session->last_write_ts_set) {
+            switch_time_t now = switch_time_now();
+            if ((now - rtp_session->time_of_last_ts_check) > 10000000) {
+                switch_time_t delta = (now - rtp_session->time_of_first_ts)/1000; // ms
+                uint64_t delta_ts = (this_ts - rtp_session->first_ts)/8; // ms
+                if (abs(delta_ts - delta) >= 20) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+                                      "Timestamp delta:%" PRId64 " vs Time delta:%" PRId64 " first=%u curr=%u\n",
+                                      delta_ts, delta, rtp_session->first_ts, this_ts);
+                }
+                rtp_session->time_of_last_ts_check = now;
+            }
+        }
+
         rtp_session->last_write_ts_set = SWITCH_TRUE;
 
         rtp_session->flags[SWITCH_RTP_FLAG_RESET] = 0;
