@@ -669,6 +669,7 @@ typedef struct conference_obj {
     uint16_t stop_entry_tone_participants;
 
     uint32_t participants_per_thread[N_CWC];
+    uint32_t g711acnt, g711ucnt, g722cnt;
 } conference_obj_t;
 
 /* Relationship with another member */
@@ -3018,15 +3019,6 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
                 member = member_next;
             }
         } else {
-            if (!member->one_of_active) {
-                if (member->orig_read_impl.ianacode == 9) {
-                    g722cnt += 1;
-                } else if (member->orig_read_impl.ianacode == 0) {
-                    g711ucnt += 1;
-                } else if (member->orig_read_impl.ianacode == 8) {
-                    g711acnt += 1;
-                }
-            }
             last = member;
             member = member->next;
         }
@@ -3049,16 +3041,6 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
              * in an effort to send less packets when we're muted */
             member->frame_max = 1;
 
-            if (!member->one_of_active) {
-                if (member->orig_read_impl.ianacode == 9) {
-                    g722cnt += 1;
-                } else if (member->orig_read_impl.ianacode == 0) {
-                    g711ucnt += 1;
-                } else if (member->orig_read_impl.ianacode == 8) {
-                    g711acnt += 1;
-                }
-            }
-
             if (last) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, 
                                   "Moving member %d from listeners to speakers\n", member->id);
@@ -3077,6 +3059,19 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
                 member = member_next;
             }
         } else {
+            last = member;
+            member = member->next;
+        }
+    }
+
+    for (int i = 0; i < eMemberListTypes_Recorders; i++) {
+        for (member = conference->member_lists[i]; member; member = member->next) {
+            if (switch_test_flag(member, MFLAG_NOCHANNEL) || !switch_test_flag(member, MFLAG_RUNNING)) {
+                continue;
+            }
+            if (member->one_of_active) {
+                continue;
+            }
             if (member->orig_read_impl.ianacode == 9) {
                 g722cnt += 1;
             } else if (member->orig_read_impl.ianacode == 0) {
@@ -3084,10 +3079,20 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
             } else if (member->orig_read_impl.ianacode == 8) {
                 g711acnt += 1;
             }
-            last = member;
-            member = member->next;
         }
     }
+
+    if ((conference->g711ucnt != g711ucnt) || (conference->g711acnt != g711acnt) ||
+        (conference->g722cnt != g722cnt)) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                          "Conference (%s) listener counts changed 0:%u -> %u 8:%u -> %u 9:%u -> %u\n",
+                          conference->meeting_id, conference->g711ucnt, g711ucnt, conference->g711acnt, g711acnt,
+                          conference->g722cnt, g722cnt);
+    }
+
+    conference->g711acnt = g711acnt;
+    conference->g711ucnt = g711ucnt;
+    conference->g722cnt = g722cnt;
 
     ceo_set_listener_count(&conference->ceo, 9, g722cnt);
     ceo_set_listener_count(&conference->ceo, 0, g711ucnt);
@@ -7581,15 +7586,17 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             }
             
             /* if we're the first to see this frame then encode it */
-            //#define USE_BUFFER
-#ifdef USE_BUFFER
+// #define USE_BUFFER
             if (!meo_frame_encoded(&member->meo)) {
+#ifdef USE_BUFFER
                 switch_frame_t *frame = NULL;
                 ols->write_frame.samples = ols->write_frame.datalen / 2;
                 ols->write_frame.timestamp = timer->samplecount;
                 
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
-                                  "member %d shouldn't get here!\n", member->id);
+                                  "member %d codec=%d cnts:0:%u 8:%u 9:%u rdidx=%d wr=%d en=%d\n", member->id, member->orig_read_impl.codec_id,
+                                  member->conference->g711ucnt, member->conference->g711acnt, member->conference->g722cnt,
+                                  member->meo.read_idx, meo_frame_written(&member->meo), meo_frame_encoded(&member->meo));
 
                 if ((ols->write_frame.datalen = (uint32_t)meo_read_buffer(&member->meo, ols->write_frame.data, ols->bytes))) {
                     
@@ -7618,9 +7625,46 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
                     switch_mutex_unlock(member->meo.cwc->codec_mutex);
                     break;
                 }
-            } else
+#else
+                /* ok so we shouldn't be in here ... let's try to fix things and figure out why we're in here */
+                uint32_t codec_cnt = 0;
+
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
+                                  "member %d codec=%d cnts:0:%u 8:%u 9:%u rdidx=%d wr=%d en=%d\n", member->id, member->orig_read_impl.codec_id,
+                                  member->conference->g711ucnt, member->conference->g711acnt, member->conference->g722cnt,
+                                  member->meo.read_idx, meo_frame_written(&member->meo), meo_frame_encoded(&member->meo));
+
+                if (member->orig_read_impl.ianacode == 0) {
+                    codec_cnt = member->conference->g711ucnt;
+                } else if (member->orig_read_impl.ianacode == 8) {
+                    codec_cnt = member->conference->g711acnt;
+                } else if (member->orig_read_impl.ianacode == 9) {
+                    codec_cnt = member->conference->g722cnt;
+                }
+
+                if (!meo_encoder_exists(&member->meo) || codec_cnt == 0) {
+                    if (!meo_encoder_exists(&member->meo)) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR,
+                                          "frame not encoded because cwc thinks we have no encoder codec=%d cnt=%d\n", member->orig_read_impl.ianacode, codec_cnt);
+                    }
+                    if (codec_cnt == 0) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
+                                          "frame not encoded because cwc thinks we have no listeners codec=%d cnt=%d\n", member->orig_read_impl.ianacode, codec_cnt);
+                        /* force an encode */
+                        ceo_set_listener_count(&member->conference->ceo, member->orig_read_impl.ianacode, 1);
+                    }
+                }
+                if (!meo_frame_written(&member->meo)) {
+                    /* well this is unfortunate */
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR,
+                                      "frame not encoded because no frame was written codec=%d cnt=%d\n", member->orig_read_impl.ianacode, codec_cnt);
+                }
+                if (!meo_frame_encoded(&member->meo)) {
+                    /* now try to force an encode */
+                    ceo_write_buffer(&member->conference->ceo, NULL, 0);
+                }
 #endif
-                {
+            } else {
                 member->meo.shared_copy_cnt += 1;
                 member->meo.cwc->rd_cnt += 1;
             }

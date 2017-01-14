@@ -118,6 +118,7 @@ typedef struct conf_member_encoder_optimization {
 } conf_member_encoder_optimization_t;
 
 #define N_CWC 4
+#define ENC_FRAME_DATA (640)
 
 /* This is a conference object.
  * Each conference has one of these
@@ -126,6 +127,10 @@ typedef struct conf_encoder_optimization {
     switch_memory_pool_t *write_codecs_pool;
     switch_memory_pool_t *enc_frame_pool;
     conference_write_codec_t *cwc[N_CWC];
+
+    uint32_t bytes;
+    int16_t buffer[ENC_FRAME_DATA];
+
     switch_bool_t enabled;
 } conf_encoder_optimization_t;
 
@@ -159,6 +164,7 @@ void meo_start(conf_member_encoder_optimization_t *meo);
 switch_bool_t meo_ready(conf_member_encoder_optimization_t *meo);
 void meo_destroy(conf_member_encoder_optimization_t *meo);
 switch_size_t meo_read_buffer(conf_member_encoder_optimization_t *meo, uint8_t *data, uint32_t bytes);
+switch_bool_t meo_encoder_exists(conf_member_encoder_optimization_t *meo);
 
 switch_bool_t meo_next_frame(conf_member_encoder_optimization_t *meo);
 switch_frame_t *meo_get_frame(conf_member_encoder_optimization_t *meo);

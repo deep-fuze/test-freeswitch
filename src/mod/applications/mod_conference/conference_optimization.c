@@ -6,9 +6,6 @@
 #define CONF_DBLOCK_SIZE CONF_BUFFER_SIZE
 #define CONF_DBUFFER_SIZE CONF_BUFFER_SIZE
 
-#define ENC_FRAME_DATA (640)
-//#define ENC_FRAME_DATA (4096)
-
 // #define USE_BUFFER
 
 uint32_t cwc_get_idx(conference_write_codec_t *cwc) {
@@ -169,13 +166,11 @@ switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t
     }
 
     switch_mutex_lock(cwc->codec_mutex);
-    cwc->frames[cwc->write_idx].encoded = SWITCH_FALSE;
-    cwc->frames[cwc->write_idx].written = SWITCH_FALSE;
 
 #ifdef USE_BUFFER
     ret = (switch_buffer_write(cwc->frames[cwc->write_idx].buffer, data, bytes) == bytes);
     if (ret) {
-      cwc->frames[cwc->write_idx].written = SWITCH_TRUE;
+        cwc->frames[cwc->write_idx].written = SWITCH_TRUE;
     }
 #else
     cwc->frames[cwc->write_idx].written = SWITCH_TRUE;
@@ -183,7 +178,7 @@ switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t
 #endif
 
     /* now encode here! */
-    if (cwc->encoder && cwc->listener_count > 0) {
+    if (cwc->encoder && cwc->listener_count > 0 && !cwc->frames[cwc->write_idx].encoded) {
         switch_status_t encode_status;
         switch_io_flag_t flags = SWITCH_IO_FLAG_NONE;
         switch_frame_t *ret_enc_frame;
@@ -226,8 +221,6 @@ switch_bool_t cwc_write_and_copy_buffer(conference_write_codec_t *cwc, conferenc
     }
 
     switch_mutex_lock(cwc->codec_mutex);
-    cwc->frames[cwc->write_idx].encoded = SWITCH_FALSE;
-    cwc->frames[cwc->write_idx].written = SWITCH_FALSE;
 
 #ifdef USE_BUFFER
     ret = (switch_buffer_write(cwc->frames[cwc->write_idx].buffer, data, bytes) == bytes);
@@ -239,7 +232,7 @@ switch_bool_t cwc_write_and_copy_buffer(conference_write_codec_t *cwc, conferenc
     ret = SWITCH_TRUE;
 #endif
 
-    if (cwc0->frames[cwc->write_idx].written && cwc0->frames[cwc->write_idx].encoded) {
+    if (cwc0->frames[cwc->write_idx].written && cwc0->frames[cwc->write_idx].encoded && !cwc->frames[cwc->write_idx].encoded) {
         cwc_set_frame(cwc, cwc->write_idx, &cwc0->frames[cwc->write_idx].frame);
     }
     switch_mutex_unlock(cwc->codec_mutex);
@@ -295,14 +288,14 @@ void ceo_set_listener_count(conf_encoder_optimization_t *ceo, int ianacode, uint
 }
 
 void ceo_set_listener_count_incr(conf_encoder_optimization_t *ceo, int ianacode, uint32_t count) {
-  for (conference_write_codec_t *wp_ptr = ceo->cwc[0];
-       wp_ptr != NULL;
-       wp_ptr = wp_ptr->next) {
-    if (wp_ptr->ianacode == ianacode) {
-      wp_ptr->listener_count += count;
-      return;
+    for (conference_write_codec_t *wp_ptr = ceo->cwc[0];
+         wp_ptr != NULL;
+         wp_ptr = wp_ptr->next) {
+        if (wp_ptr->ianacode == ianacode) {
+            wp_ptr->listener_count += count;
+            return;
+        }
     }
-  }
 }
 
 switch_bool_t ceo_initilialize(conf_encoder_optimization_t *ceo, switch_memory_pool_t *pool) {
@@ -331,11 +324,36 @@ void ceo_destroy(conf_encoder_optimization_t *ceo, char *name) {
     }
 }
 
+//#define SIMULATE_ENCODER_LOSS
 switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, uint32_t bytes) {
+#ifdef SIMULATE_ENCODER_LOSS
+    int randoms = rand() % 10;
+#endif
+
+    if (data) {
+        memcpy(ceo->buffer, data, bytes);
+        ceo->bytes = bytes;
+    } else {
+#ifdef SIMULATE_ENCODER_LOSS
+        randoms = 0;
+#endif
+        data = ceo->buffer;
+        bytes = ceo->bytes;
+    }
+
     for (conference_write_codec_t *wp_ptr = ceo->cwc[0];
          wp_ptr != NULL;
          wp_ptr = wp_ptr->next) {
-        cwc_write_and_encode_buffer(wp_ptr, data, bytes);
+#ifdef SIMULATE_ENCODER_LOSS
+        if (randoms < 8) {
+            cwc_write_and_encode_buffer(wp_ptr, data, bytes);
+	} else {
+            wp_ptr->frames[wp_ptr->write_idx].written = SWITCH_TRUE;
+	    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "skipping\n");
+	}
+#else
+	cwc_write_and_encode_buffer(wp_ptr, data, bytes);
+#endif
     }
 
     for (int i = 1; i < N_CWC; i++) {
@@ -343,8 +361,15 @@ switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, 
         for (conference_write_codec_t *wp_ptr = ceo->cwc[i];
              wp_ptr != NULL;
              wp_ptr = wp_ptr->next) {
-            cwc_write_and_copy_buffer(wp_ptr, cwc0, data, bytes);
-            cwc0 = cwc0->next;
+#ifdef SIMULATE_ENCODER_LOSS
+            if (randoms < 8) {
+	        cwc_write_and_copy_buffer(wp_ptr, cwc0, data, bytes);
+		cwc0 = cwc0->next;
+            }
+#else
+	    cwc_write_and_copy_buffer(wp_ptr, cwc0, data, bytes);
+	    cwc0 = cwc0->next;
+#endif
         }
     }
 
@@ -423,7 +448,6 @@ void meo_print(conf_member_encoder_optimization_t *meo, switch_core_session_t *s
   cwc_print(meo->cwc, session, meo->read_idx);
 }
   
-
 switch_bool_t meo_next_frame(conf_member_encoder_optimization_t *meo) {
     if (cwc_frame_written(meo->cwc, meo->read_idx) && cwc_frame_encoded(meo->cwc, meo->read_idx)) {
         meo->read_idx = (meo->read_idx + 1) % MAX_CONF_FRAMES;
@@ -431,6 +455,15 @@ switch_bool_t meo_next_frame(conf_member_encoder_optimization_t *meo) {
     } else {
         return SWITCH_FALSE;
     }
+}
+
+switch_bool_t meo_encoder_exists(conf_member_encoder_optimization_t *meo) {
+    if (meo && meo->cwc) {
+        if (meo->cwc->encoder) {
+            return SWITCH_TRUE;
+        }
+    }
+    return SWITCH_FALSE;
 }
 
 /* xxx */
