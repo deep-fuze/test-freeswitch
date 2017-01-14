@@ -493,6 +493,7 @@ struct switch_rtp {
     uint32_t ts_ooo_count;
     uint32_t rtp_send_fail_count;
     uint32_t adjust_cn_count;
+    uint32_t bad_packet_size_recv;
     switch_time_t last_adjust_cn_count;
     switch_time_t last_ivr_send_time;
     uint32_t in_cn_period;
@@ -4555,6 +4556,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->stats.last_flaws = -1;
 
     rtp_session->last_adjust_cn_count = switch_time_now();
+    rtp_session->bad_packet_size_recv = 0;
 
     rtp_session->stats.recv_rate_history_idx = 0;
     rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
@@ -7146,7 +7148,15 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
             rtp_session->missed_count = 0;
 
             if (bytes < rtp_header_len && bytes != 6) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "Ignoring invalid RTP packet size of %ld bytes.\n", (long)bytes);
+                if (rtp_session->bad_packet_size_recv % 500 == 0) {
+                    uint8_t *dptr = (uint8_t *)&rtp_session->recv_msg.header;
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+                                      "Ignoring invalid RTP packet size of %ld bytes cnt %u bytes[] = [%x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x]\n",
+                                      (long)bytes, rtp_session->bad_packet_size_recv,
+                                      dptr[0],  dptr[1],  dptr[2],  dptr[3],  dptr[4],  dptr[5],  dptr[6],  dptr[7],  dptr[8],  dptr[9],
+                                      dptr[10], dptr[11], dptr[12], dptr[13], dptr[14], dptr[15], dptr[16], dptr[17], dptr[18], dptr[19]);
+                }
+                rtp_session->bad_packet_size_recv += 1;
                 bytes = 0;
                 goto do_continue;
             }
@@ -9091,14 +9101,14 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
         fuze_transport_get_rates(rtp_session->rtp_conn, &local_send, &local_recv);
         rtp_stat_add_value(rtp_session->stats.send_rate, "%d", local_send, rtp_session->stats.last_send_rate);
         rtp_stat_add_value(rtp_session->stats.recv_rate, "%d", local_recv, rtp_session->stats.last_recv_rate);
-        if (local_send == 0 || local_recv == 0) {
+        if (local_send == 0 || (!switch_core_session_get_cn_state(rtp_session->session) && local_recv == 0)) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "bad local send(%d) or recv(%d)\n",
                               local_send, local_recv);
         }
         rtp_session->stats.recv_rate_history[rtp_session->stats.recv_rate_history_idx] = local_recv;
         rtp_session->stats.recv_rate_history_idx = (rtp_session->stats.recv_rate_history_idx + 1) % RTP_STATS_RATE_HISTORY;
         if (neteq_inst && rtp_session->stats.time > RTP_STATS_RATE_HISTORY) {
-            if (!rtp_session->in_cn_period) {
+            if (!switch_core_session_get_cn_state(rtp_session->session)) {
                 if (rtp_session->stats.ignore_rate_period > 0) {
                     rtp_session->stats.ignore_rate_period -= 1;
                 } else {
