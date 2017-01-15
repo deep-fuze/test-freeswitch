@@ -1004,10 +1004,17 @@ static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t
         switch_status_t ret = SWITCH_STATUS_FALSE;
         switch_time_t now = switch_time_now();
         transport_status_t tret = (switch_status_t) fuze_transport_socket_read(rtp_session->rtp_conn, &saddr, (uint8_t *) buf, len);
-        
+        switch_time_t threshold = 0;
+
+        if (switch_core_session_get_cn_state(rtp_session->session)) {
+            threshold = LONG_TIME_BETWEEN_READS * 10;
+        } else {
+            threshold = LONG_TIME_BETWEEN_READS;
+        }
+
         if (rtp_session->last_read) {
             switch_time_t delta = now - rtp_session->last_read;
-            if (delta > LONG_TIME_BETWEEN_READS) {
+            if (delta > threshold) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
                                   "Long time since last read: %" PRId64 "ms\n", delta/1000);
             }
@@ -1015,7 +1022,7 @@ static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t
             if (*len) {
                 if (rtp_session->last_read_w_data) {
                     delta = now - rtp_session->last_read_w_data;
-                    if (delta > LONG_TIME_BETWEEN_READS) {
+                    if (delta > threshold) {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
                                           "Long time since last read w/ data: %" PRId64"ms\n", delta/1000);
                     }
