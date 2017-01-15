@@ -4638,6 +4638,14 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
     memset(rtp_session->stats.recv_rate_history, 0, sizeof(uint16_t)*RTP_STATS_RATE_HISTORY);
 
+    for (int i = 0; i < STATS_MAX; i++) {
+        memset(rtp_session->stats.str[i], 0, sizeof(rtp_session->stats.str[i]));
+        rtp_session->stats.eos[i] = rtp_session->stats.str[i];
+        rtp_session->stats.len[i] = RTP_STATS_STR_SIZE;
+    }
+
+    rtp_session->stats.duration = 0;
+
 #ifdef TRACE_READ
     memset(rtp_session->trace_buffer, 0, 1024);
     rtp_session->trace_cnt = 0;
@@ -9112,27 +9120,28 @@ SWITCH_DECLARE(void) switch_rtp_reset_rtp_stats(switch_channel_t *channel)
         return;
     }
 
-    memset(rtp_session->stats.jitter, 0, sizeof(rtp_session->stats.jitter));
-    memset(rtp_session->stats.recv_level, 0, sizeof(rtp_session->stats.recv_level));
-    memset(rtp_session->stats.send_level, 0, sizeof(rtp_session->stats.send_level));
-    memset(rtp_session->stats.active_speaker, 0, sizeof(rtp_session->stats.active_speaker));
-    memset(rtp_session->stats.send_rate, 0, sizeof(rtp_session->stats.send_rate));
-    memset(rtp_session->stats.recv_rate, 0, sizeof(rtp_session->stats.recv_rate));
-    memset(rtp_session->stats.lost_percent, 0, sizeof(rtp_session->stats.lost_percent));
-    memset(rtp_session->stats.mos, 0, sizeof(rtp_session->stats.mos));
-    memset(rtp_session->stats.r, 0, sizeof(rtp_session->stats.r));
-    memset(rtp_session->stats.variance, 0, sizeof(rtp_session->stats.variance));
-    memset(rtp_session->stats.flaws, 0, sizeof(rtp_session->stats.flaws));
+    for (int i = 0; i < STATS_MAX; i++) {
+        memset(rtp_session->stats.str[i], 0, sizeof(rtp_session->stats.str[i]));
+        rtp_session->stats.eos[i] = rtp_session->stats.str[i];
+        rtp_session->stats.len[i] = RTP_STATS_STR_SIZE;
+    }
 
     rtp_session->stats.duration = 0;
 }
 
-#define rtp_stat_add_value(stat, type_str, value, last_value)   \
+#define rtp_stat_add_value(rtp_session, rtpstat, type_str, value, last_value) \
     { \
         if (value != last_value) { \
-          if (strlen(stat) > 0) switch_snprintf(stat, sizeof(stat), "%s:", stat); \
-          switch_snprintf(stat, sizeof(stat), "%s" type_str ",%" PRId64 "", stat, value, rtp_session->stats.time); \
-          last_value = value; \
+            int statno = rtpstat-RTP_RECV_RATE; \
+            if (rtp_session->stats.len[statno] < RTP_STATS_STR_SIZE) { \
+                strncat(rtp_session->stats.eos[statno], ":", rtp_session->stats.len[statno]); \
+                rtp_session->stats.eos[statno] += 1; \
+                rtp_session->stats.len[statno] -= 1; \
+            } \
+            switch_snprintf(rtp_session->stats.eos[statno], rtp_session->stats.len[statno], type_str ",%" PRId64 "", value, rtp_session->stats.time); \
+            rtp_session->stats.len[statno] -= strlen(rtp_session->stats.eos[statno]); \
+            rtp_session->stats.eos[statno] += strlen(rtp_session->stats.eos[statno]); \
+            last_value = value; \
         }\
     }
 
@@ -9196,55 +9205,61 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
      * switch_rtp.c:2459 audio stat 49.00 467/947 flaws: 480 mos: 2.52 v: 444.73 15.47/444.73
      */
     if (jbuf != -1) {
-        rtp_stat_add_value(rtp_session->stats.jitter, "%d", jbuf, rtp_session->stats.last_jitter);
+        rtp_stat_add_value(rtp_session, RTP_JITTER_BUFFER, "%d", jbuf, rtp_session->stats.last_jitter);
         if (rtp_session->stats.duration % 10 == 0) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "jitter buffer size:%d\n", jbuf);
         }
         if (neteq_inst) {
-            rtp_stat_add_value(rtp_session->stats.pref_jbuf, "%d", nwstats.preferredBufferSize, rtp_session->stats.last_pref_jbuf);
-            rtp_stat_add_value(rtp_session->stats.jbuf_pkts, "%d", processing.pkts_in_buffer, rtp_session->stats.last_jbuf_pkts);
-            rtp_stat_add_value(rtp_session->stats.proc_time, "%d", max_proc_time, rtp_session->stats.last_proc_time);
+            rtp_stat_add_value(rtp_session, RTP_PREF_JBUF, "%d", nwstats.preferredBufferSize, rtp_session->stats.last_pref_jbuf);
+            rtp_stat_add_value(rtp_session, RTP_JBUF_PKTS, "%d", processing.pkts_in_buffer, rtp_session->stats.last_jbuf_pkts);
+            rtp_stat_add_value(rtp_session, RTP_MAX_PROC_TIME, "%d", max_proc_time, rtp_session->stats.last_proc_time);
         }
     }
 
     if (level_in > -1) {
-        rtp_stat_add_value(rtp_session->stats.recv_level, "%d", level_in, rtp_session->stats.last_recv_level);
+        rtp_stat_add_value(rtp_session, RTP_RECV_LEVEL, "%d", level_in, rtp_session->stats.last_recv_level);
     }
 
     if (rtp_session->stats.inbound.mos) {
-        rtp_stat_add_value(rtp_session->stats.mos, "%0.2f", rtp_session->stats.inbound.mos, rtp_session->stats.last_mos);
+        float mos;
+        mos = ((float)(int)(rtp_session->stats.inbound.mos*100)/100);
+        rtp_stat_add_value(rtp_session, RTP_MOS, "%0.2f", mos, rtp_session->stats.last_mos);
     }
 
     if (rtp_session->stats.inbound.R) {
-        rtp_stat_add_value(rtp_session->stats.r, "%0.2f", rtp_session->stats.inbound.R, rtp_session->stats.last_r);
+        float r;
+        r = ((float)(int)(rtp_session->stats.inbound.R*100)/100);
+        rtp_stat_add_value(rtp_session, RTP_R, "%0.2f", r, rtp_session->stats.last_r);
     }
 
 #if 0
     if (rtp_session->stats.inbound.variance) {
-        rtp_stat_add_value(rtp_session->stats.variance, "%0.2f", rtp_session->stats.inbound.variance, rtp_session->stats.last_variance);
+        rtp_stat_add_value(rtp_session, RTP_VARIANCE, "%0.2f", rtp_session->stats.inbound.variance, rtp_session->stats.last_variance);
     }
 #endif
 
     if (rtp_session->stats.inbound.flaws) {
-        rtp_stat_add_value(rtp_session->stats.flaws, "%0ld", rtp_session->stats.inbound.flaws, rtp_session->stats.last_flaws);
+        rtp_stat_add_value(rtp_session, RTP_FLAWS, "%0ld", rtp_session->stats.inbound.flaws, rtp_session->stats.last_flaws);
     }
 
     if (rtp_session->stats.inbound.lossrate) {
-        rtp_stat_add_value(rtp_session->stats.lost_percent, "%0.2f", rtp_session->stats.inbound.lossrate, rtp_session->stats.last_lost_percent);
+        float loss;
+        loss = ((float)(int)(rtp_session->stats.inbound.lossrate*100)/100);
+        rtp_stat_add_value(rtp_session, RTP_PER_LOST, "%0.2f", loss, rtp_session->stats.last_lost_percent);
     }
 
     if (level_out > -1) {
-        rtp_stat_add_value(rtp_session->stats.send_level, "%d", level_out, rtp_session->stats.last_send_level);
+        rtp_stat_add_value(rtp_session, RTP_SEND_LEVEL, "%d", level_out, rtp_session->stats.last_send_level);
     }
 
     if (active > -1) {
-        rtp_stat_add_value(rtp_session->stats.active_speaker, "%d", active, rtp_session->stats.last_active_speaker);
+        rtp_stat_add_value(rtp_session, RTP_ACTIVE_SPEAKER, "%d", active, rtp_session->stats.last_active_speaker);
     }
 
     if (rtp_session->rtp_conn) {
         fuze_transport_get_rates(rtp_session->rtp_conn, &local_send, &local_recv);
-        rtp_stat_add_value(rtp_session->stats.send_rate, "%d", local_send, rtp_session->stats.last_send_rate);
-        rtp_stat_add_value(rtp_session->stats.recv_rate, "%d", local_recv, rtp_session->stats.last_recv_rate);
+        rtp_stat_add_value(rtp_session, RTP_SEND_RATE, "%d", local_send, rtp_session->stats.last_send_rate);
+        rtp_stat_add_value(rtp_session, RTP_RECV_RATE, "%d", local_recv, rtp_session->stats.last_recv_rate);
         if (local_send == 0 || (!switch_core_session_get_cn_state(rtp_session->session) && local_recv == 0)) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "bad local send(%d) or recv(%d)\n",
                               local_send, local_recv);

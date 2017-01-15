@@ -677,14 +677,14 @@ typedef enum {
     RTP_JITTER,
     RTP_MAX_JITTER,
     RTP_CUR_JB_SIZE,
-    RTP_JITTER_BUFFER,
-    RTP_ACTIVE_SPEAKER,
-    RTP_SEND_LEVEL,
-    RTP_RECV_LEVEL,
-    RTP_CUM_LOST,
-    RTP_PER_LOST,
     RTP_RECV_RATE,
     RTP_SEND_RATE,
+    RTP_RECV_LEVEL,
+    RTP_SEND_LEVEL,
+    RTP_ACTIVE_SPEAKER,
+    RTP_JITTER_BUFFER,
+    RTP_CUM_LOST,
+    RTP_PER_LOST,
     RTP_MOS,
     RTP_R,
     RTP_VARIANCE,
@@ -734,6 +734,8 @@ typedef enum {
     RTP_RX_CONGESTION_BAD
 } rtp_rx_congestion_state_t;
 
+#define STATS_MAX (RTP_MAX_STAT-RTP_RECV_RATE)
+
 typedef struct {
     switch_rtp_numbers_t inbound;
     switch_rtp_numbers_t outbound;
@@ -754,22 +756,9 @@ typedef struct {
     uint8_t  jb_period_lost_percent;
     uint16_t jb_period_chop_events[10];
 
-    char recv_rate[RTP_STATS_STR_SIZE];
-    char send_rate[RTP_STATS_STR_SIZE];
-    char recv_level[RTP_STATS_STR_SIZE];
-    char send_level[RTP_STATS_STR_SIZE];
-    char active_speaker[RTP_STATS_STR_SIZE];
-    char jitter[RTP_STATS_STR_SIZE];
-    char cumulative_lost_e[RTP_STATS_STR_SIZE];
-    char lost_percent[RTP_STATS_STR_SIZE];
-    char mos[RTP_STATS_STR_SIZE];
-    char r[RTP_STATS_STR_SIZE];
-    char variance[RTP_STATS_STR_SIZE];
-    char flaws[RTP_STATS_STR_SIZE];
-
-    char pref_jbuf[RTP_STATS_STR_SIZE];
-    char jbuf_pkts[RTP_STATS_STR_SIZE];
-    char proc_time[RTP_STATS_STR_SIZE];
+    char str[STATS_MAX][RTP_STATS_STR_SIZE];
+    char *eos[STATS_MAX];
+    int len[STATS_MAX];
 
     uint16_t last_recv_rate;
     uint16_t last_send_rate;

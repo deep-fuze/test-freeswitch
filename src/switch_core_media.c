@@ -1600,15 +1600,21 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
     }
 
     if ((vval = switch_channel_get_variable(channel, "meeting"))) {
-        switch_channel_set_running_stats(channel, "meeting", vval);
+        if (switch_channel_update_running_stats(channel, "meeting", vval) < 0) {
+            switch_channel_set_running_stats(channel, "meeting", vval);
+        }
     }
 
     if ((vval = switch_channel_get_variable(channel, "meeting_instance"))) {
-        switch_channel_set_running_stats(channel, "meeting_instance", vval);
+        if (switch_channel_update_running_stats(channel, "meeting_instance", vval) < 0) {
+            switch_channel_set_running_stats(channel, "meeting_instance", vval);
+        }
     }
 
     if ((vval = switch_channel_get_variable(channel, "attendee_name"))) {
-        switch_channel_set_running_stats(channel, "attendee_name", vval);
+        if (switch_channel_update_running_stats(channel, "attendee_name", vval) < 0) {
+            switch_channel_set_running_stats(channel, "attendee_name", vval);
+        }
     }
 
     if (stats->last_event) {
@@ -1692,47 +1698,10 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
     }
 
     if (event_trigger == SWITCH_FALSE) {
-        if (strlen(stats->jitter) > 0) {
-            set_periodic_stats_value(session, RTP_JITTER_BUFFER, stats->jitter, type);
-        }
-        if (strlen(stats->recv_level) > 0) {
-            set_periodic_stats_value(session, RTP_RECV_LEVEL, stats->recv_level, type);
-        }
-        if (strlen(stats->send_level) > 0) {
-            set_periodic_stats_value(session, RTP_SEND_LEVEL, stats->send_level, type);
-        }
-        if (strlen(stats->active_speaker) > 0) {
-            set_periodic_stats_value(session, RTP_ACTIVE_SPEAKER, stats->active_speaker, type);
-        }
-        if (strlen(stats->recv_rate) > 0) {
-            set_periodic_stats_value(session, RTP_RECV_RATE, stats->recv_rate, type);
-        }
-        if (strlen(stats->send_rate) > 0) {
-            set_periodic_stats_value(session, RTP_SEND_RATE, stats->send_rate, type);
-        }
-        if (strlen(stats->lost_percent) > 0) {
-            set_periodic_stats_value(session, RTP_PER_LOST, stats->lost_percent, type);
-        }
-        if (strlen(stats->r) > 0) {
-            set_periodic_stats_value(session, RTP_R, stats->r, type);
-        }
-        if (strlen(stats->variance) > 0) {
-            set_periodic_stats_value(session, RTP_VARIANCE, stats->variance, type);
-        }
-        if (strlen(stats->flaws) > 0) {
-            set_periodic_stats_value(session, RTP_FLAWS, stats->flaws, type);
-        }
-        if (strlen(stats->mos) > 0) {
-            set_periodic_stats_value(session, RTP_MOS, stats->mos, type);
-        }
-        if (strlen(stats->pref_jbuf) > 0) {
-            set_periodic_stats_value(session, RTP_PREF_JBUF, stats->pref_jbuf, type);
-        }
-        if (strlen(stats->jbuf_pkts) > 0) {
-            set_periodic_stats_value(session, RTP_JBUF_PKTS, stats->jbuf_pkts, type);
-        }
-        if (strlen(stats->proc_time) > 0) {
-            set_periodic_stats_value(session, RTP_MAX_PROC_TIME, stats->proc_time, type);
+        for (int i = 0; i < STATS_MAX; i++) {
+            if (strlen(stats->str[i]) > 0) {
+                set_periodic_stats_value(session, RTP_RECV_RATE+i, stats->str[i], type);
+            }
         }
     }
 }
