@@ -7273,7 +7273,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
     return NULL;
 }
 
-#define CONFERENCE_PARTICIPANT_LIMIT_BEFORE_ACCUMULATION 1000
+#define CONFERENCE_PARTICIPANT_LIMIT_BEFORE_ACCUMULATION 400
 
 SWITCH_DECLARE(switch_status_t) switch_core_session_send_conference_frame(switch_core_session_t *session, switch_frame_t *frame,
                                                                           switch_io_flag_t flags, int stream_id, switch_time_t *timed);
