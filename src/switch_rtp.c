@@ -304,6 +304,8 @@ typedef struct ts_normalize_s {
 #define MAX_EMAIL_LEN 1024
 #define MAX_PHONE_LEN 100
 //#define TRACE_READ 1
+#define N_LAST_READ_BUCKETS 20
+#define LAST_READ_BUCKET_SIZE 50
 
 struct switch_rtp {
     /*
@@ -505,6 +507,10 @@ struct switch_rtp {
     switch_time_t last_read;
     switch_time_t last_read_w_data;
 
+    switch_time_t last_read_log_time;
+    switch_time_t last_pkt_sent;
+    int last_read_log_time_cnt;
+    uint32_t last_read_bucket[N_LAST_READ_BUCKETS];
 };
 
 struct switch_rtcp_report_block {
@@ -1022,9 +1028,41 @@ static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t
             if (*len) {
                 if (rtp_session->last_read_w_data) {
                     delta = now - rtp_session->last_read_w_data;
-                    if (delta > threshold) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
-                                          "Long time since last read w/ data: %" PRId64"ms\n", delta/1000);
+                    if ((now - rtp_session->last_read_log_time) > LONG_TIME_BETWEEN_READS*10*10) {
+                        if (rtp_session->last_read_log_time_cnt) {
+                            if (delta > threshold) {
+                                int bucket = delta/(1000*LAST_READ_BUCKET_SIZE);
+                                rtp_session->last_read_log_time_cnt += 1;
+                                bucket = (bucket >= N_LAST_READ_BUCKETS) ? (N_LAST_READ_BUCKETS-1) : bucket;
+                                rtp_session->last_read_bucket[bucket] += 1;
+                            }
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+                                              "Delay rx'ing data: cnt(%u) [%u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u]\n",
+                                              rtp_session->last_read_log_time_cnt,
+                                              rtp_session->last_read_bucket[0], rtp_session->last_read_bucket[1],
+                                              rtp_session->last_read_bucket[2], rtp_session->last_read_bucket[3],
+                                              rtp_session->last_read_bucket[4], rtp_session->last_read_bucket[5],
+                                              rtp_session->last_read_bucket[6], rtp_session->last_read_bucket[7],
+                                              rtp_session->last_read_bucket[8], rtp_session->last_read_bucket[9],
+                                              rtp_session->last_read_bucket[10], rtp_session->last_read_bucket[11],
+                                              rtp_session->last_read_bucket[12], rtp_session->last_read_bucket[13],
+                                              rtp_session->last_read_bucket[14], rtp_session->last_read_bucket[15],
+                                              rtp_session->last_read_bucket[16], rtp_session->last_read_bucket[17],
+                                              rtp_session->last_read_bucket[18], rtp_session->last_read_bucket[19]);
+                            rtp_session->last_read_log_time_cnt = 0;
+                            memset(rtp_session->last_read_bucket, 0, N_LAST_READ_BUCKETS*sizeof(uint32_t));
+                        } else if (delta > threshold) {
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+                                              "Delay rx'ing data: %" PRId64"ms\n", delta/1000);
+                        }
+                        rtp_session->last_read_log_time = now;
+                    } else {
+                        if (delta > threshold) {
+                            int bucket = delta/(1000*LAST_READ_BUCKET_SIZE);
+                            rtp_session->last_read_log_time_cnt += 1;
+                            bucket = (bucket >= N_LAST_READ_BUCKETS) ? (N_LAST_READ_BUCKETS-1) : bucket;
+                            rtp_session->last_read_bucket[bucket] += 1;
+                        }
                     }
                 }
                 rtp_session->last_read_w_data = now;
@@ -8165,6 +8203,14 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
         if (rtp_session->use_webrtc_neteq) {
             /* this is the case where we have a jitter buffer and we're just generating our own sequence numbers */
             send_msg->header.seq = htons(++rtp_session->seq);
+            if (rtp_session->last_pkt_sent) {
+                switch_time_t delta = (switch_time_now() - rtp_session->last_pkt_sent)/1000;
+                if (delta < 10) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+                                      "short time between sends: %" PRId64 "ms\n", delta);
+                }
+            }
+            rtp_session->last_pkt_sent  = switch_time_now();
         } else if (*flags & SFF_IVR_FRAME) {
             switch_time_t now = switch_time_now();
             uint32_t diff = 0;
@@ -8510,7 +8556,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 switch_time_t delta = (now - rtp_session->time_of_first_ts)/1000; // ms
                 uint64_t delta_ts = (this_ts - rtp_session->first_ts)/8; // ms
                 uint64_t difference = abs(delta_ts - delta);
-                if (difference >= 60) {
+                if (difference > 60) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
                                       "Timestamp delta %" PRId64 " [ts delta:%" PRId64 " vs time delta:%" PRId64 "] first=%u curr=%u\n",
                                       difference, delta_ts, delta, rtp_session->first_ts, this_ts);
@@ -9310,6 +9356,22 @@ SWITCH_DECLARE(void) switch_rtp_set_been_active_talker(switch_rtp_t *rtp_session
         rtp_session->been_active_talker = val;
     }
 }
+
+SWITCH_DECLARE(void) switch_rtp_update_ts(switch_channel_t *channel, int increment) {
+    switch_rtp_t *rtp_session;
+
+    rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session) {
+        return;
+    }
+
+    if (rtp_session->use_next_ts) {
+        rtp_session->next_ts += increment;
+    }
+}
+
+
 /* For Emacs:
  * Local Variables:
  * mode:c
@@ -9320,4 +9382,3 @@ SWITCH_DECLARE(void) switch_rtp_set_been_active_talker(switch_rtp_t *rtp_session
  * For VIM:
  * vim:set softtabstop=4 shiftwidth=4 tabstop=4 noet:
  */
-

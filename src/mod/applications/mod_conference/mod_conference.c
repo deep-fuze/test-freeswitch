@@ -7344,6 +7344,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
     switch_time_t sent_time = 0;
     switch_time_t before_mutex_time = 0;
     switch_time_t before_send_time;
+    int sent = 0;
 
     switch_mutex_lock(ols->member->write_mutex);
 
@@ -7443,6 +7444,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
     }
     
     if (switch_channel_test_app_flag(channel, CF_APP_TAGGED)) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "FLUSHING\n");
         set_member_state_locked(member, MFLAG_FLUSH_BUFFER);
     } else if ((mux_used >= ols->bytes) && member->one_of_active) {
         switch_frame_t *frame = NULL;
@@ -7512,6 +7514,8 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
                     switch_mutex_unlock(member->audio_out_mutex);
                     switch_mutex_unlock(member->write_mutex);
                     return OUTPUT_LOOP_FAILED;
+                } else {
+                    sent = 1;
                 }
             }
         
@@ -7549,6 +7553,8 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
                 switch_channel_hangup(channel, SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER);
                 switch_mutex_unlock(member->write_mutex);
                 return OUTPUT_LOOP_HANGUP;
+            } else {
+                sent = 1;
             }
         }
         send_time += before_send_time;
@@ -7602,46 +7608,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             }
             
             /* if we're the first to see this frame then encode it */
-// #define USE_BUFFER
             if (!meo_frame_encoded(&member->meo)) {
-#ifdef USE_BUFFER
-                switch_frame_t *frame = NULL;
-                ols->write_frame.samples = ols->write_frame.datalen / 2;
-                ols->write_frame.timestamp = timer->samplecount;
-                
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
-                                  "member %d codec=%d cnts:0:%u 8:%u 9:%u rdidx=%d wr=%d en=%d\n", member->id, member->orig_read_impl.codec_id,
-                                  member->conference->g711ucnt, member->conference->g711acnt, member->conference->g722cnt,
-                                  member->meo.read_idx, meo_frame_written(&member->meo), meo_frame_encoded(&member->meo));
-
-                if ((ols->write_frame.datalen = (uint32_t)meo_read_buffer(&member->meo, ols->write_frame.data, ols->bytes))) {
-                    
-                    if (switch_core_session_enc_frame(member->session, &ols->write_frame, SWITCH_IO_FLAG_NONE, 0,
-                                                      &frame) != SWITCH_STATUS_SUCCESS) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
-                                          "member %d failed to encode\n", member->id);
-                        failed = SWITCH_TRUE;
-                        switch_mutex_unlock(member->meo.cwc->codec_mutex);
-                        break;
-                    }
-                    member->meo.shared_encode_cnt += 1;
-                    member->meo.cwc->encode_cnt += 1;
-                } else {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
-                                      "member %d read 0 bytes\n", member->id);
-                    meo_print(&member->meo, member->session);
-                    switch_mutex_unlock(member->meo.cwc->codec_mutex);
-                    break;
-                }
-                
-                if (!frame || !meo_set_frame(&member->meo, frame)) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
-                                      "member %d failed to set frame 0x%lld\n",
-                                      member->id, (long long)frame);
-                    switch_mutex_unlock(member->meo.cwc->codec_mutex);
-                    break;
-                }
-#else
                 /* ok so we shouldn't be in here ... let's try to fix things and figure out why we're in here */
                 uint32_t codec_cnt = 0;
 
@@ -7685,7 +7652,6 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
                     /* now try to force an encode */
                     ceo_write_buffer(&member->conference->ceo, NULL, 0);
                 }
-#endif
             } else {
                 member->meo.shared_copy_cnt += 1;
                 member->meo.cwc->rd_cnt += 1;
@@ -7708,6 +7674,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
                 switch_mutex_unlock(member->meo.cwc->codec_mutex);
                 break;
             } else {
+                sent = 1;
                 sent_frames += 1;
             }
             
@@ -7738,6 +7705,11 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         }
     } else {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "Didn't match one of the other conditions\n");
+    }
+
+    if (!sent) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "didn't send a frame!\n");
+        switch_rtp_update_ts(member->channel, 160);
     }
     
     if (switch_test_flag(member, MFLAG_FLUSH_BUFFER)) {
