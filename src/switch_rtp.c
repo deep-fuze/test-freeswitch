@@ -501,6 +501,10 @@ struct switch_rtp {
     int trace_cnt;
     char trace_buffer[1024];
 #endif
+
+    switch_time_t last_read;
+    switch_time_t last_read_w_data;
+
 };
 
 struct switch_rtcp_report_block {
@@ -990,14 +994,41 @@ static switch_status_t rtp_sendto(switch_rtp_t *rtp_session, switch_socket_t *so
 #endif
 }
 
+#define LONG_TIME_BETWEEN_READS 100000
+
 static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t *from,
                                         switch_socket_t *sock, int32_t flags, char *buf, size_t *len)
 {
     if (rtp_session && rtp_session->rtp_conn) {
         __sockaddr_t saddr;
         switch_status_t ret = SWITCH_STATUS_FALSE;
+        switch_time_t now = switch_time_now();
         transport_status_t tret = (switch_status_t) fuze_transport_socket_read(rtp_session->rtp_conn, &saddr, (uint8_t *) buf, len);
         
+        if (rtp_session->last_read) {
+            switch_time_t delta = now - rtp_session->last_read;
+            if (delta > LONG_TIME_BETWEEN_READS) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+                                  "Long time since last read: %" PRId64 "ms\n", delta/1000);
+            }
+            rtp_session->last_read = now;
+            if (*len) {
+                if (rtp_session->last_read_w_data) {
+                    delta = now - rtp_session->last_read_w_data;
+                    if (delta > LONG_TIME_BETWEEN_READS) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+                                          "Long time since last read w/ data: %" PRId64"ms\n", delta/1000);
+                    }
+                }
+                rtp_session->last_read_w_data = now;
+            }
+        } else {
+            rtp_session->last_read = now;
+            if (*len) {
+                rtp_session->last_read_w_data =now;
+            }
+        }
+
 #ifdef CHECK_FOR_LARGE_PKTS
         if (*len > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_recvfrom len too large:%zu ret=%x\n", *len, tret);
@@ -8087,7 +8118,8 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 if (rtp_session->ts_ooo_count == 0) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
                                       "%s dropping because of lower timestamp and sequence number curr=(%d,%u) prev=(%d,%u) pt=%d len=%u cn=%d\n",
-                                      rtp_session->rtp_conn_name, this_seq, this_ts, rtp_session->last_seq, rtp_session->last_write_ts, send_msg->header.pt, datalen, (*flags & SFF_CNG) != 0);
+                                      rtp_session->rtp_conn_name, this_seq, this_ts, rtp_session->last_seq, rtp_session->last_write_ts,
+                                      send_msg->header.pt, datalen, (*flags & SFF_CNG) != 0);
                 }
                 rtp_session->ts_ooo_count += 1;
                 send = 0;
@@ -8096,7 +8128,8 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                     if (rtp_session->ts_ooo_count == 0) {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
                                           "%s out of order TS because of lower timestamp and sequence number curr=(%d,%u) prev=(%d,%u) pt=%d len=%u cn=%d\n",
-                                          rtp_session->rtp_conn_name, this_seq, this_ts, rtp_session->last_seq, rtp_session->last_write_ts, send_msg->header.pt, datalen, (*flags & SFF_CNG) != 0);
+                                          rtp_session->rtp_conn_name, this_seq, this_ts, rtp_session->last_seq, rtp_session->last_write_ts,
+                                          send_msg->header.pt, datalen, (*flags & SFF_CNG) != 0);
                     }
                     rtp_session->ts_ooo_count += 1;
                 }
@@ -8105,7 +8138,8 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             if (rtp_session->ts_ooo_count > 1) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
                                   "%s out of order TS back to normal curr=(%d,%u) prev=(%d,%u) pt=%d len=%u cn=%d after %d packets\n",
-                                  rtp_session->rtp_conn_name, this_seq, this_ts, rtp_session->last_seq, rtp_session->last_write_ts, send_msg->header.pt, datalen, (*flags & SFF_CNG) != 0, rtp_session->ts_ooo_count);
+                                  rtp_session->rtp_conn_name, this_seq, this_ts, rtp_session->last_seq, rtp_session->last_write_ts,
+                                  send_msg->header.pt, datalen, (*flags & SFF_CNG) != 0, rtp_session->ts_ooo_count);
             }
             rtp_session->ts_ooo_count = 0;
         }
@@ -8162,6 +8196,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             uint16_t seq_no_from_rtp = ntohs(send_msg->header.seq);
             switch_bool_t out_of_order = SWITCH_FALSE;
             switch_bool_t adjusted_cn = SWITCH_FALSE;
+            int seq_out_of_order_step = 0;
 
             if (rtp_session->is_ivr == SWITCH_TRUE) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s ivr -> bridge (%u) seq=%u bpath=%d x=%d\n",
@@ -8182,6 +8217,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 rtp_session->seq += 1;
             } else if ((rtp_session->last_bridge_seq[0] + 1) != seq_no_from_rtp) {
                 out_of_order = SWITCH_TRUE;
+                seq_out_of_order_step = (seq_no_from_rtp - (rtp_session->last_bridge_seq[0] + 1));
             }
 
             if (rtp_session->write_count == 0) {
@@ -8191,6 +8227,23 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             if (out_of_order && *flags & SFF_TIMEOUT) {
                 ret = (int) bytes;
                 goto end;
+            }
+
+            if (seq_out_of_order_step) {
+                if (seq_out_of_order_step >= -8 && seq_out_of_order_step <= 8 && rtp_session->last_write_ts_set) {
+                    int delta_ts = (this_ts - (rtp_session->last_write_ts+160))/160;
+                    int delta = seq_out_of_order_step - delta_ts;
+                    if (delta >= -8 && delta <= 8 && delta != 0) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+                                          "adjust timestamp: seq %u -> %u ts %u -> %u delta_seq %d delta_ts %d --> delta %d ts %u --> %u\n",
+                                          rtp_session->last_bridge_seq[0] + 1, seq_no_from_rtp,
+                                          rtp_session->last_write_ts+160, this_ts,
+                                          seq_out_of_order_step, delta_ts, delta,
+                                          this_ts, (uint32_t)(this_ts + (delta*160)));
+                        this_ts += (delta*160);
+                        send_msg->header.ts = htonl(this_ts);
+                    }
+                }
             }
 
             if (*flags & SFF_CNG) {
@@ -9030,13 +9083,22 @@ SWITCH_DECLARE(void) switch_rtp_reset_rtp_stats(switch_channel_t *channel)
         }\
     }
 
+#define MAX_WAITING_TIME_TO_CHECK 50
+
 SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int level_in, int level_out, int active)
 {
     switch_rtp_t *rtp_session;
     void *neteq_inst;
     WebRtcNetEQ_NetworkStatistics nwstats;
+    WebRtcNetEQ_ProcessingActivity processing;
     int jbuf = -1;
-    uint16_t local_send, local_recv;
+    uint16_t local_send = 0, local_recv = 0;
+    int rawframeswaiting = 0, waiting_times_ms[MAX_WAITING_TIME_TO_CHECK];
+    int max_proc_time = 0;
+
+//  int pkts_in_buffer, max_pkts_in_buffer
+// void WebRtcNetEQ_GetProcessingActivity(void* inst, WebRtcNetEQ_ProcessingActivity* stat, int clear);
+// void WebRtcNetEQ_GetJitterBufferSize(void* inst, WebRtcNetEQ_ProcessingActivity* stat);
 
     rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
 
@@ -9046,8 +9108,32 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
 
     neteq_inst = switch_core_get_neteq_inst(rtp_session->session);
     if (neteq_inst) {
+        rawframeswaiting = WebRtcNetEQ_GetRawFrameWaitingTimes(neteq_inst, MAX_WAITING_TIME_TO_CHECK, waiting_times_ms);
+        WebRtcNetEQ_GetJitterBufferSize(neteq_inst, &processing);
         if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
             jbuf = nwstats.currentBufferSize;
+            for (int i = 0; i < rawframeswaiting; i++) {
+                if (waiting_times_ms[i] > max_proc_time) {
+                    max_proc_time = waiting_times_ms[i];
+                }
+            }
+            if ((jbuf > 250 && rtp_session->stats.last_jitter < 250) ||
+                (jbuf < 250 && rtp_session->stats.last_jitter > 250) ||
+                (nwstats.preferredBufferSize > 250 && rtp_session->stats.last_pref_jbuf < 250) ||
+                (nwstats.preferredBufferSize < 250 && rtp_session->stats.last_pref_jbuf > 250) ||
+                abs(jbuf - nwstats.preferredBufferSize) > 100 ||
+                (max_proc_time > 250 && rtp_session->stats.last_proc_time < 250) ||
+                (max_proc_time < 250 && rtp_session->stats.last_proc_time > 250)) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+                                  "jitter buffer stats: curr:%d pref:%d pkts:%d "
+                                  "wait[%d]=[%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d]\n",
+                                  jbuf, nwstats.preferredBufferSize,
+                                  processing.pkts_in_buffer, rawframeswaiting,
+                                  waiting_times_ms[0],  waiting_times_ms[1],  waiting_times_ms[2],  waiting_times_ms[3],  waiting_times_ms[4],
+                                  waiting_times_ms[5],  waiting_times_ms[6],  waiting_times_ms[7],  waiting_times_ms[8],  waiting_times_ms[9],
+                                  waiting_times_ms[10], waiting_times_ms[11], waiting_times_ms[12], waiting_times_ms[13], waiting_times_ms[14],
+                                  waiting_times_ms[15], waiting_times_ms[16], waiting_times_ms[17], waiting_times_ms[18], waiting_times_ms[19]);
+            }
         }
     } else {
         jbuf = rtp_session->stats.rtcp.jitter;
@@ -9060,6 +9146,11 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
         rtp_stat_add_value(rtp_session->stats.jitter, "%d", jbuf, rtp_session->stats.last_jitter);
         if (rtp_session->stats.duration % 10 == 0) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "jitter buffer size:%d\n", jbuf);
+        }
+        if (neteq_inst) {
+            rtp_stat_add_value(rtp_session->stats.pref_jbuf, "%d", nwstats.preferredBufferSize, rtp_session->stats.last_pref_jbuf);
+            rtp_stat_add_value(rtp_session->stats.jbuf_pkts, "%d", processing.pkts_in_buffer, rtp_session->stats.last_jbuf_pkts);
+            rtp_stat_add_value(rtp_session->stats.proc_time, "%d", max_proc_time, rtp_session->stats.last_proc_time);
         }
     }
 
@@ -9121,7 +9212,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
                         }
                         delta = delta / (float)RTP_STATS_RATE_HISTORY_BAD;
                         if ((delta > 2.5 || jbuf > 750)) {
-                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "Transition to bad rx congrestion state: delta:%f\n",
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "Transition to bad rx congestion state: delta:%f\n",
                                               delta);
                             rtp_session->send_rtcp |=  (SWITCH_RTCP_NORMAL | SWITCH_RTCP_RX_CONGESTION);
                             rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_BAD;
@@ -9137,7 +9228,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
                             delta = 0;
                             rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
                             rtp_session->send_rtcp |=  (SWITCH_RTCP_NORMAL | SWITCH_RTCP_RX_CONGESTION);
-                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "Transition to bad good congrestion state: delta:%f\n",
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "Transition to good congestion state: delta:%f\n",
                                               delta);
                         }
                     }

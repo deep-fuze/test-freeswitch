@@ -9406,9 +9406,19 @@ static void conference_thread_print(switch_stream_handle_t *stream, char *delim,
                             int j = 0;
 
                             for (olp = globals.conference_thread[i].loop; olp; olp = olp->next) {
-                                stream->write_function(stream, "  %3d L%2d OL%2d m%4d %s %s %s%s%s\n",
+                                char *codec;
+                                if (olp->member->ianacode == 0) {
+                                    codec = "g711u";
+                                } else if (olp->member->ianacode == 8) {
+                                    codec = "g711a";
+                                } else if (olp->member->ianacode == 9) {
+                                    codec = "g722 ";
+                                } else {
+                                    codec = "other";
+                                }
+                                stream->write_function(stream, "  %3d L%2d OL%2d m%4d %s %s %s %s%s%s\n",
                                                        j, olp->list_idx, olp->initial_list_idx, olp->member->id, olp->member->mname, 
-                                                       olp->member->conference->meeting_id,
+                                                       olp->member->conference->meeting_id, codec,
                                                        (olp->starting ? "starting " : ""), (olp->stopping ? "stopping " : ""),
                                                        (olp->stopped ? "stopped " : ""));
                                 j++;

@@ -689,6 +689,9 @@ typedef enum {
     RTP_R,
     RTP_VARIANCE,
     RTP_FLAWS,
+    RTP_PREF_JBUF,
+    RTP_JBUF_PKTS,
+    RTP_MAX_PROC_TIME,
     RTP_MAX_STAT
 } rtp_periodic_stat_t;
 
@@ -727,8 +730,8 @@ typedef enum {
 #define RTP_STATS_RATE_HISTORY_GOOD 20
 
 typedef enum {
-	RTP_RX_CONGESTION_GOOD,
-	RTP_RX_CONGESTION_BAD
+    RTP_RX_CONGESTION_GOOD,
+    RTP_RX_CONGESTION_BAD
 } rtp_rx_congestion_state_t;
 
 typedef struct {
@@ -764,6 +767,10 @@ typedef struct {
     char variance[RTP_STATS_STR_SIZE];
     char flaws[RTP_STATS_STR_SIZE];
 
+    char pref_jbuf[RTP_STATS_STR_SIZE];
+    char jbuf_pkts[RTP_STATS_STR_SIZE];
+    char proc_time[RTP_STATS_STR_SIZE];
+
     uint16_t last_recv_rate;
     uint16_t last_send_rate;
     int last_recv_level;
@@ -776,6 +783,9 @@ typedef struct {
     float last_r;
     float last_variance;
     uint64_t last_flaws;
+    int last_pref_jbuf;
+    int last_jbuf_pkts;
+    int last_proc_time;
 
     uint16_t recv_rate_history[RTP_STATS_RATE_HISTORY];
     int recv_rate_history_idx;

@@ -244,7 +244,9 @@ static const char* rtp_stat_name[RTP_MAX_STAT] =
     [RTP_R] = "event-r",
     [RTP_VARIANCE] = "event-variance",
     [RTP_FLAWS] = "event-flaws",
-
+    [RTP_PREF_JBUF] = "preferred-jitter",
+    [RTP_JBUF_PKTS] = "packets-in-jitterbuffer",
+    [RTP_MAX_PROC_TIME] = "max-proc-time-jitterbuffer",
 };
 
 static const char* rtp_event_name[RTP_EVENT_MAX] =
@@ -1722,6 +1724,15 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
         }
         if (strlen(stats->mos) > 0) {
             set_periodic_stats_value(session, RTP_MOS, stats->mos, type);
+        }
+        if (strlen(stats->pref_jbuf) > 0) {
+            set_periodic_stats_value(session, RTP_PREF_JBUF, stats->pref_jbuf, type);
+        }
+        if (strlen(stats->jbuf_pkts) > 0) {
+            set_periodic_stats_value(session, RTP_JBUF_PKTS, stats->jbuf_pkts, type);
+        }
+        if (strlen(stats->proc_time) > 0) {
+            set_periodic_stats_value(session, RTP_MAX_PROC_TIME, stats->proc_time, type);
         }
     }
 }
