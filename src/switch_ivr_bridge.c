@@ -82,9 +82,6 @@ static const char* log_filter[] =
         "dialplan",
 };
 
-extern SWITCH_DECLARE(switch_bool_t) switch_get_rtp_session_description(switch_channel_t *channel, char *description, int len);
-extern SWITCH_DECLARE(switch_bool_t) switch_set_rtcp_passthru(switch_channel_t *channel);
-
 static int bridge_can_log_key(const char *key)
 {
         int i;
@@ -807,6 +804,8 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
                 if (switch_test_flag(read_frame, SFF_RTCP)) {
                 }
             }
+            switch_check_bridge_channel_timestamps(chan_a, chan_b);
+
             if (!hot_read) {
                 switch_time_t current_time = switch_time_now();
                 switch_time_t wake_up_delta = (current_time < next_wake_up) ? (next_wake_up - current_time) : 0;

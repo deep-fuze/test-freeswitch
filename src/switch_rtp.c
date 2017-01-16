@@ -455,7 +455,11 @@ struct switch_rtp {
 
     switch_time_t time_of_first_ts;
     switch_time_t time_of_last_ts_check;
+    switch_time_t time_of_last_xchannel_ts_check;
     uint32_t first_ts;
+
+    switch_time_t time_of_first_rx_ts;
+    uint32_t first_rx_ts;
 
     uint32_t high_drift_packets;
     uint32_t high_drift_log_suppress;
@@ -6082,6 +6086,11 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
                 rtp_session->stats.rtcp.max_jitter = rtp_session->stats.rtcp.jitter;
         }
 
+        if (!rtp_session->time_of_first_rx_ts || (abs(ts - rtp_session->last_ts) > 16000)) {
+            rtp_session->time_of_first_rx_ts = now;
+            rtp_session->first_rx_ts = ts;
+        }
+
         rtp_session->last_read_time = now;
         rtp_session->last_ts = ts;
     }
@@ -7917,35 +7926,29 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
     }
     
     if (!switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_VIDEO)) {
-    
-        
-    if ((rtp_session->rtp_bugs & RTP_BUG_NEVER_SEND_MARKER)) {
-        m = 0;
-    } else {
-        if ((rtp_session->last_write_ts != RTP_TS_RESET && rtp_session->ts > (rtp_session->last_write_ts + (rtp_session->samples_per_interval * 10)))
-            || rtp_session->ts == rtp_session->samples_per_interval) {
-            m++;
-        }
-
-        if (switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_USE_TIMER) &&
-            (rtp_session->timer.samplecount - rtp_session->last_write_samplecount) * rtp_session->timestamp_multiplier > rtp_session->samples_per_interval * 10) {
-            m++;
-        }
+        if ((rtp_session->rtp_bugs & RTP_BUG_NEVER_SEND_MARKER)) {
+            m = 0;
+        } else {
+            if ((rtp_session->last_write_ts != RTP_TS_RESET && rtp_session->ts > (rtp_session->last_write_ts + (rtp_session->samples_per_interval * 10)))
+                || rtp_session->ts == rtp_session->samples_per_interval) {
+                m++;
+            }
+            if (switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_USE_TIMER) &&
+                (rtp_session->timer.samplecount - rtp_session->last_write_samplecount) * rtp_session->timestamp_multiplier > rtp_session->samples_per_interval * 10) {
+                m++;
+            }
             if (rtp_session->flags[SWITCH_RTP_FLAG_USE_TIMER] &&
                 (rtp_session->timer.samplecount - rtp_session->last_write_samplecount) > rtp_session->samples_per_interval * 10) {
                 m++;
             }
-
             if (!rtp_session->flags[SWITCH_RTP_FLAG_USE_TIMER] &&
                 ((unsigned) ((switch_micro_time_now() - rtp_session->last_write_timestamp))) > (rtp_session->ms_per_packet * 10)) {
                 m++;
             }
-
             if (rtp_session->cn && (payload != rtp_session->cng_pt && payload != 13)) {
                 rtp_session->cn = 0;
                 m++;
             }
-
             if (rtp_session->need_mark && !rtp_session->sending_dtmf) {
                 m++;
                 rtp_session->need_mark = 0;
@@ -8326,7 +8329,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                     this_ts += 160;
                     send_msg->header.ts = htonl(this_ts);
                     ats = this_ts;
-                    adjusted_cn= SWITCH_TRUE;
+                    adjusted_cn = SWITCH_TRUE;
                 }
 
                 send_msg->header.m = 0;
@@ -8558,13 +8561,17 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             rtp_session->first_ts = this_ts;
         }
 
-        if (rtp_session->last_write_ts_set) {
+        /*
+         * Only check conf timestamps here.  Bridging timestamps are checked separately across both
+         * channels.
+         */
+        if (rtp_session->last_write_ts_set && rtp_session->use_webrtc_neteq) {
             switch_time_t now = switch_time_now();
             if ((now - rtp_session->time_of_last_ts_check) > 10000000) {
                 switch_time_t delta = (now - rtp_session->time_of_first_ts)/1000; // ms
                 uint64_t delta_ts = (this_ts - rtp_session->first_ts)/8; // ms
-                uint64_t difference = abs(delta_ts - delta);
-                if (difference > 60) {
+                int64_t difference = abs(delta_ts - delta);
+                if (abs(difference) > 60) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
                                       "Timestamp delta %" PRId64 " [ts delta:%" PRId64 " vs time delta:%" PRId64 "] first=%u curr=%u\n",
                                       difference, delta_ts, delta, rtp_session->first_ts, this_ts);
@@ -9384,6 +9391,59 @@ SWITCH_DECLARE(void) switch_rtp_update_ts(switch_channel_t *channel, int increme
     if (rtp_session->use_next_ts) {
         rtp_session->next_ts += increment;
     }
+}
+
+SWITCH_DECLARE(void) switch_check_bridge_channel_timestamps(switch_channel_t *chana, switch_channel_t *chanb) {
+    switch_rtp_t *rtp_session_a, *rtp_session_b;
+    switch_time_t rx_delta_time[2], tx_delta_time[2];
+    uint32_t rx_delta_ts[2], tx_delta_ts[2];
+    switch_time_t now = switch_time_now();
+    int64_t diff[2][2];
+    int64_t diff_rx_tx[2];
+
+    rtp_session_a = switch_channel_get_private(chana, "__rtcp_audio_rtp_session");
+    rtp_session_b = switch_channel_get_private(chanb, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session_a || !rtp_session_b) {
+        return;
+    }
+
+    if (now - rtp_session_a->time_of_last_xchannel_ts_check < 1000*1000*10) {
+        return;
+    }
+
+    /* check chan a rx and chan b tx */
+    rx_delta_time[0] = (now - rtp_session_a->time_of_first_rx_ts)/1000;
+    rx_delta_ts[0] = (rtp_session_a->last_ts - rtp_session_a->first_rx_ts)/8;
+    diff[0][0] = rx_delta_time[0] - rx_delta_ts[0];
+
+    tx_delta_time[0] = (now - rtp_session_b->time_of_first_ts)/1000;
+    tx_delta_ts[0] = (rtp_session_b->last_write_ts - rtp_session_b->first_ts)/8;
+    diff[0][1] = tx_delta_time[0] - tx_delta_ts[0];
+    diff_rx_tx[0] = diff[0][1] - diff[0][0];
+
+    /* check chan b rx and chan a tx */
+    rx_delta_time[1] = (now - rtp_session_b->time_of_first_rx_ts)/1000;
+    rx_delta_ts[1] = (rtp_session_b->last_ts - rtp_session_b->first_rx_ts)/8;
+    diff[1][0] = rx_delta_time[1] - rx_delta_ts[1];
+
+    tx_delta_time[1] = (now - rtp_session_a->time_of_first_ts)/1000;
+    tx_delta_ts[1] = (rtp_session_a->last_write_ts - rtp_session_a->first_ts)/8;
+    diff[1][1] = tx_delta_time[1] - tx_delta_ts[1];
+    diff_rx_tx[1] = diff[1][1] - diff[1][0];
+
+    if (abs(diff_rx_tx[0]) > 60) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session_a->session), SWITCH_LOG_WARNING,
+                          "TS delta A->B %" PRId64 " [tx(%" PRId64 " - %u) - rx (%" PRId64 " - %u)]\n",
+                          diff_rx_tx[0], tx_delta_time[0], tx_delta_ts[0], rx_delta_time[0], rx_delta_ts[0]);
+    }
+    if (abs(diff_rx_tx[1]) > 60) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session_b->session), SWITCH_LOG_WARNING,
+                          "TS delta B->A %" PRId64 " [tx(%" PRId64 " - %u) - rx (%" PRId64 " - %u)]\n",
+                          diff_rx_tx[1], tx_delta_time[1], tx_delta_ts[1], rx_delta_time[1], rx_delta_ts[1]);
+    }
+    rtp_session_a->time_of_last_xchannel_ts_check = now;
+    rtp_session_b->time_of_last_xchannel_ts_check = now;
 }
 
 

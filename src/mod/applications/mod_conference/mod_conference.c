@@ -7303,9 +7303,6 @@ switch_status_t accumulate_and_send(participant_thread_data_t *ol, switch_frame_
         if (switch_frame_append(to_frame, from_frame, from_frame->datalen) != SWITCH_STATUS_SUCCESS) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "member %d failed to switch_frame_append\n", member->id);
         } else {
-            if (ol->frame_cnt == 0) {
-                to_frame->timestamp = from_frame->timestamp;
-            }
             ol->frame_cnt += 1;
         }
         if (ol->frame_cnt >= frame_max) {
@@ -7346,7 +7343,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
     switch_time_t sent_time = 0;
     switch_time_t before_mutex_time = 0;
     switch_time_t before_send_time;
-    int sent = 0;
+    int sent = 0, path = -1;
 
     switch_mutex_lock(ols->member->write_mutex);
 
@@ -7448,9 +7445,11 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
     if (switch_channel_test_app_flag(channel, CF_APP_TAGGED)) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "FLUSHING\n");
         set_member_state_locked(member, MFLAG_FLUSH_BUFFER);
+        path = 1;
     } else if ((mux_used >= ols->bytes) && member->one_of_active) {
         switch_frame_t *frame = NULL;
         
+        path = 2;
         /* Flush the output buffer and write all the data (presumably muxed) back to the channel */
         /* locked above when copying in a new set of samples/buffer */
         switch_mutex_lock(member->audio_out_mutex);
@@ -7479,7 +7478,6 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             
             /* Fuze: this part hasn't changed */
             ols->write_frame.samples = ols->write_frame.datalen / 2;
-            ols->write_frame.timestamp = timer->samplecount;
             
             if(!switch_test_flag(member, MFLAG_CAN_HEAR)) {
                 memset(ols->write_frame.data, 255, ols->write_frame.datalen);
@@ -7511,7 +7509,6 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             }
 
             if (frame) {
-                frame->timestamp = timer->samplecount;
                 if (accumulate_and_send(ols, frame, &ols->acc_frame, &before_send_time) != SWITCH_STATUS_SUCCESS) {
                     switch_mutex_unlock(member->audio_out_mutex);
                     switch_mutex_unlock(member->write_mutex);
@@ -7535,11 +7532,12 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         
     } else if (member->fnode) {
         switch_frame_t *frame = NULL;
+
+        path = 3;
         
         ols->write_frame.datalen = ols->bytes;
         ols->write_frame.samples = ols->samples;
         memset(ols->write_frame.data, 255, ols->write_frame.datalen);
-        ols->write_frame.timestamp = timer->samplecount;
         
         if (ols->individual == SWITCH_FALSE) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
@@ -7550,7 +7548,6 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         frame = process_file_play(member, &ols->write_frame, SWITCH_TRUE);
 
         if (frame) {
-            frame->timestamp = timer->samplecount;
             if (accumulate_and_send(ols, frame, &ols->acc_frame, &before_send_time) != SWITCH_STATUS_SUCCESS) {
                 switch_channel_hangup(channel, SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER);
                 switch_mutex_unlock(member->write_mutex);
@@ -7570,6 +7567,8 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
     } else if (!member->one_of_active) {
         switch_bool_t failed = SWITCH_FALSE;
         int sent_frames = 0;
+
+        path = 4;
 
         switch_mutex_lock(member->audio_out_mutex);
 
@@ -7668,8 +7667,6 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
                 break;
             }
 
-            rdframe->timestamp = timer->samplecount;
-
             if (accumulate_and_send(ols, rdframe, &ols->acc_frame, &before_send_time) != SWITCH_STATUS_SUCCESS) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "failed to send frame!\n");
                 failed = SWITCH_TRUE;
@@ -7706,11 +7703,13 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             return OUTPUT_LOOP_FAILED;
         }
     } else {
+
+        path = 5;
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "Didn't match one of the other conditions\n");
     }
 
     if (!sent) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "didn't send a frame!\n");
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "didn't send a frame path:%d!\n", path);
         switch_rtp_update_ts(member->channel, 160);
     }
     

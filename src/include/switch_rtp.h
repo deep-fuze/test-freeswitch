@@ -538,6 +538,10 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
 SWITCH_DECLARE(void) switch_rtp_reset_rtp_stats(switch_channel_t *channel);
 SWITCH_DECLARE(void) switch_rtp_update_ts(switch_channel_t *channel, int increment);
 
+SWITCH_DECLARE(switch_bool_t) switch_get_rtp_session_description(switch_channel_t *channel, char *description, int len);
+SWITCH_DECLARE(switch_bool_t) switch_set_rtcp_passthru(switch_channel_t *channel);
+SWITCH_DECLARE(void) switch_check_bridge_channel_timestamps(switch_channel_t *chana, switch_channel_t *chanb);
+
 /*!
   \}
 */
