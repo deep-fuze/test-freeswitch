@@ -3338,7 +3338,8 @@ static switch_status_t conference_del_member(conference_obj_t *conference, confe
 
     switch_thread_rwlock_wrlock(member->rwlock);
 
-    if (member->session && (exit_sound = switch_channel_get_variable(switch_core_session_get_channel(member->session), "conference_exit_sound"))) {
+    if (member->session && (exit_sound = switch_channel_get_variable(switch_core_session_get_channel(member->session), "conference_exit_sound")) &&
+        (conference->stop_entry_tone_participants == 0 || conference->count < conference->stop_entry_tone_participants)) {
         conference_play_file(conference, (char *)exit_sound, CONF_DEFAULT_LEADIN,
                              switch_core_session_get_channel(member->session), !switch_test_flag(conference, CFLAG_WAIT_MOD) ? 0 : 1, 0);
     }
@@ -3428,7 +3429,8 @@ static switch_status_t conference_del_member(conference_obj_t *conference, confe
             || (switch_test_flag(conference, CFLAG_DYNAMIC) && (conference->count + conference->count_ghosts == 0))) {
             set_conference_state_unlocked(conference, CFLAG_DESTRUCT);
         } else {
-            if (!exit_sound && conference->exit_sound && switch_test_flag(conference, CFLAG_EXIT_SOUND)) {
+            if (!exit_sound && conference->exit_sound && switch_test_flag(conference, CFLAG_EXIT_SOUND) &&
+                (conference->stop_entry_tone_participants == 0 || conference->count < conference->stop_entry_tone_participants)) {
                 conference_play_file(conference, conference->exit_sound, 0, channel, 0, 0);
             }
             if (conference->count == 1 && conference->alone_sound && !switch_test_flag(conference, CFLAG_WAIT_MOD) && !switch_test_flag(member, MFLAG_GHOST) && !conference->is_recording) {
