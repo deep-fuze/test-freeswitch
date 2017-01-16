@@ -181,6 +181,7 @@ typedef enum {
     MFLAG_PAUSE_RECORDING = (1 << 21),
     MFLAG_ACTIVE_TALKER = (1 << 22),
     MFLAG_NOTIFY_ACTIVITY = (1 << 23),
+    MFLAG_CLIENT_SIDE_TONES = (1 << 24),
     MFLAG_INDICATE_LOCK_MUTE = (1 << 25),
     MFLAG_INDICATE_UNLOCK_MUTE = (1 << 26),
     MFLAG_CAN_MUTE = (1 << 27),
@@ -991,6 +992,7 @@ static void memberFlagToString(member_flag_t flag, char *str)
     if (flag & MFLAG_INDICATE_UNMUTE) { strcat(str,"ind_unmute "); }
     if (flag & MFLAG_NOMOH)     { strcat(str,"no_moh "); }
     if (flag & MFLAG_USE_FAKE_MUTE) { strcat(str,"fmute "); }
+    if (flag & MFLAG_CLIENT_SIDE_TONES) { strcat(str,"!lsound "); }
 
     if (flag & MFLAG_INDICATE_MUTE_DETECT) { strcat(str,"ind_mute_detect "); }
     if (flag & MFLAG_PAUSE_RECORDING) { strcat(str,"pause_recording "); }
@@ -2047,6 +2049,7 @@ static switch_status_t conference_add_event_member_data(conference_member_t *mem
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Talking", "%s", switch_test_flag(member, MFLAG_TALKING) ? "true" : "false" );
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Mute-Detect", "%s", switch_test_flag(member, MFLAG_MUTE_DETECT) ? "true" : "false" );
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Mute-Fake", "%s", switch_test_flag(member, MFLAG_USE_FAKE_MUTE) ? "true" : "false" );
+    switch_event_add_header(event, SWITCH_STACK_BOTTOM, "No-Local-Sounds", "%s", switch_test_flag(member, MFLAG_CLIENT_SIDE_TONES) ? "true" : "false" );
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Mute-Locked", "%s", switch_test_flag(member, MFLAG_CAN_MUTE) ? "false" : "true" );
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Member-ID", "%u", member->id);
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Member-Type", "%s", switch_test_flag(member, MFLAG_MOD) ? "moderator" : "member");
@@ -7724,7 +7727,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
     }
     switch_mutex_unlock(member->write_mutex);
     
-    if (switch_test_flag(member, MFLAG_INDICATE_MUTE)) {
+    if (switch_test_flag(member, MFLAG_INDICATE_MUTE) && !switch_test_flag(member, MFLAG_CLIENT_SIDE_TONES)) {
         if (!zstr(member->conference->muted_sound)) {
             conference_member_play_file(member, member->conference->muted_sound, 0, 1);
         } else {
@@ -7772,7 +7775,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         clear_member_state_unlocked(member, MFLAG_INDICATE_MUTE_DETECT);
     }
     
-    if (switch_test_flag(member, MFLAG_INDICATE_UNMUTE)) {
+    if (switch_test_flag(member, MFLAG_INDICATE_UNMUTE) && !switch_test_flag(member, MFLAG_CLIENT_SIDE_TONES)) {
         if (!zstr(member->conference->unmuted_sound)) {
             conference_member_play_file(member, member->conference->unmuted_sound, 0, 1);
         } else {
@@ -10021,6 +10024,9 @@ static void conference_xlist(conference_obj_t *conference, switch_xml_t x_confer
             x_tag = switch_xml_add_child_d(x_flags, "is_ghost", count++);
             switch_xml_set_txt_d(x_tag, switch_test_flag(member, MFLAG_GHOST) ? "true" : "false");
 
+            x_tag = switch_xml_add_child_d(x_flags, "client_side_tones", count++);
+            switch_xml_set_txt_d(x_tag, switch_test_flag(member, MFLAG_CLIENT_SIDE_TONES) ? "true" : "false");
+
             switch_snprintf(tmp, sizeof(tmp), "%d", member->volume_out_level);
             add_x_tag(x_member, "output-volume", tmp, toff++);
 
@@ -11862,6 +11868,8 @@ static void set_mflags(const char *flags, member_flag_t *f)
             }
         }
 
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "flags: %s\n", flags);
+
         argc = switch_separate_string(dup, '|', argv, (sizeof(argv) / sizeof(argv[0])));
 
         for (i = 0; i < argc && argv[i]; i++) {
@@ -11893,7 +11901,10 @@ static void set_mflags(const char *flags, member_flag_t *f)
                 *f |= MFLAG_JOIN_ONLY;
             } else if (!strcasecmp(argv[i], "fake_mute")) {
                 *f |= MFLAG_USE_FAKE_MUTE;
+            } else if (!strcasecmp(argv[i], "client_side_tones")) {
+                *f |= MFLAG_CLIENT_SIDE_TONES;
             }
+
         }
 
         free(dup);
@@ -12491,7 +12502,7 @@ SWITCH_STANDARD_APP(conference_function)
 
             /* no conference yet, so check for join-only flag */
             if (flags_str) {
-                set_mflags(flags_str,&mflags);
+                set_mflags(flags_str, &mflags);
                 if (mflags & MFLAG_JOIN_ONLY) {
                     switch_event_t *event;
                     switch_xml_t jos_xml;
