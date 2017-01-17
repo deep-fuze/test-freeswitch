@@ -6073,6 +6073,11 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
         }
 #endif
     }
+
+    if (switch_core_session_get_cn_state(member->session)) {
+        il->io_flags |= SWITCH_IO_FLAG_CANT_SPEAK;
+    }
+
     /* put packets into active speaker jitter buffer if not muted */
     if ((member->one_of_active == SWITCH_TRUE) && (switch_test_flag(member, MFLAG_TALKING))) {
         il->io_flags |= SWITCH_IO_FLAG_ACTIVE_TALKER;

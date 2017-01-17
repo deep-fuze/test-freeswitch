@@ -24,6 +24,7 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Extract(void *inst, int8_t *pcm_data,
 				uint32_t *outlen, uint16_t *consecutive_lost, uint32_t *total_decoded, uint8_t suppress_lost);
 
 void *WebRtcNetEQ_Inst(void *inst);
+int WebRtcNetEQ_PlayoutPause(void *inst, int on);
 
 #ifndef __EXT_LOG_CB__
 typedef void (*log_cb_fp)(int16_t level, const char * format, ...);

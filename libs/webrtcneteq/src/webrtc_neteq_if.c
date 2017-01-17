@@ -297,3 +297,12 @@ void *WebRtcNetEQ_Inst(void *inst)
 	
 	return (neteq_inst) ? neteq_inst->main_inst : NULL;
 }
+
+int WebRtcNetEQ_PlayoutPause(void *inst, int on)
+{
+  neteq_inst_t *neteq_inst = (neteq_inst_t *)inst;
+  int ret = -1;
+  if (inst) {
+      return WebRtcNetEQ_SetPlayoutMode(neteq_inst->main_inst, on ? kPlayoutOff : kPlayoutOn);
+  }
+}

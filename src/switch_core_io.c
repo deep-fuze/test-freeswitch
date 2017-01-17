@@ -264,7 +264,8 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
     now = switch_time_now();
 
     if (session->last_jbuf_time[0] && (now-session->last_jbuf_time[0]) > 30000) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Long time since switch_core_session_fast_read_frame_from_jitterbuffer was called %" PRId64 "ms\n",
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+						  "Long time since switch_core_session_fast_read_frame_from_jitterbuffer was called %" PRId64 "ms\n",
                           (now-session->last_jbuf_time[0])/1000);
     }
     session->last_jbuf_time[0] = now;
@@ -302,6 +303,31 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
         goto even_more_done;
     }
 
+    if (session->paused) {
+        // paused
+        if (!(flags & SWITCH_IO_FLAG_CANT_SPEAK || session->audio_level_low_count >= 50)) {
+            int ret = WebRtcNetEQ_PlayoutPause(session->neteq_inst, 0);
+            session->paused = 0;
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Playout continue returned %d\n", ret);
+            session->last_jbuf_time[2] = now; /* adjust this as it's the normal case and we don't want to log an error */
+        }
+    } else {
+        // not paused
+        if ((flags & SWITCH_IO_FLAG_CANT_SPEAK || session->audio_level_low_count >= 50)) {
+            WebRtcNetEQ_ProcessingActivity processing;
+            int rawframeswaiting, waiting_times_ms[1];
+            WebRtcNetEQ_GetJitterBufferSize(session->neteq_inst, &processing);
+            rawframeswaiting = WebRtcNetEQ_GetRawFrameWaitingTimes(session->neteq_inst, 1, waiting_times_ms);
+            if (rawframeswaiting == 0) {
+                int ret = WebRtcNetEQ_PlayoutPause(session->neteq_inst, 1);
+                session->paused = 1;
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Playout pause returned %d (%d pkts)\n", ret, processing.pkts_in_buffer);
+            } else {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Playout pause waiting on %d pkts\n", processing.pkts_in_buffer);
+            }
+        }
+    }
+
     /* Normally this function would return an empty frame if there was nothing waiting in the socket.  That's obviously not right.
      * Here, even if we fail to read something out of the socket, we'll try to read out of the jitter buffer.  This path only works
      * with the webrtc neteq jitter buffer as that jitter buffer decodes encoded packets internally.
@@ -312,14 +338,15 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
 
         now = switch_time_now();
         if (session->last_jbuf_time[1] && (now-session->last_jbuf_time[1]) > 30000) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Long time since switch_core_session_fast_read_frame_from_jitterbuffer entered jbuf read %" PRId64 "ms %s low=%d\n",
-                              (now-session->last_jbuf_time[1])/1000, (flags & SWITCH_IO_FLAG_CANT_SPEAK ? "can't speak" : "speak ok"), session->audio_level_low_count);
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                              "Long time since jbuf read %" PRId64 "ms %s low=%d\n",
+                              (now-session->last_jbuf_time[1])/1000,
+                              (flags & SWITCH_IO_FLAG_CANT_SPEAK ? "can't speak" : "speak ok"),
+                              session->audio_level_low_count);
         }
         session->last_jbuf_time[1] = now;
 
-
-        if (!(flags & SWITCH_IO_FLAG_CANT_SPEAK || session->audio_level_low_count >= 50)) {
-            // switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "No packet in socket, reading from jitter buffer\n");
+        if (!session->paused) {
             /* we need to try to extract */
             switch_thread_rwlock_rdlock(session->bug_rwlock); /* ok */
             now = switch_time_now();
@@ -333,16 +360,15 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
                 *frame = &session->raw_read_frame;
 
                 if (session->last_jbuf_time[2] && (now-session->last_jbuf_time[2]) > 30000) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Long time since switch_core_session_fast_read_frame_from_jitterbuffer extract succeeded %" PRId64 "ms fail:%u\n",
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                                      "Long time since jitter buffer extract succeeded %" PRId64 "ms fail:%u\n",
                                       (now-session->last_jbuf_time[2])/1000, session->jbuf_fail);
                 }
                 session->last_jbuf_time[2] = now;
                 session->jbuf_fail = 0;
-
             } else {
                 session->jbuf_fail += 1;
                 session->empty += 1;
-                *frame = &runtime.dummy_cng_frame;
             }
             switch_thread_rwlock_unlock(session->bug_rwlock);
         }

@@ -219,6 +219,7 @@ struct switch_core_session {
   /* jbuf debugs */
   switch_time_t last_jbuf_time[3];
   uint32_t jbuf_fail;
+  switch_bool_t paused;
 
 };
 
