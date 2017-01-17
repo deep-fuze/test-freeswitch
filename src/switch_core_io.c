@@ -257,8 +257,17 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
     int i;
     switch_channel_t *channel = switch_core_session_get_channel(session);
     switch_bool_t dontwait = switch_get_dont_wait_for_packets(channel);
+    switch_time_t now;
 
     switch_assert(session != NULL);
+
+    now = switch_time_now();
+
+    if (session->last_jbuf_time[0] && (now-session->last_jbuf_time[0]) > 30000) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Long time since switch_core_session_fast_read_frame_from_jitterbuffer was called %" PRId64 "ms\n",
+                          (now-session->last_jbuf_time[0])/1000);
+    }
+    session->last_jbuf_time[0] = now;
 
     if (switch_mutex_trylock(session->codec_read_mutex) == SWITCH_STATUS_SUCCESS) {
         switch_mutex_unlock(session->codec_read_mutex);
@@ -285,8 +294,6 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
         goto even_more_done;
     }
 
-    status = SWITCH_STATUS_FALSE;
-
     *frame = NULL;
 
     if (switch_channel_test_flag(session->channel, CF_HOLD)) {
@@ -299,31 +306,48 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
      * Here, even if we fail to read something out of the socket, we'll try to read out of the jitter buffer.  This path only works
      * with the webrtc neteq jitter buffer as that jitter buffer decodes encoded packets internally.
      */
-    if (status != SWITCH_STATUS_SUCCESS) {
-        if (dontwait && session->neteq_inst) {
-            WebRtcNetEQ_status_t ret_status;
-            uint16_t lost_count = 0;
-            
-            if (!(flags & SWITCH_IO_FLAG_CANT_SPEAK || session->audio_level_low_count >= 50)) {
-                // switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "No packet in socket, reading from jitter buffer\n");
-                /* we need to try to extract */
-                switch_thread_rwlock_rdlock(session->bug_rwlock); /* ok */
-                if ((ret_status = WebRtcNetEQ_Extract(session->neteq_inst,
-                                                      session->raw_read_frame.data,
-                                                      &session->raw_read_frame.datalen,
-                                                      &lost_count, &session->total_decoded,
-                                                      session->suppress_lost)) == WebRtcNetEQ_SUCCESS) {
-                    status = SWITCH_STATUS_SUCCESS;
-                    session->read += 1;
-                    *frame = &session->raw_read_frame;
-                } else {
-                    session->empty += 1;
-                    *frame = &runtime.dummy_cng_frame;
+    if (dontwait && session->neteq_inst) {
+        WebRtcNetEQ_status_t ret_status;
+        uint16_t lost_count = 0;
+
+        now = switch_time_now();
+        if (session->last_jbuf_time[1] && (now-session->last_jbuf_time[1]) > 30000) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Long time since switch_core_session_fast_read_frame_from_jitterbuffer entered jbuf read %" PRId64 "ms %s low=%d\n",
+                              (now-session->last_jbuf_time[1])/1000, (flags & SWITCH_IO_FLAG_CANT_SPEAK ? "can't speak" : "speak ok"), session->audio_level_low_count);
+        }
+        session->last_jbuf_time[1] = now;
+
+
+        if (!(flags & SWITCH_IO_FLAG_CANT_SPEAK || session->audio_level_low_count >= 50)) {
+            // switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "No packet in socket, reading from jitter buffer\n");
+            /* we need to try to extract */
+            switch_thread_rwlock_rdlock(session->bug_rwlock); /* ok */
+            now = switch_time_now();
+            if ((ret_status = WebRtcNetEQ_Extract(session->neteq_inst,
+                                                  session->raw_read_frame.data,
+                                                  &session->raw_read_frame.datalen,
+                                                  &lost_count, &session->total_decoded,
+                                                  session->suppress_lost)) == WebRtcNetEQ_SUCCESS) {
+                status = SWITCH_STATUS_SUCCESS;
+                session->read += 1;
+                *frame = &session->raw_read_frame;
+
+                if (session->last_jbuf_time[2] && (now-session->last_jbuf_time[2]) > 30000) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Long time since switch_core_session_fast_read_frame_from_jitterbuffer extract succeeded %" PRId64 "ms fail:%u\n",
+                                      (now-session->last_jbuf_time[2])/1000, session->jbuf_fail);
                 }
-                switch_thread_rwlock_unlock(session->bug_rwlock);
+                session->last_jbuf_time[2] = now;
+                session->jbuf_fail = 0;
+
+            } else {
+                session->jbuf_fail += 1;
+                session->empty += 1;
+                *frame = &runtime.dummy_cng_frame;
             }
+            switch_thread_rwlock_unlock(session->bug_rwlock);
         }
     }
+
 even_more_done:
     if (!(*frame)) {
         *frame = &runtime.dummy_cng_frame;

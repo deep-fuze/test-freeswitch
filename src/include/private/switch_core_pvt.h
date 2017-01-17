@@ -215,6 +215,11 @@ struct switch_core_session {
         uint32_t errors;
         uint32_t hot_read;
         uint32_t empty;
+
+  /* jbuf debugs */
+  switch_time_t last_jbuf_time[3];
+  uint32_t jbuf_fail;
+
 };
 
 struct switch_media_bug {
