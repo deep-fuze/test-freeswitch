@@ -4130,116 +4130,125 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
     /*
      * Fuze Step 3: Find the new talkers
      * This is just used to set up the MFLAG_NOTIFY_ACTIVITY flag
+     *
+     * MQT-5318: don't recalculate active speakers while prompts are playing
      */
-    for (i = 0; i < MAX_ACTIVE_TALKERS; ++i) {
-        if (temp_active_talkers[i] == NULL)
-            break;
-
-        for (j = 0; j < MAX_ACTIVE_TALKERS; ++j) {
-            if (conference->last_active_talkers[j] == NULL)
+    if (!conference->fnode && !conference->async_fnode) {
+        for (i = 0; i < MAX_ACTIVE_TALKERS; ++i) {
+            if (temp_active_talkers[i] == NULL)
                 break;
 
-            if (temp_active_talkers[i] == conference->last_active_talkers[j]) {
-                break;
+            for (j = 0; j < MAX_ACTIVE_TALKERS; ++j) {
+                if (conference->last_active_talkers[j] == NULL)
+                    break;
+
+                if (temp_active_talkers[i] == conference->last_active_talkers[j]) {
+                    break;
+                }
+            }
+
+            if (j == MAX_ACTIVE_TALKERS || conference->last_active_talkers[j] == NULL) {
+                /*
+                 * New Active Member
+                 */
+                if (strlen(temp_active_talkers[i]->mname) > 0) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(temp_active_talkers[i]->session), SWITCH_LOG_INFO, "Meeting Id: %s Instance Id: %s start speaking %s/%u score %u energy %u\n",
+                                      conference->meeting_id, conference->instance_id,
+                                      temp_active_talkers[i]->mname, temp_active_talkers[i]->id,
+                                      temp_active_talkers[i]->score_iir, temp_active_talkers[i]->score);
+                }
+
+                switch_set_flag(temp_active_talkers[i], MFLAG_NOTIFY_ACTIVITY);
+                // set_member_state_unlocked(temp_active_talkers[i], MFLAG_NOTIFY_ACTIVITY);
+            } else {
+                switch_set_flag(temp_active_talkers[i], MFLAG_NOTIFY_ACTIVITY);
+                //set_member_state_unlocked(temp_active_talkers[i], MFLAG_NOTIFY_ACTIVITY);
             }
         }
 
-        if (j == MAX_ACTIVE_TALKERS || conference->last_active_talkers[j] == NULL) {
-            /*
-             * New Active Member
-             */
-            if (strlen(temp_active_talkers[i]->mname) > 0) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(temp_active_talkers[i]->session), SWITCH_LOG_INFO, "Meeting Id: %s Instance Id: %s start speaking %s/%u score %u energy %u\n",
-                                  conference->meeting_id, conference->instance_id,
-                                  temp_active_talkers[i]->mname, temp_active_talkers[i]->id,
-                                  temp_active_talkers[i]->score_iir, temp_active_talkers[i]->score);
-            }
-            
-            switch_set_flag(temp_active_talkers[i], MFLAG_NOTIFY_ACTIVITY);
-            // set_member_state_unlocked(temp_active_talkers[i], MFLAG_NOTIFY_ACTIVITY);
+        /*
+         * Fuze Step 4: Find the participants who just became non-active
+         * This is just used to set up the MFLAG_NOTIFY_ACTIVITY flag
+         */
+        if (conference->last_active_talkers[0]) {
+            conference->last_time_active = now;
         } else {
-            switch_set_flag(temp_active_talkers[i], MFLAG_NOTIFY_ACTIVITY);
-            //set_member_state_unlocked(temp_active_talkers[i], MFLAG_NOTIFY_ACTIVITY);
-        }
-
-    }
-
-    /*
-     * Fuze Step 4: Find the participants who just became non-active
-     * This is just used to set up the MFLAG_NOTIFY_ACTIVITY flag
-     */
-    if (conference->last_active_talkers[0]) {
-        conference->last_time_active = now;
-    } else {
-        if (conference->min_inactive_to_end) {
-            int min_inactive = (int)((now - conference->last_time_active)/(60*1000*1000));
-            if (min_inactive > conference->min_inactive_to_end) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
-                                  "Meeting Id: %s Instance Id: %s no active speakers for %d minutes, ending meeting!\n",
-                                  conference->meeting_id, conference->instance_id, min_inactive);
-                conference->ending_due_to_inactivity = SWITCH_TRUE;
-                set_conference_state_unlocked(conference, CFLAG_DESTRUCT);
+            if (conference->min_inactive_to_end) {
+                int min_inactive = (int)((now - conference->last_time_active)/(60*1000*1000));
+                if (min_inactive > conference->min_inactive_to_end) {
+                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                                      "Meeting Id: %s Instance Id: %s no active speakers for %d minutes, ending meeting!\n",
+                                      conference->meeting_id, conference->instance_id, min_inactive);
+                    conference->ending_due_to_inactivity = SWITCH_TRUE;
+                    set_conference_state_unlocked(conference, CFLAG_DESTRUCT);
+                }
             }
         }
-    }
-    for (i = 0; i < MAX_ACTIVE_TALKERS; ++i) {
-        uint32_t codec;
-        if (conference->last_active_talkers[i] == NULL)
-            break;
-
-        conference->last_active_talkers[i]->one_of_active = SWITCH_FALSE;
-        conference->last_active_talkers[i]->last_time_active = now;
-        codec = conference->last_active_talkers[i]->ianacode;
-
-        ceo_set_listener_count_incr(&conference->ceo, codec, 1);
-
-        for (j = 0; j < MAX_ACTIVE_TALKERS; ++j) {
-            if (temp_active_talkers[j] == NULL)
+        for (i = 0; i < MAX_ACTIVE_TALKERS; ++i) {
+            uint32_t codec;
+            if (conference->last_active_talkers[i] == NULL)
                 break;
 
-            if (conference->last_active_talkers[i] == temp_active_talkers[j]) {
-                break;
+            conference->last_active_talkers[i]->one_of_active = SWITCH_FALSE;
+            conference->last_active_talkers[i]->last_time_active = now;
+            codec = conference->last_active_talkers[i]->ianacode;
+
+            ceo_set_listener_count_incr(&conference->ceo, codec, 1);
+
+            for (j = 0; j < MAX_ACTIVE_TALKERS; ++j) {
+                if (temp_active_talkers[j] == NULL)
+                    break;
+                if (conference->last_active_talkers[i] == temp_active_talkers[j]) {
+                    break;
+                }
             }
-        }
 
-        if (j == MAX_ACTIVE_TALKERS || temp_active_talkers[j] == NULL) {
-            /*
-             * Out of the list
-             */
-            switch_set_flag(conference->last_active_talkers[i], MFLAG_NOTIFY_ACTIVITY);
-            // set_member_state_unlocked(conference->last_active_talkers[i], MFLAG_NOTIFY_ACTIVITY);
+            if (j == MAX_ACTIVE_TALKERS || temp_active_talkers[j] == NULL) {
+                /*
+                 * Out of the list
+                 */
+                switch_set_flag(conference->last_active_talkers[i], MFLAG_NOTIFY_ACTIVITY);
+                // set_member_state_unlocked(conference->last_active_talkers[i], MFLAG_NOTIFY_ACTIVITY);
 
-            if (switch_test_flag(conference->last_active_talkers[i], MFLAG_RUNNING)) {
-                /* we're ready to start consuming from the common audio source again */
                 if (switch_test_flag(conference->last_active_talkers[i], MFLAG_RUNNING)) {
-                    meo_reset_idx(&conference->last_active_talkers[i]->meo);
-                    if (strlen(conference->last_active_talkers[i]->mname) > 0) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(conference->last_active_talkers[i]->session), SWITCH_LOG_INFO,
-                                          "Meeting Id: %s Instance Id: %s stop speaking %s/%u score %u energy %u\n",
-                                          conference->meeting_id, conference->instance_id,
-                                          conference->last_active_talkers[i]->mname, conference->last_active_talkers[i]->id,
-                                          conference->last_active_talkers[i]->score_iir, conference->last_active_talkers[i]->score);
+                    /* we're ready to start consuming from the common audio source again */
+                    if (switch_test_flag(conference->last_active_talkers[i], MFLAG_RUNNING)) {
+                        meo_reset_idx(&conference->last_active_talkers[i]->meo);
+                        if (strlen(conference->last_active_talkers[i]->mname) > 0) {
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(conference->last_active_talkers[i]->session), SWITCH_LOG_INFO,
+                                              "Meeting Id: %s Instance Id: %s stop speaking %s/%u score %u energy %u\n",
+                                              conference->meeting_id, conference->instance_id,
+                                              conference->last_active_talkers[i]->mname, conference->last_active_talkers[i]->id,
+                                              conference->last_active_talkers[i]->score_iir, conference->last_active_talkers[i]->score);
+                        }
                     }
                 }
-            
             }
         }
-    }
 
-    /*
-     * Fuze Step 5: Update the active talker list
-     * Used for notifications next time
-     */
-    no_active_speakers = 0;
-    for (i = 0, j = 0; i < MAX_ACTIVE_TALKERS; ++i) {
-        if (temp_active_talkers[i]) {
-            temp_active_talkers[i]->one_of_active = SWITCH_TRUE;
-            temp_active_talkers[i]->was_active = SWITCH_TRUE;
-            j++;
-            no_active_speakers += 1;
+        /*
+         * Fuze Step 5: Update the active talker list
+         * Used for notifications next time
+         */
+        no_active_speakers = 0;
+        for (i = 0, j = 0; i < MAX_ACTIVE_TALKERS; ++i) {
+            if (temp_active_talkers[i]) {
+                temp_active_talkers[i]->one_of_active = SWITCH_TRUE;
+                temp_active_talkers[i]->was_active = SWITCH_TRUE;
+                j++;
+                no_active_speakers += 1;
+            }
+
+            conference->last_active_talkers[i] = temp_active_talkers[i];
         }
-
-        conference->last_active_talkers[i] = temp_active_talkers[i];
+    } else {
+        for (j = 0; j < MAX_ACTIVE_TALKERS; ) {
+            if (conference->last_active_talkers[j]) {
+                j += 1;
+            } else {
+                break;
+            }
+        }
     }
 
     /*
