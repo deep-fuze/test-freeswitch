@@ -7948,8 +7948,8 @@ static void *SWITCH_THREAD_FUNC conference_record_thread_run(switch_thread_t *th
     switch_mutex_init(&member->read_mutex, SWITCH_MUTEX_NESTED, rec->pool);
     switch_thread_rwlock_create(&member->rwlock, rec->pool);
 
-    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Conference Recording Info: id:%d interval:%u samples: %u rate: %u\n",
-                      member->id, conference->interval, samples, member->native_rate);
+    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Conference Recording Info: id:%d interval:%u samples: %u rate: %u [%s]\n",
+                      member->id, conference->interval, samples, member->native_rate, member->rec_path);
 
     /* Setup an audio buffer for the incoming audio */
     if (switch_buffer_create_dynamic(&member->audio_buffer, CONF_DBLOCK_SIZE, CONF_DBUFFER_SIZE, 0) != SWITCH_STATUS_SUCCESS) {
@@ -7986,6 +7986,8 @@ static void *SWITCH_THREAD_FUNC conference_record_thread_run(switch_thread_t *th
         }
 
         goto end;
+    } else {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Opened Recording File [%s]\n", rec->path);
     }
 
 
@@ -8078,7 +8080,11 @@ static void *SWITCH_THREAD_FUNC conference_record_thread_run(switch_thread_t *th
         switch_core_timer_next(&timer);
     }                            /* Rinse ... Repeat */
 
+
   end:
+
+    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Left Recording Loop member_running:%d conference_running:%d conf_count:%d [%s]\n", 
+                      switch_test_flag(member, MFLAG_RUNNING), switch_test_flag(conference, CFLAG_RUNNING), conference->count, rec->path);
 
     while(!no_data) {
         switch_mutex_lock(member->audio_out_mutex);
