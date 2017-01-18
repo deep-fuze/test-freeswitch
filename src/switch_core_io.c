@@ -250,6 +250,8 @@ SWITCH_DECLARE(void) switch_core_session_get_webrtc_counts(switch_core_session_t
     session->empty = 0;
 }
 
+#define PAUSE_THRESHOLD 20
+
 SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterbuffer(switch_core_session_t *session, switch_frame_t **frame, switch_io_flag_t flags,
                                                                                       int stream_id, switch_time_t *time_after_wait)
 {
@@ -258,6 +260,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
     switch_channel_t *channel = switch_core_session_get_channel(session);
     switch_bool_t dontwait = switch_get_dont_wait_for_packets(channel);
     switch_time_t now;
+    void *neteq_inst;
 
     switch_assert(session != NULL);
 
@@ -303,30 +306,36 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
         goto even_more_done;
     }
 
-    if (session->paused) {
-        // paused
-        if (!(flags & SWITCH_IO_FLAG_CANT_SPEAK || session->audio_level_low_count >= 50)) {
-            int ret = WebRtcNetEQ_PlayoutPause(session->neteq_inst, 0);
-            session->paused = 0;
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Playout continue returned %d\n", ret);
-            session->last_jbuf_time[2] = now; /* adjust this as it's the normal case and we don't want to log an error */
-        }
-    } else {
-        // not paused
-        if ((flags & SWITCH_IO_FLAG_CANT_SPEAK || session->audio_level_low_count >= 50)) {
-            WebRtcNetEQ_ProcessingActivity processing;
-            int rawframeswaiting, waiting_times_ms[1];
-            WebRtcNetEQ_GetJitterBufferSize(session->neteq_inst, &processing);
-            rawframeswaiting = WebRtcNetEQ_GetRawFrameWaitingTimes(session->neteq_inst, 1, waiting_times_ms);
-            if (rawframeswaiting == 0) {
-                int ret = WebRtcNetEQ_PlayoutPause(session->neteq_inst, 1);
-                session->paused = 1;
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Playout pause returned %d (%d pkts)\n", ret, processing.pkts_in_buffer);
-            } else {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Playout pause waiting on %d pkts\n", processing.pkts_in_buffer);
+    neteq_inst = switch_core_get_neteq_inst(session);
+
+    if (neteq_inst) {
+        if (session->paused) {
+            if (!(flags & SWITCH_IO_FLAG_CANT_SPEAK || session->audio_level_low_count >= 50)) {
+                if (WebRtcNetEQ_PlayoutPause(neteq_inst, 0) == 0) {
+                    session->paused = SWITCH_FALSE;
+                    session->paused_threshold = 0;
+                    session->last_jbuf_time[2] = now; /* adjust this as it's the normal case and we don't want to log an error */
+                }
             }
-        }
-    }
+        } else {
+            WebRtcNetEQ_ProcessingActivity processing;
+            WebRtcNetEQ_GetJitterBufferSize(neteq_inst, &processing);
+
+            if (flags & SWITCH_IO_FLAG_CANT_SPEAK || session->audio_level_low_count >= 50) {
+                if (session->paused_threshold > PAUSE_THRESHOLD) {
+                    if (WebRtcNetEQ_PlayoutPause(neteq_inst, 1) == 0) {
+                        session->paused = SWITCH_TRUE;
+                    }
+                } else {
+                    if (processing.pkts_in_buffer == 0) {
+                        session->paused_threshold += 1;
+                    }
+                }
+            } else {
+                session->paused_threshold = 0;
+            }
+        } // paused
+    } // neteq_inst
 
     /* Normally this function would return an empty frame if there was nothing waiting in the socket.  That's obviously not right.
      * Here, even if we fail to read something out of the socket, we'll try to read out of the jitter buffer.  This path only works
