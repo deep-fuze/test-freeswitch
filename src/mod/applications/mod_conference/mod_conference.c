@@ -3004,6 +3004,7 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
              * in an effort to send less packets when we're muted.
              */
             member->frame_max = member->frame_max_on_mute;
+            member->one_of_active = SWITCH_FALSE;
 
             if (last) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, 
@@ -7722,7 +7723,6 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
     } else {
 
         path = 5;
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "Didn't match one of the other conditions\n");
     }
 
     if (!sent) {
