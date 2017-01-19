@@ -266,7 +266,8 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
 
     now = switch_time_now();
 
-    if (session->last_jbuf_time[0] && (now-session->last_jbuf_time[0]) > 30000) {
+    if (!session->paused && !(flags & SWITCH_IO_FLAG_CANT_SPEAK) &&
+		session->last_jbuf_time[0] && (now-session->last_jbuf_time[0]) > 60000) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
 						  "Long time since switch_core_session_fast_read_frame_from_jitterbuffer was called %" PRId64 "ms\n",
                           (now-session->last_jbuf_time[0])/1000);
@@ -345,8 +346,9 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
         WebRtcNetEQ_status_t ret_status;
         uint16_t lost_count = 0;
 
+#if 0
         now = switch_time_now();
-        if (session->last_jbuf_time[1] && (now-session->last_jbuf_time[1]) > 30000) {
+        if (session->last_jbuf_time[1] && (now-session->last_jbuf_time[1]) > 60000) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                               "Long time since jbuf read %" PRId64 "ms %s low=%d\n",
                               (now-session->last_jbuf_time[1])/1000,
@@ -354,6 +356,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
                               session->audio_level_low_count);
         }
         session->last_jbuf_time[1] = now;
+#endif
 
         if (!session->paused) {
             /* we need to try to extract */
@@ -368,7 +371,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
                 session->read += 1;
                 *frame = &session->raw_read_frame;
 
-                if (session->last_jbuf_time[2] && (now-session->last_jbuf_time[2]) > 30000) {
+                if (session->last_jbuf_time[2] && (now-session->last_jbuf_time[2]) > 60000) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                       "Long time since jitter buffer extract succeeded %" PRId64 "ms fail:%u\n",
                                       (now-session->last_jbuf_time[2])/1000, session->jbuf_fail);
