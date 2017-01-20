@@ -457,6 +457,7 @@ struct switch_rtp {
     switch_time_t time_of_last_ts_check;
     switch_time_t time_of_last_xchannel_ts_check;
     uint32_t first_ts;
+    int ts_delta;
 
     switch_time_t time_of_first_rx_ts;
     uint32_t first_rx_ts;
@@ -2976,7 +2977,11 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
                                      - sizeof(struct switch_rtcp_report)
                                      + sizeof(struct switch_rtcp_source))/4);
 
-            rtp_session->stats.cumulative_lost = exp_total - rtp_session->total_received;
+            if (switch_core_session_get_cn_state(rtp_session->session)) {
+                rtp_session->stats.cumulative_lost = 0;
+            } else {
+                rtp_session->stats.cumulative_lost = exp_total - rtp_session->total_received;
+            }
 
             /* Source Description */
             nbytes = add_cname(rtp_session, (void *)((char *)&rep->sr_desc_head + sizeof(switch_rtcp_hdr_t)), &rep->sr_desc_head);
@@ -8216,6 +8221,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
         if (rtp_session->use_webrtc_neteq) {
             /* this is the case where we have a jitter buffer and we're just generating our own sequence numbers */
             send_msg->header.seq = htons(++rtp_session->seq);
+#if 0
             if (rtp_session->last_pkt_sent) {
                 switch_time_t delta = (switch_time_now() - rtp_session->last_pkt_sent)/1000;
                 if (delta < 10) {
@@ -8223,6 +8229,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                                       "short time between sends: %" PRId64 "ms\n", delta);
                 }
             }
+#endif
             rtp_session->last_pkt_sent  = switch_time_now();
         } else if (*flags & SFF_IVR_FRAME) {
             switch_time_t now = switch_time_now();
@@ -8575,11 +8582,23 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             if ((now - rtp_session->time_of_last_ts_check) > 10000000) {
                 switch_time_t delta = (now - rtp_session->time_of_first_ts)/1000; // ms
                 uint64_t delta_ts = (this_ts - rtp_session->first_ts)/8; // ms
-                int64_t difference = abs(delta_ts - delta);
-                if (abs(difference) > 60) {
+                int64_t difference = delta_ts - delta;
+                uint64_t delta_thresold = (datalen/8)+80;
+                if (abs(difference) > delta_thresold) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
                                       "Timestamp delta %" PRId64 " [ts delta:%" PRId64 " vs time delta:%" PRId64 "] first=%u curr=%u\n",
                                       difference, delta_ts, delta, rtp_session->first_ts, this_ts);
+                }
+                if (abs(difference) < (abs(rtp_session->ts_delta)-20)) {
+#if 0
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+                                      "Timestamp delta %" PRId64 " decreased from %d\n",
+                                      difference, rtp_session->ts_delta);
+#endif
+                    rtp_session->ts_delta = difference;
+                }
+                if (abs(difference) > abs(rtp_session->ts_delta)) {
+                    rtp_session->ts_delta = difference;
                 }
                 rtp_session->time_of_last_ts_check = now;
             }
@@ -9272,10 +9291,13 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
         fuze_transport_get_rates(rtp_session->rtp_conn, &local_send, &local_recv);
         rtp_stat_add_value(rtp_session, RTP_SEND_RATE, "%d", local_send, rtp_session->stats.last_send_rate);
         rtp_stat_add_value(rtp_session, RTP_RECV_RATE, "%d", local_recv, rtp_session->stats.last_recv_rate);
+#if 0
         if (local_send == 0 || (!switch_core_session_get_cn_state(rtp_session->session) && local_recv == 0)) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "bad local send(%d) or recv(%d)\n",
                               local_send, local_recv);
         }
+#endif
+
         rtp_session->stats.recv_rate_history[rtp_session->stats.recv_rate_history_idx] = local_recv;
         rtp_session->stats.recv_rate_history_idx = (rtp_session->stats.recv_rate_history_idx + 1) % RTP_STATS_RATE_HISTORY;
         if (neteq_inst && rtp_session->stats.time > RTP_STATS_RATE_HISTORY) {
@@ -9337,7 +9359,11 @@ SWITCH_DECLARE(void) switch_rtp_set_event(switch_rtp_t *rtp_session, rtp_events_
         case RTP_EVENT_HIGH_CONSECUTIVE_PACKET_LOSS:
             now = switch_micro_time_now();
             exp_period = (rtp_session->samples_per_second / rtp_session->samples_per_interval) * ((now - rtp_session->stats.cur_period_start_time) / 1000000.);
-            rtp_session->stats.period_lost_count = exp_period - rtp_session->stats.period_received;
+            if (!switch_core_session_get_cn_state(rtp_session->session)) {
+                rtp_session->stats.period_lost_count = exp_period - rtp_session->stats.period_received;
+            } else {
+                rtp_session->stats.period_lost_count = 0;
+            }
             rtp_session->stats.last_period_received = rtp_session->stats.period_received;
 
             if (rtp_session->use_webrtc_neteq == SWITCH_FALSE) {
@@ -9350,8 +9376,11 @@ SWITCH_DECLARE(void) switch_rtp_set_event(switch_rtp_t *rtp_session, rtp_events_
             now = switch_micro_time_now();
             exp_period = (rtp_session->samples_per_second / rtp_session->samples_per_interval) * ((now - rtp_session->stats.cur_period_start_time) / 1000000.);
             rtp_session->stats.cur_period_start_time = now;
-
-            rtp_session->stats.period_lost_count = exp_period - rtp_session->stats.period_received;
+            if (!switch_core_session_get_cn_state(rtp_session->session)) {
+                rtp_session->stats.period_lost_count = exp_period - rtp_session->stats.period_received;
+            } else {
+                rtp_session->stats.period_lost_count = 0;
+            }
             rtp_session->stats.last_period_received = rtp_session->stats.period_received;
             rtp_session->stats.period_received = 0;
 

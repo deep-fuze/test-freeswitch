@@ -424,6 +424,9 @@ typedef struct {
     switch_thread_cond_t *cond;
     switch_mutex_t *cond_mutex;
 
+    uint64_t signaled;
+    uint64_t run;
+
 } conference_thread_data_t;
 
 /* Global Values */
@@ -6865,6 +6868,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
     uint32_t behind = 0;
     uint32_t overflow_number = list->idx/MAX_NUMBER_OF_OUTPUT_NTHREADS;
     switch_time_t status_output_period = PROCESSING_PERIOD;
+    int delta = 0;
 
     /*
      * There's an edge case where we might have 2 threads processing a single queue.  The last thread
@@ -6892,6 +6896,9 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
         switch_mutex_lock(globals.conference_thread[list->idx].cond_mutex);
     }
     next_wake_up = switch_time_now() + 20000;
+
+    list->signaled = 0;
+    list->run = 0;
 
     while (1) {
         globals.output_thread_time[list->idx] = loop_now;
@@ -6985,7 +6992,25 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             participant_thread_data_t *prev = NULL;
             int move_count = 0;
 
-            switch_thread_cond_wait(globals.conference_thread[list->idx].cond, globals.conference_thread[list->idx].cond_mutex);
+            while (globals.conference_thread[list->idx].run == globals.conference_thread[list->idx].signaled) {
+                time_asleep = switch_time_now();
+                switch_thread_cond_timedwait(globals.conference_thread[list->idx].cond, globals.conference_thread[list->idx].cond_mutex, 20000);
+                time_asleep = switch_time_now() - time_asleep;
+                if (time_asleep > 25000) {
+                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Slept too long %" PRId64 "ms\n", time_asleep/1000);
+				}
+				if (time_asleep > 0000) {
+                    time_asleep = 20000;
+                }
+            }
+
+            if (abs(globals.conference_thread[list->idx].signaled - globals.conference_thread[list->idx].run) > 10) {
+                delta = globals.conference_thread[list->idx].signaled - globals.conference_thread[list->idx].run;
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
+                                  "Signaled %" PRId64 " and Run %" PRId64 " diverging %d\n",
+                                  globals.conference_thread[list->idx].signaled, globals.conference_thread[list->idx].run, delta);
+            }
+            globals.conference_thread[list->idx].run += 1;
 
             time_asleep = switch_time_now() - time_asleep;
 
@@ -7045,9 +7070,14 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                             if (ols->stopping) { ols = ols->next; continue; }
                             if (ols->member->conference->participants_per_thread[0] < MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD) {
                                 /* move me */
+                                int to = ols->member->conference->list_idx;
                                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO, "Moving member %d from list: %d to list: %d\n",
-                                                  ols->member->id, list->idx, ols->member->conference->list_idx);
-                                
+                                                  ols->member->id, list->idx, to);
+
+                                ols->member->meo.cwc = cwc_get(ols->member->conference->ceo.cwc[0],
+                                                               ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id);
+                                ols->member->meo.filelist = filelist_get(globals.filelist[0],
+                                                                         ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id);
                                 if (prev == NULL) {
                                     list->loop = ols->next;
                                     ols->next = NULL;
@@ -7146,6 +7176,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             for (int idx = list->idx+MAX_NUMBER_OF_OUTPUT_NTHREADS; idx < MAX_NUMBER_OF_OUTPUT_THREADS; idx += MAX_NUMBER_OF_OUTPUT_NTHREADS) {
                 if (globals.conference_thread[idx].count > 0) {
                     switch_thread_cond_signal(globals.conference_thread[idx].cond);
+                    globals.conference_thread[idx].signaled += 1;
                 }
             }
         }
@@ -7381,6 +7412,15 @@ switch_status_t accumulate_and_send(participant_thread_data_t *ol, switch_frame_
     return SWITCH_STATUS_SUCCESS;
 }
 
+typedef enum {
+    PARTICIPANT_OUTPUT_PATH_UNDEF = 0,
+    PARTICIPANT_OUTPUT_PATH_FLUSH = 1,
+    PARTICIPANT_OUTPUT_PATH_ACTIVE = 2,
+    PARTICIPANT_OUTPUT_PATH_FILE = 3,
+    PARTICIPANT_OUTPUT_PATH_MIX = 4,
+    PARTICIPANT_OUTPUT_PATH_OTHER = 5
+} participant_output_path_t;
+
 OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switch_timer_t *timer)
 {
     switch_event_t *event;
@@ -7393,7 +7433,8 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
     switch_time_t sent_time = 0;
     switch_time_t before_mutex_time = 0;
     switch_time_t before_send_time;
-    int sent = 0, path = -1;
+    int sent = 0;
+    participant_output_path_t path = PARTICIPANT_OUTPUT_PATH_UNDEF;
 
     switch_mutex_lock(ols->member->write_mutex);
 
@@ -7495,11 +7536,11 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
     if (switch_channel_test_app_flag(channel, CF_APP_TAGGED)) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "FLUSHING\n");
         set_member_state_locked(member, MFLAG_FLUSH_BUFFER);
-        path = 1;
+        path = PARTICIPANT_OUTPUT_PATH_FLUSH;
     } else if ((mux_used >= ols->bytes) && member->one_of_active) {
         switch_frame_t *frame = NULL;
         
-        path = 2;
+        path = PARTICIPANT_OUTPUT_PATH_ACTIVE;
         /* Flush the output buffer and write all the data (presumably muxed) back to the channel */
         /* locked above when copying in a new set of samples/buffer */
         switch_mutex_lock(member->audio_out_mutex);
@@ -7583,7 +7624,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
     } else if (member->fnode) {
         switch_frame_t *frame = NULL;
 
-        path = 3;
+        path = PARTICIPANT_OUTPUT_PATH_FILE;
         
         ols->write_frame.datalen = ols->bytes;
         ols->write_frame.samples = ols->samples;
@@ -7609,16 +7650,18 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         send_time += before_send_time;
         
         sent_time = switch_micro_time_now() / 1000;
+#if 0
         if (sent_time - member->out_last_sent > 60) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "Loop %d Time since last send: %lld ms\n",
                               ols->list_idx, (long long)(sent_time - member->out_last_sent));
         }
+#endif
         member->out_last_sent = sent_time;
     } else if (!member->one_of_active) {
         switch_bool_t failed = SWITCH_FALSE;
         int sent_frames = 0;
 
-        path = 4;
+        path = PARTICIPANT_OUTPUT_PATH_MIX;
 
         switch_mutex_lock(member->audio_out_mutex);
 
@@ -7637,7 +7680,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             ols->individual = SWITCH_FALSE;
         }
         
-        for (int i = 0; i < MAX_CONF_FRAMES; ) {
+        for (int i = 0; i < member->meo.cwc->num_conf_frames; ) {
             switch_frame_t  *rdframe = NULL;
             
             before_mutex_time = switch_micro_time_now();
@@ -7753,11 +7796,10 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             return OUTPUT_LOOP_FAILED;
         }
     } else {
-
-        path = 5;
+        path = PARTICIPANT_OUTPUT_PATH_OTHER;
     }
 
-    if (!sent) {
+    if (!sent && path != PARTICIPANT_OUTPUT_PATH_MIX) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "didn't send a frame path:%d!\n", path);
         switch_rtp_update_ts(member->channel, 160);
     }
@@ -13355,8 +13397,8 @@ static conference_obj_t *conference_find(char *name, char *domain)
     return conference;
 }
 
-#define MAX_PARTICIPANTS_PER_THREAD 400
-#define MAX_PARTICIPANTS_PER_OTHREAD 400
+#define MAX_PARTICIPANTS_PER_THREAD 300
+#define MAX_PARTICIPANTS_PER_OTHREAD 300
 
 /* create a new conferene with a specific profile */
 static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_core_session_t *session, switch_memory_pool_t *pool)

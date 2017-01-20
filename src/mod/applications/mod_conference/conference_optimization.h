@@ -1,7 +1,6 @@
 #ifndef CONFERENCE_OPTIMIZATION_H
 #define CONFERENCE_OPTIMIZATION_H
 
-#define MAX_CONF_FRAMES 1
 #define MAX_FILENAME 2048
 
 /* This is a frame.  Each codec will have a queue of frames. */
@@ -76,8 +75,10 @@ typedef struct conference_write_codec {
 
     conference_encoder_state_t *encoder;
 
-    conference_frame_t frames[MAX_CONF_FRAMES];
+    conference_frame_t *frames;
     
+    int num_conf_frames;
+
     uint32_t codec_id;
     uint32_t impl_id;
     uint32_t ianacode;
