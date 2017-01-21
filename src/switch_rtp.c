@@ -8316,7 +8316,8 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                                               this_ts, (uint32_t)(this_ts + (delta*datalen)));
                         }
                         rtp_session->last_ts_delta = delta;
-						this_ts += (delta*datalen);
+                        this_ts += (delta*datalen);
+                        send_msg->header.ts = htonl(this_ts);
                     }
                 }
             }
