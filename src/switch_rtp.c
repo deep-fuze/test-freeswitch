@@ -8249,7 +8249,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 uint32_t new_ts = old_ts + ((diff/20)-1) * datalen;
                 send_msg->header.ts = htonl(new_ts);
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "timestamp adjustment of %u after %ums gap %u -> %u\n",
-                                  (diff/20) * 160, diff, old_ts, ntohl(send_msg->header.ts));
+                                  diff*8, diff, old_ts, ntohl(send_msg->header.ts));
                 send_msg->header.m = 1;
                 rtp_session->next_ts = new_ts;
             }
@@ -8304,20 +8304,19 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 
             if (seq_out_of_order_step) {
                 if (seq_out_of_order_step >= -8 && seq_out_of_order_step <= 8 && rtp_session->last_write_ts_set) {
-                    int delta_ts = (this_ts - (rtp_session->last_write_ts+160))/160;
+                    int delta_ts = (this_ts - (rtp_session->last_write_ts+datalen))/160;
                     int delta = seq_out_of_order_step - delta_ts;
                     if (delta >= -8 && delta <= 8 && delta != 0) {
                         if (delta != rtp_session->last_ts_delta) {
                             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
                                               "adjust timestamp: seq %u -> %u ts %u -> %u delta_seq %d delta_ts %d --> delta %d ts %u --> %u\n",
                                               rtp_session->last_bridge_seq[0] + 1, seq_no_from_rtp,
-                                              rtp_session->last_write_ts+160, this_ts,
+                                              rtp_session->last_write_ts+datalen, this_ts,
                                               seq_out_of_order_step, delta_ts, delta,
-                                              this_ts, (uint32_t)(this_ts + (delta*160)));
+                                              this_ts, (uint32_t)(this_ts + (delta*datalen)));
                         }
                         rtp_session->last_ts_delta = delta;
-                        this_ts += (delta*160);
-                        send_msg->header.ts = htonl(this_ts);
+						this_ts += (delta*datalen);
                     }
                 }
             }
@@ -8338,7 +8337,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 ots = this_ts;
                 ats = this_ts;
                 if (this_ts == rtp_session->last_write_ts) {
-                    this_ts += 160;
+                    this_ts += datalen;
                     send_msg->header.ts = htonl(this_ts);
                     ats = this_ts;
                     adjusted_cn = SWITCH_TRUE;
