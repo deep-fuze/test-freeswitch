@@ -8302,22 +8302,28 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 goto end;
             }
 
-            if (seq_out_of_order_step) {
+            if (seq_out_of_order_step && !(*flags & SFF_CNG)) {
                 if (seq_out_of_order_step >= -8 && seq_out_of_order_step <= 8 && rtp_session->last_write_ts_set) {
                     int delta_ts = (this_ts - (rtp_session->last_write_ts+adjust_ts_step))/160;
                     int delta = seq_out_of_order_step - delta_ts;
                     if (delta >= -8 && delta <= 8 && delta != 0) {
-                        if (delta != rtp_session->last_ts_delta) {
-                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
-                                              "adjust timestamp: seq %u -> %u ts %u -> %u delta_seq %d delta_ts %d --> delta %d ts %u --> %u\n",
-                                              rtp_session->last_bridge_seq[0] + 1, seq_no_from_rtp,
-                                              rtp_session->last_write_ts+adjust_ts_step, this_ts,
-                                              seq_out_of_order_step, delta_ts, delta,
-                                              this_ts, (uint32_t)(this_ts + (delta*adjust_ts_step)));
-                        }
-                        rtp_session->last_ts_delta = delta;
-                        this_ts += (delta*adjust_ts_step);
-                        send_msg->header.ts = htonl(this_ts);
+						/*
+						 * only adjust if directionally the sequence numbers and timestamps
+						 * are the same.
+						 */
+						if ((delta > 0 && seq_out_of_order_step > 0) || (delta < 0 && seq_out_of_order_step < 0)) {
+							if (delta != rtp_session->last_ts_delta) {
+								switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+												  "adjust timestamp: dl:%u seq %u -> %u ts %u -> %u delta_seq %d delta_ts %d --> delta %d ts %u --> %u\n",
+												  datalen, rtp_session->last_bridge_seq[0] + 1, seq_no_from_rtp,
+												  rtp_session->last_write_ts+adjust_ts_step, this_ts,
+												  seq_out_of_order_step, delta_ts, delta,
+												  this_ts, (uint32_t)(this_ts + (delta*adjust_ts_step)));
+							}
+							rtp_session->last_ts_delta = delta;
+							this_ts += (delta*adjust_ts_step);
+							send_msg->header.ts = htonl(this_ts);
+						}
                     }
                 }
             }
