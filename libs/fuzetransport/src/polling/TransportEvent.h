@@ -19,7 +19,7 @@ class TransportEvent
 public:
     
     typedef fuze_shared_ptr<TransportEvent> Ptr;
-    
+
     enum Type
     {
         TE_DATA,
@@ -32,7 +32,12 @@ public:
     virtual Buffer::Ptr      Data(string& IP, uint16_t& port, bool& remoteChanged);
     virtual EventType        EvType();
     virtual Connection::Ptr  Conn();
-        
+
+#ifdef COPY_TO_BUFFER
+    uint8_t buffer[1500];
+    int len;
+#endif
+
 public:
     TransportEvent();
 

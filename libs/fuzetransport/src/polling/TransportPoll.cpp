@@ -62,6 +62,8 @@ struct connection_wrap_t
 
     uint16_t rateKbps[4];
     uint16_t arrivedTime[4];
+
+    size_t ignore_size;
 };
 
 /* End: Static Declarations */
@@ -84,6 +86,11 @@ private:
 };
 
 TransportPoll TransportPoll::inst;
+
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
 
 void TransportPoll::OnRateData(void *pContext,
 			RateType type,
@@ -109,18 +116,44 @@ void TransportPoll::OnDataReceived(void* pContext, Buffer::Ptr spBuffer)
         connection_wrap_t *conn_wrap = static_cast<connection_wrap_t *> (pContext);
         
         TransportEvent::Ptr te(new TEData(spBuffer));
-        conn_wrap->evq_.InsertNode(te);
-        int qsize = conn_wrap->evq_.Size();
-        if (qsize >= 2000) { // roughly 40 seconds delay then remove all
+
+	string IP;
+	uint16_t port;
+	bool remChanged;
+	Buffer::Ptr rdBuf = te->Data(IP, port, remChanged);
+
+	if (rdBuf) {
+	  if (conn_wrap->ignore_size != 0) {
+	    if (rdBuf->size() < conn_wrap->ignore_size) {
+	      return;
+	    }
+	  }
+
+#ifdef COPY_TO_BUFFER
+	  if (remChanged == true) {
+	    if (!evutil_inet_pton(AF_INET, IP.c_str(), &(conn_wrap->last_from_addr_.sa.sin.sin_addr))) {
+
+	      te->len = 0;
+	    }
+	  }
+	  te->len = MIN(rdBuf->size(), 1500);
+	  memcpy(te->buffer, rdBuf->getBuf(), te->len);
+#endif
+
+	  conn_wrap->evq_.InsertNode(te);
+	  int qsize = conn_wrap->evq_.Size();
+
+	  if (qsize >= 2000) { // roughly 40 seconds delay then remove all
             string lIp;
             uint16_t lPort;
             conn_wrap->conn_->GetLocalAddress(lIp, lPort);
             MLOG("ALERT: High Event-Queue size: " << qsize << " on " <<
                  lIp.c_str() << ":" << lPort << " - flushing the Event-Queue");
             conn_wrap->evq_.Clear();
-        }
+	  }
+	}
     } else {
-        ELOG("Invalid Context or Buffer. Conext=" << (int64_t)pContext);
+      ELOG("Invalid Context or Buffer. Conext=" << (int64_t)pContext);
     }
 }
 
@@ -335,6 +368,7 @@ void* fuze_transport_tbase_create_connection(void *tbase, connection_type_t conn
                 connection_wrap_t *conn_wrap = new connection_wrap_t;
                 conn_wrap->conn_ = conn;
                 conn_wrap->conn_type_ = conn_type;
+		conn_wrap->ignore_size = 0;
                 
                 TransportDB::GetInstance().addConnection(conn_wrap);
                 
@@ -440,10 +474,6 @@ transport_status_t fuze_transport_socket_poll(void *conn, int timeout_us)
     return (conn_wrap->evq_.WaitUntil(timeout_us) == true) ? TR_STATUS_SUCCESS : TR_STATUS_FALSE;
 }
 
-#ifndef MIN
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-#endif
-
 transport_status_t fuze_transport_get_rates(void *conn, uint16_t *local_send, uint16_t *local_recv)
 {
     if (!conn) {
@@ -458,6 +488,14 @@ transport_status_t fuze_transport_get_rates(void *conn, uint16_t *local_send, ui
     return TR_STATUS_SUCCESS;
 }
 
+int64_t get_time_usec()
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  int64_t result = 1000000000LL * static_cast<int64_t>(ts.tv_sec) +
+    static_cast<int64_t>(ts.tv_nsec);
+  return result / 1000;
+}
 
 transport_status_t fuze_transport_socket_read(void *conn, __sockaddr_t *from, 
                                               uint8_t *buf, size_t *bytes)
@@ -470,14 +508,47 @@ transport_status_t fuze_transport_socket_read(void *conn, __sockaddr_t *from,
     connection_wrap_t *conn_wrap = (connection_wrap_t *) conn;
     TransportEvent::Ptr event;
     Buffer::Ptr rdBuf;
-    
+    int loop_cnt = 0;
+#ifdef DEBUG_TIMING
+    int64_t time_all = get_time_usec();
+#endif
     do {
+        loop_cnt += 1;
+#ifdef DEBUG_TIMING
+        int64_t time = get_time_usec();
         event = conn_wrap->evq_.GetNext(false);
+        int64_t diff = get_time_usec() - time;
+        if (diff > 1000) {
+	  WLOG("Queue (" << conn_wrap->evq_.Size() << ") item took " << diff << " usec");
+        }
+#else
+	event = conn_wrap->evq_.GetNext(false);
+#endif
+
         if (event) {
-            string IP;
+
+#ifdef COPY_TO_BUFFER
+	  if (event->len) {
+	    *from = conn_wrap->last_from_addr_;
+	    *bytes = MIN(event->len, *bytes);
+	    time = get_time_usec();
+	    memcpy(buf, event->buffer, *bytes);
+	    diff = get_time_usec() - time;
+	    if (diff > 1000) {
+	      WLOG("memcpy (" << conn_wrap->evq_.Size() << ") item took " << diff << " usec");
+	    }
+	    return TR_STATUS_SUCCESS;
+	  } else
+#endif
+	  {
+	    string IP;
             uint16_t port;
             bool remChanged;
+#ifdef DEBUG_TIMING
+	    time = get_time_usec();
+#endif
             rdBuf = event->Data(IP, port, remChanged);
+
             if (rdBuf) {
                 if (remChanged == true) {
                     if (!evutil_inet_pton(AF_INET, IP.c_str(), &(from->sa.sin.sin_addr))) {
@@ -502,17 +573,36 @@ transport_status_t fuze_transport_socket_read(void *conn, __sockaddr_t *from,
                     ELOG("Read Buffer size large: " << *bytes);
                 }
 
+#ifdef DEBUG_TIMING
+		diff = get_time_usec() - time;
+		if (diff > 1000) {
+		  WLOG("read (" << conn_wrap->evq_.Size() << ") item took " << diff << " usec");
+		}
+#endif
                 return TR_STATUS_SUCCESS;
             } else if (event->EvType() == ET_DISCONNECTED) {
-                *bytes = 0;
-                return TR_STATUS_DISCONNECTED;
+	      *bytes = 0;
+	      return TR_STATUS_DISCONNECTED;
             } else if (event->EvType() == ET_FAILED) {
-                *bytes = 0;
-                return TR_STATUS_SOCKET_ERROR;
-            }
+	      *bytes = 0;
+	      return TR_STATUS_SOCKET_ERROR;
+	    } else if (event->EvType() == ET_CONNECTED) {
+	      /* do nothing */
+            } else {
+#ifdef DEBUG_TIMING
+	      diff = get_time_usec() - time;
+	      WLOG("de-Q'ed (" << conn_wrap->evq_.Size() << ") event type " << toStr(event->EvType()) << " time " << diff << " usec");
+#endif
+	    }
+	  }
         }
     } while (event && !rdBuf);
-
+#ifdef DEBUG_TIMING
+    int64_t diff = get_time_usec() - time_all;
+    if (diff > 1000) {
+      WLOG("Queue (" << conn_wrap->evq_.Size() << ") item took " << diff << " usec");
+    }
+#endif
     *bytes = 0;
     return TR_STATUS_FALSE; 
 }
@@ -551,6 +641,18 @@ transport_status_t fuze_transport_socket_write(void *conn, const uint8_t* buf, s
 
     return (conn_wrap->conn_->Send(buf, bytes) ? TR_STATUS_SUCCESS : TR_STATUS_FALSE);
 }
+
+void fuze_transport_ignore_packets(void *conn, int size)
+{
+   if (!conn) {
+       return;
+   }
+
+   connection_wrap_t *conn_wrap = (connection_wrap_t*)conn;
+
+   conn_wrap->ignore_size = size;
+}
+
 
 int fuze_udp_port_available(uint16_t port, const char* pIP)
 {

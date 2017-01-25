@@ -132,6 +132,8 @@ extern int fuze_reserve_udp_port(uint32_t holdTimeMs, uint16_t port, const char*
     
 extern void fuze_release_udp_port(uint16_t port);
 
+extern void fuze_transport_ignore_packets(void *conn, int size);
+
 /* read local rates from transport */
 extern transport_status_t fuze_transport_get_rates(void *conn, uint16_t *local_send, uint16_t *local_recv);
 

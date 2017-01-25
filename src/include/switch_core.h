@@ -44,99 +44,99 @@
 SWITCH_BEGIN_EXTERN_C
 #define SWITCH_MAX_CORE_THREAD_SESSION_OBJS 128
 #define SWITCH_MAX_STREAMS 128
-	struct switch_core_time_duration {
-	uint32_t mms;
-	uint32_t ms;
-	uint32_t sec;
-	uint32_t min;
-	uint32_t hr;
-	uint32_t day;
-	uint32_t yr;
+    struct switch_core_time_duration {
+    uint32_t mms;
+    uint32_t ms;
+    uint32_t sec;
+    uint32_t min;
+    uint32_t hr;
+    uint32_t day;
+    uint32_t yr;
 };
 
 struct switch_app_log {
-	char *app;
-	char *arg;
-	switch_time_t stamp;
-	struct switch_app_log *next;
+    char *app;
+    char *arg;
+    switch_time_t stamp;
+    struct switch_app_log *next;
 };
 
 typedef struct switch_thread_data_s {
-	switch_thread_start_t func;
-	void *obj;
-	int alloc;
-	switch_memory_pool_t *pool;
+    switch_thread_start_t func;
+    void *obj;
+    int alloc;
+    switch_memory_pool_t *pool;
 } switch_thread_data_t;
 
 typedef struct switch_hold_record_s {
-	switch_time_t on;
-	switch_time_t off;
-	char *uuid;
-	struct switch_hold_record_s *next;
+    switch_time_t on;
+    switch_time_t off;
+    char *uuid;
+    struct switch_hold_record_s *next;
 } switch_hold_record_t;
 
 typedef struct device_uuid_node_s {
-	char *uuid;
-	switch_xml_t xml_cdr;
-	switch_event_t *event;
-	switch_channel_callstate_t callstate;
-	switch_hold_record_t *hold_record;
-	switch_caller_profile_t *hup_profile;
-	switch_call_direction_t direction;
-	struct switch_device_record_s *parent;
-	struct device_uuid_node_s *next;
+    char *uuid;
+    switch_xml_t xml_cdr;
+    switch_event_t *event;
+    switch_channel_callstate_t callstate;
+    switch_hold_record_t *hold_record;
+    switch_caller_profile_t *hup_profile;
+    switch_call_direction_t direction;
+    struct switch_device_record_s *parent;
+    struct device_uuid_node_s *next;
 } switch_device_node_t;
 
 typedef struct switch_device_stats_s {
-	uint32_t total; 
-	uint32_t total_in;
-	uint32_t total_out;
-	uint32_t offhook;
-	uint32_t offhook_in;
-	uint32_t offhook_out;
-	uint32_t active;
-	uint32_t active_in;
-	uint32_t active_out;
-	uint32_t held;
-	uint32_t held_in;
-	uint32_t held_out;
-	uint32_t unheld;
-	uint32_t unheld_in;
-	uint32_t unheld_out;
-	uint32_t hup;
-	uint32_t hup_in;
-	uint32_t hup_out;
-	uint32_t ringing;
-	uint32_t ringing_in;
-	uint32_t ringing_out;
-	uint32_t early;
-	uint32_t early_in;
-	uint32_t early_out;
-	uint32_t ring_wait;
+    uint32_t total; 
+    uint32_t total_in;
+    uint32_t total_out;
+    uint32_t offhook;
+    uint32_t offhook_in;
+    uint32_t offhook_out;
+    uint32_t active;
+    uint32_t active_in;
+    uint32_t active_out;
+    uint32_t held;
+    uint32_t held_in;
+    uint32_t held_out;
+    uint32_t unheld;
+    uint32_t unheld_in;
+    uint32_t unheld_out;
+    uint32_t hup;
+    uint32_t hup_in;
+    uint32_t hup_out;
+    uint32_t ringing;
+    uint32_t ringing_in;
+    uint32_t ringing_out;
+    uint32_t early;
+    uint32_t early_in;
+    uint32_t early_out;
+    uint32_t ring_wait;
 } switch_device_stats_t;
 
 
 typedef struct switch_device_record_s {
-	char *device_id;
-	char *uuid;
-	int refs;
-	switch_device_stats_t stats;
-	switch_device_stats_t last_stats;
-	switch_device_state_t state;
-	switch_device_state_t last_state;
-	switch_time_t active_start;
-	switch_time_t active_stop;
-	switch_time_t last_call_time;
-	switch_time_t ring_start;
-	switch_time_t ring_stop;
-	switch_time_t hold_start;
-	switch_time_t hold_stop;
-	switch_time_t call_start;
-	struct device_uuid_node_s *uuid_list;
-	struct device_uuid_node_s *uuid_tail;
-	switch_mutex_t *mutex;
-	switch_memory_pool_t *pool;
-	void *user_data;
+    char *device_id;
+    char *uuid;
+    int refs;
+    switch_device_stats_t stats;
+    switch_device_stats_t last_stats;
+    switch_device_state_t state;
+    switch_device_state_t last_state;
+    switch_time_t active_start;
+    switch_time_t active_stop;
+    switch_time_t last_call_time;
+    switch_time_t ring_start;
+    switch_time_t ring_stop;
+    switch_time_t hold_start;
+    switch_time_t hold_stop;
+    switch_time_t call_start;
+    struct device_uuid_node_s *uuid_list;
+    struct device_uuid_node_s *uuid_tail;
+    switch_mutex_t *mutex;
+    switch_memory_pool_t *pool;
+    void *user_data;
 } switch_device_record_t;
 
 typedef void(*switch_device_state_function_t)(switch_core_session_t *session, switch_channel_callstate_t callstate, switch_device_record_t *drec);
@@ -148,25 +148,25 @@ typedef void(*switch_device_state_function_t)(switch_core_session_t *session, sw
 #define MAX_FPSTRLEN 192
 
 typedef struct dtls_fp_s { 
-	uint32_t len;
-	uint8_t data[MAX_FPLEN+1];
-	char *type;
-	char str[MAX_FPSTRLEN];
+    uint32_t len;
+    uint8_t data[MAX_FPLEN+1];
+    char *type;
+    char str[MAX_FPSTRLEN];
 } dtls_fingerprint_t;
 
 typedef enum {
-	DTLS_TYPE_CLIENT = (1 << 0),
-	DTLS_TYPE_SERVER = (1 << 1),
-	DTLS_TYPE_RTP = (1 << 2),
-	DTLS_TYPE_RTCP = (1 << 3)
+    DTLS_TYPE_CLIENT = (1 << 0),
+    DTLS_TYPE_SERVER = (1 << 1),
+    DTLS_TYPE_RTP = (1 << 2),
+    DTLS_TYPE_RTCP = (1 << 3)
 } dtls_type_t;
 
 typedef enum {
-	DS_HANDSHAKE,
-	DS_SETUP,
-	DS_READY,
-	DS_FAIL,
-	DS_INVALID,
+    DS_HANDSHAKE,
+    DS_SETUP,
+    DS_READY,
+    DS_FAIL,
+    DS_INVALID,
 } dtls_state_t;
 
 
@@ -178,52 +178,52 @@ typedef enum {
 #define MESSAGE_STRING_ARG_MAX 10
 /*! \brief A message object designed to allow unlike technologies to exchange data */
 struct switch_core_session_message {
-	/*! uuid of the sender (for replies) */
-	char *from;
-	/*! enumeration of the type of message */
-	switch_core_session_message_types_t message_id;
+    /*! uuid of the sender (for replies) */
+    char *from;
+    /*! enumeration of the type of message */
+    switch_core_session_message_types_t message_id;
 
-	/*! optional numeric arg */
-	int numeric_arg;
-	/*! optional string arg */
-	const char *string_arg;
-	/*! optional string arg */
-	switch_size_t string_arg_size;
-	/*! optional arbitrary pointer arg */
-	void *pointer_arg;
-	/*! optional arbitrary pointer arg's size */
-	switch_size_t pointer_arg_size;
+    /*! optional numeric arg */
+    int numeric_arg;
+    /*! optional string arg */
+    const char *string_arg;
+    /*! optional string arg */
+    switch_size_t string_arg_size;
+    /*! optional arbitrary pointer arg */
+    void *pointer_arg;
+    /*! optional arbitrary pointer arg's size */
+    switch_size_t pointer_arg_size;
 
-	/*! optional numeric reply */
-	int numeric_reply;
-	/*! optional string reply */
-	char *string_reply;
-	/*! optional string reply */
-	switch_size_t string_reply_size;
-	/*! optional arbitrary pointer reply */
-	void *pointer_reply;
-	/*! optional arbitrary pointer reply's size */
-	switch_size_t pointer_reply_size;
-	/*! message flags */
-	switch_core_session_message_flag_t flags;
-	const char *_file;
-	const char *_func;
-	int _line;
-	const char *string_array_arg[MESSAGE_STRING_ARG_MAX];
-	time_t delivery_time;
+    /*! optional numeric reply */
+    int numeric_reply;
+    /*! optional string reply */
+    char *string_reply;
+    /*! optional string reply */
+    switch_size_t string_reply_size;
+    /*! optional arbitrary pointer reply */
+    void *pointer_reply;
+    /*! optional arbitrary pointer reply's size */
+    switch_size_t pointer_reply_size;
+    /*! message flags */
+    switch_core_session_message_flag_t flags;
+    const char *_file;
+    const char *_func;
+    int _line;
+    const char *string_array_arg[MESSAGE_STRING_ARG_MAX];
+    time_t delivery_time;
 };
 
 /*! \brief A generic object to pass as a thread's session object to allow mutiple arguements and a pool */
 struct switch_core_thread_session {
-	/*! status of the thread */
-	int running;
-	/*! mutex */
-	switch_mutex_t *mutex;
-	/*! array of void pointers to pass mutiple data objects */
-	void *objs[SWITCH_MAX_CORE_THREAD_SESSION_OBJS];
-	/*! a pointer to a memory pool if the thread has it's own pool */
-	switch_input_callback_function_t input_callback;
-	switch_memory_pool_t *pool;
+    /*! status of the thread */
+    int running;
+    /*! mutex */
+    switch_mutex_t *mutex;
+    /*! array of void pointers to pass mutiple data objects */
+    void *objs[SWITCH_MAX_CORE_THREAD_SESSION_OBJS];
+    /*! a pointer to a memory pool if the thread has it's own pool */
+    switch_input_callback_function_t input_callback;
+    switch_memory_pool_t *pool;
 };
 
 struct switch_core_session;
@@ -251,9 +251,9 @@ SWITCH_DECLARE(void) switch_core_session_disable_heartbeat(switch_core_session_t
 #define switch_core_session_get_name(_s) switch_channel_get_name(switch_core_session_get_channel(_s))
 
 SWITCH_DECLARE(switch_status_t) switch_core_media_bug_pop(switch_core_session_t *orig_session, const char *function, switch_media_bug_t **pop);
-								
+                                
 SWITCH_DECLARE(switch_status_t) switch_core_media_bug_exec_all(switch_core_session_t *orig_session, 
-															   const char *function, switch_media_bug_exec_cb_t cb, void *user_data);
+                                                               const char *function, switch_media_bug_exec_cb_t cb, void *user_data);
 SWITCH_DECLARE(uint32_t) switch_core_media_bug_count(switch_core_session_t *orig_session, const char *function);
 /*!
   \brief Add a media bug to the session
@@ -266,11 +266,11 @@ SWITCH_DECLARE(uint32_t) switch_core_media_bug_count(switch_core_session_t *orig
   \return SWITCH_STATUS_SUCCESS if the operation was a success
 */
 SWITCH_DECLARE(switch_status_t) switch_core_media_bug_add(_In_ switch_core_session_t *session,
-														  _In_ const char *function,
-														  _In_ const char *target,
-														  _In_ switch_media_bug_callback_t callback,
-														  _In_opt_ void *user_data,
-														  _In_ time_t stop_time, _In_ switch_media_bug_flag_t flags, _Out_ switch_media_bug_t **new_bug);
+                                                          _In_ const char *function,
+                                                          _In_ const char *target,
+                                                          _In_ switch_media_bug_callback_t callback,
+                                                          _In_opt_ void *user_data,
+                                                          _In_ time_t stop_time, _In_ switch_media_bug_flag_t flags, _Out_ switch_media_bug_t **new_bug);
 
 /*!
   \brief Pause a media bug on the session
@@ -379,7 +379,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_bug_enumerate(switch_core_sess
 SWITCH_DECLARE(switch_status_t) switch_core_media_bug_transfer_recordings(switch_core_session_t *orig_session, switch_core_session_t *new_session);
 
 SWITCH_DECLARE(switch_status_t) switch_core_media_bug_transfer_callback(switch_core_session_t *orig_session, switch_core_session_t *new_session, 
-																		switch_media_bug_callback_t callback, void * (*user_data_dup_func) (switch_core_session_t *, void *));
+                                                                        switch_media_bug_callback_t callback, void * (*user_data_dup_func) (switch_core_session_t *, void *));
 
 
 /*!
@@ -419,9 +419,9 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_bug_set_pre_buffer_framecount(
   \return SWITCH_STATUS_SUCCESS if the operation was a success
 */
 SWITCH_DECLARE(switch_status_t) switch_core_port_allocator_new(_In_ const char *ip,
-															   _In_ switch_port_t start,
-															   _In_ switch_port_t end,
-															   _In_ switch_port_flag_t flags, _Out_ switch_core_port_allocator_t **new_allocator);
+                                                               _In_ switch_port_t start,
+                                                               _In_ switch_port_t end,
+                                                               _In_ switch_port_flag_t flags, _Out_ switch_core_port_allocator_t **new_allocator);
 
 /*!
   \brief Get a port from the port allocator
@@ -523,7 +523,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_lock(_In_ switch_core_s
 
 #ifdef SWITCH_DEBUG_RWLOCKS
 SWITCH_DECLARE(switch_status_t) switch_core_session_perform_read_lock_hangup(_In_ switch_core_session_t *session, const char *file, const char *func,
-																			 int line);
+                                                                             int line);
 #endif
 
 /*! 
@@ -595,7 +595,7 @@ SWITCH_DECLARE(const switch_state_handler_table_t *) switch_core_get_state_handl
 SWITCH_DECLARE(void) switch_core_memory_pool_tag(switch_memory_pool_t *pool, const char *tag);
 
 SWITCH_DECLARE(switch_status_t) switch_core_perform_new_memory_pool(_Out_ switch_memory_pool_t **pool,
-																	_In_z_ const char *file, _In_z_ const char *func, _In_ int line);
+                                                                    _In_z_ const char *file, _In_z_ const char *func, _In_ int line);
 
 ///\defgroup memp Memory Pooling/Allocation
 ///\ingroup core1
@@ -608,7 +608,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_perform_new_memory_pool(_Out_ switch
 
 SWITCH_DECLARE(int) switch_core_session_sync_clock(void);
 SWITCH_DECLARE(switch_status_t) switch_core_perform_destroy_memory_pool(_Inout_ switch_memory_pool_t **pool,
-																		_In_z_ const char *file, _In_z_ const char *func, _In_ int line);
+                                                                        _In_z_ const char *file, _In_z_ const char *func, _In_ int line);
 /*! 
   \brief Returns a subpool back to the main pool
   \return SWITCH_STATUS_SUCCESS on success
@@ -646,7 +646,7 @@ SWITCH_DECLARE(void *) switch_core_perform_permanent_alloc(_In_ switch_size_t me
 
 
 SWITCH_DECLARE(void *) switch_core_perform_alloc(_In_ switch_memory_pool_t *pool, _In_ switch_size_t memory, _In_z_ const char *file,
-												 _In_z_ const char *func, _In_ int line);
+                                                 _In_z_ const char *func, _In_ int line);
 
 /*! 
   \brief Allocate memory directly from a memory pool
@@ -657,8 +657,8 @@ SWITCH_DECLARE(void *) switch_core_perform_alloc(_In_ switch_memory_pool_t *pool
 */
 #define switch_core_alloc(_pool, _mem) switch_core_perform_alloc(_pool, _mem, __FILE__, __SWITCH_FUNC__, __LINE__)
 
-	 _Ret_ SWITCH_DECLARE(void *) switch_core_perform_session_alloc(_In_ switch_core_session_t *session, _In_ switch_size_t memory, const char *file,
-																	const char *func, int line);
+     _Ret_ SWITCH_DECLARE(void *) switch_core_perform_session_alloc(_In_ switch_core_session_t *session, _In_ switch_size_t memory, const char *file,
+                                                                    const char *func, int line);
 
 /*! 
   \brief Allocate memory from a session's pool
@@ -682,7 +682,7 @@ SWITCH_DECLARE(char *) switch_core_perform_permanent_strdup(_In_z_ const char *t
 
 
 SWITCH_DECLARE(char *) switch_core_perform_session_strdup(_In_ switch_core_session_t *session, _In_z_ const char *todup, _In_z_ const char *file,
-														  _In_z_ const char *func, _In_ int line);
+                                                          _In_z_ const char *func, _In_ int line);
 
 /*! 
   \brief Copy a string using memory allocation from a session's pool
@@ -694,7 +694,7 @@ SWITCH_DECLARE(char *) switch_core_perform_session_strdup(_In_ switch_core_sessi
 
 
 SWITCH_DECLARE(char *) switch_core_perform_strdup(_In_ switch_memory_pool_t *pool, _In_z_ const char *todup, _In_z_ const char *file,
-												  _In_z_ const char *func, _In_ int line);
+                                                  _In_z_ const char *func, _In_ int line);
 
 /*! 
   \brief Copy a string using memory allocation from a given pool
@@ -754,7 +754,7 @@ SWITCH_DECLARE(switch_memory_pool_t *) switch_core_session_get_pool(_In_ switch_
 ///\}
 
 SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_endpoint_interface_t *endpoint_interface,
-																		switch_memory_pool_t **pool, switch_xml_t xml);
+                                                                        switch_memory_pool_t **pool, switch_xml_t xml);
 
 ///\defgroup sessm Session Creation / Management
 ///\ingroup core1
@@ -766,16 +766,16 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
   \return the newly created session
 */
 SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_uuid(_In_ switch_endpoint_interface_t *endpoint_interface,
-																		 _In_ switch_call_direction_t direction,
-																		 switch_originate_flag_t originate_flags,
-																		 _Inout_opt_ switch_memory_pool_t **pool, 
-																		 _In_opt_z_ const char *use_uuid);
+                                                                         _In_ switch_call_direction_t direction,
+                                                                         switch_originate_flag_t originate_flags,
+                                                                         _Inout_opt_ switch_memory_pool_t **pool, 
+                                                                         _In_opt_z_ const char *use_uuid);
 #define switch_core_session_request(_ep, _d, _f, _p) switch_core_session_request_uuid(_ep, _d, _f, _p, NULL)
 
 SWITCH_DECLARE(switch_status_t) switch_core_session_set_uuid(_In_ switch_core_session_t *session, _In_z_ const char *use_uuid);
 
 SWITCH_DECLARE(void) switch_core_session_perform_destroy(_Inout_ switch_core_session_t **session,
-														 _In_z_ const char *file, _In_z_ const char *func, _In_ int line);
+                                                         _In_z_ const char *file, _In_z_ const char *func, _In_ int line);
 
 /*! 
   \brief Destroy a session and return the memory pool to the core
@@ -810,7 +810,7 @@ SWITCH_DECLARE(switch_size_t) switch_core_session_id_dec(void);
   \return the newly created session
 */
 SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_by_name(_In_z_ const char *endpoint_name,
-																			_In_ switch_call_direction_t direction, _Inout_ switch_memory_pool_t **pool);
+                                                                            _In_ switch_call_direction_t direction, _Inout_ switch_memory_pool_t **pool);
 
 /*! 
   \brief Launch the session thread (state machine) on a given session
@@ -828,7 +828,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_thread_pool_launch(switch_co
   \param session the session to retrieve from
   \return a pointer to the channel object
 */
-	 _Ret_ SWITCH_DECLARE(switch_channel_t *) switch_core_session_get_channel(_In_ switch_core_session_t *session);
+     _Ret_ SWITCH_DECLARE(switch_channel_t *) switch_core_session_get_channel(_In_ switch_core_session_t *session);
 
 /*! 
   \brief Signal a session's state machine thread that a state change has occured
@@ -859,7 +859,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_set_loglevel(switch_core_ses
   \return the log level
 */
 SWITCH_DECLARE(switch_log_level_t) switch_core_session_get_loglevel(switch_core_session_t *session);
-								   
+                                   
 SWITCH_DECLARE(jb_t *) switch_core_session_get_jb(switch_core_session_t *session, switch_media_type_t type);
 SWITCH_DECLARE(void) switch_core_session_soft_lock(switch_core_session_t *session, uint32_t sec);
 SWITCH_DECLARE(void) switch_core_session_soft_unlock(switch_core_session_t *session);
@@ -941,9 +941,9 @@ SWITCH_DECLARE(void) switch_core_dump_variables(_In_ switch_stream_handle_t *str
 SWITCH_DECLARE(void) switch_core_session_hupall(_In_ switch_call_cause_t cause);
 
 typedef enum {
-	SHT_NONE = 0,
-	SHT_UNANSWERED = (1 << 0),
-	SHT_ANSWERED = (1 << 1)
+    SHT_NONE = 0,
+    SHT_UNANSWERED = (1 << 0),
+    SHT_ANSWERED = (1 << 1)
 } switch_hup_type_t;
 
 /*! 
@@ -953,7 +953,7 @@ typedef enum {
   \param cause the hangup cause to apply to the hungup channels
 */
 SWITCH_DECLARE(uint32_t) switch_core_session_hupall_matching_var_ans(_In_ const char *var_name, _In_ const char *var_val, _In_ 
-																	 switch_call_cause_t cause, switch_hup_type_t type);
+                                                                     switch_call_cause_t cause, switch_hup_type_t type);
 SWITCH_DECLARE(switch_console_callback_match_t *) switch_core_session_findall_matching_var(const char *var_name, const char *var_val);
 #define switch_core_session_hupall_matching_var(_vn, _vv, _c) switch_core_session_hupall_matching_var_ans(_vn, _vv, _c, SHT_UNANSWERED | SHT_ANSWERED)
 SWITCH_DECLARE(switch_console_callback_match_t *) switch_core_session_findall(void);
@@ -971,7 +971,7 @@ SWITCH_DECLARE(void) switch_core_session_hupall_endpoint(const switch_endpoint_i
   \return SWITCH_STATUS_SUCCESS or SWITCH_STATUS_FALSE if this session isn't bridged
 */
 SWITCH_DECLARE(switch_status_t) switch_core_session_perform_get_partner(switch_core_session_t *session, switch_core_session_t **partner,
-																		const char *file, const char *func, int line);
+                                                                        const char *file, const char *func, int line);
 
 #define switch_core_session_get_partner(_session, _partner) switch_core_session_perform_get_partner(_session, _partner, __FILE__, __SWITCH_FUNC__, __LINE__)
 
@@ -1004,7 +1004,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_dequeue_signal_data(switch_c
   \return SWITCH_STATUS_SUCCESS if the message was passed
 */
 SWITCH_DECLARE(switch_status_t) switch_core_session_pass_indication(_In_ switch_core_session_t *session,
-																	_In_ switch_core_session_message_types_t indication);
+                                                                    _In_ switch_core_session_message_types_t indication);
 
 /*! 
   \brief Queue an indication message on a session
@@ -1013,7 +1013,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_pass_indication(_In_ switch_
   \return SWITCH_STATUS_SUCCESS if the message was queued
 */
 SWITCH_DECLARE(switch_status_t) switch_core_session_queue_indication(_In_ switch_core_session_t *session,
-																	 _In_ switch_core_session_message_types_t indication);
+                                                                     _In_ switch_core_session_message_types_t indication);
 
 /*! 
   \brief DE-Queue an message on a given session
@@ -1049,7 +1049,7 @@ SWITCH_DECLARE(switch_app_log_t *) switch_core_session_get_app_log(_In_ switch_c
   \return the application's return value
 */
 SWITCH_DECLARE(switch_status_t) switch_core_session_exec(_In_ switch_core_session_t *session,
-														 _In_ const switch_application_interface_t *application_interface, _In_opt_z_ const char *arg);
+                                                         _In_ const switch_application_interface_t *application_interface, _In_opt_z_ const char *arg);
 
 SWITCH_DECLARE(void) switch_core_session_video_reset(switch_core_session_t *session);
 /*! 
@@ -1061,7 +1061,7 @@ SWITCH_DECLARE(void) switch_core_session_video_reset(switch_core_session_t *sess
   \return the application's return value
 */
 SWITCH_DECLARE(switch_status_t) switch_core_session_execute_application_get_flags(_In_ switch_core_session_t *session,
-																				  _In_ const char *app, _In_opt_z_ const char *arg, _Out_opt_ int32_t *flags);
+                                                                                  _In_ const char *app, _In_opt_z_ const char *arg, _Out_opt_ int32_t *flags);
 
 SWITCH_DECLARE(switch_status_t) switch_core_session_execute_application_async(switch_core_session_t *session, const char *app, const char *arg);
 
@@ -1086,8 +1086,8 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_get_app_flags(const char *ap
   \return the application's return value
 */
 SWITCH_DECLARE(switch_status_t) switch_core_session_execute_exten(_In_ switch_core_session_t *session,
-																  _In_z_ const char *exten,
-																  _In_opt_z_ const char *dialplan, _In_opt_z_ const char *context);
+                                                                  _In_z_ const char *exten,
+                                                                  _In_opt_z_ const char *dialplan, _In_opt_z_ const char *context);
 
 /*! 
   \brief Send an event to a session translating it to it's native message format
@@ -1144,7 +1144,7 @@ SWITCH_DECLARE(int) switch_core_session_get_stream_count(_In_ switch_core_sessio
   \param obj an arguement
 */
 SWITCH_DECLARE(void) switch_core_session_launch_thread(_In_ switch_core_session_t *session,
-													   _In_ void *(*func) (switch_thread_t *, void *), _In_opt_ void *obj);
+                                                       _In_ void *(*func) (switch_thread_t *, void *), _In_opt_ void *obj);
 
 /*! 
   \brief Signal a thread using a thread session to terminate
@@ -1172,12 +1172,12 @@ SWITCH_DECLARE(void) switch_core_service_session_av(_In_ switch_core_session_t *
   \return the cause code of the attempted call
 */
 SWITCH_DECLARE(switch_call_cause_t) switch_core_session_outgoing_channel(_In_opt_ switch_core_session_t *session,
-																		 _In_opt_ switch_event_t *var_event,
-																		 _In_z_ const char *endpoint_name,
-																		 _In_ switch_caller_profile_t *caller_profile,
-																		 _Inout_ switch_core_session_t **new_session,
-																		 _Inout_ switch_memory_pool_t **pool, _In_ switch_originate_flag_t flags,
-																		 switch_call_cause_t *cancel_cause);
+                                                                         _In_opt_ switch_event_t *var_event,
+                                                                         _In_z_ const char *endpoint_name,
+                                                                         _In_ switch_caller_profile_t *caller_profile,
+                                                                         _Inout_ switch_core_session_t **new_session,
+                                                                         _Inout_ switch_memory_pool_t **pool, _In_ switch_originate_flag_t flags,
+                                                                         switch_call_cause_t *cancel_cause);
 
 /*! 
   \brief Receive a message on a given session
@@ -1186,10 +1186,10 @@ SWITCH_DECLARE(switch_call_cause_t) switch_core_session_outgoing_channel(_In_opt
   \return the status returned by the message handler
 */
 SWITCH_DECLARE(switch_status_t) switch_core_session_perform_receive_message(_In_ switch_core_session_t *session,
-																			_In_ switch_core_session_message_t *message,
-																			const char *file, const char *func, int line);
+                                                                            _In_ switch_core_session_message_t *message,
+                                                                            const char *file, const char *func, int line);
 #define switch_core_session_receive_message(_session, _message) switch_core_session_perform_receive_message(_session, _message, \
-																											__FILE__, __SWITCH_FUNC__, __LINE__)
+                                                                                                            __FILE__, __SWITCH_FUNC__, __LINE__)
 
 /*! 
   \brief Queue an event on a given session
@@ -1229,7 +1229,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_dequeue_event(_In_ switch_co
   \return the status returned by the message handler
 */
 SWITCH_DECLARE(switch_status_t) switch_core_session_queue_private_event(_In_ switch_core_session_t *session, _Inout_ switch_event_t **event,
-																		switch_bool_t priority);
+                                                                        switch_bool_t priority);
 
 
 /*! 
@@ -1265,16 +1265,16 @@ SWITCH_DECLARE(uint32_t) switch_core_session_flush_private_events(switch_core_se
   \return SWITCH_STATUS_SUCCESS a the frame was read
 */
 SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame(_In_ switch_core_session_t *session, switch_frame_t **frame, switch_io_flag_t flags,
-															   int stream_id);
+                                                               int stream_id);
 SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(_In_ switch_core_session_t *session, switch_frame_t **frame, switch_io_flag_t flags,
-																	  int stream_id, switch_time_t *time_after_wait);
+                                                                      int stream_id, switch_time_t *time_after_wait);
 
 SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_socket(switch_core_session_t *session, switch_frame_t **frame, switch_io_flag_t flags,
-                                                                                int stream_id, switch_time_t *time_after_wait);
+                                                                                int stream_id);
 
 SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterbuffer(switch_core_session_t *session, 
-																					  switch_frame_t **frame, switch_io_flag_t flags,
-																					  int stream_id, switch_time_t *time_after_wait);
+                                                                                      switch_frame_t **frame, switch_io_flag_t flags,
+                                                                                      int stream_id);
 
 
 
@@ -1286,7 +1286,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
 SWITCH_DECLARE(uint32_t) switch_core_session_get_low_energy(switch_core_session_t *session);
 SWITCH_DECLARE(switch_bool_t) switch_core_session_get_cn_state(switch_core_session_t *session);
 SWITCH_DECLARE(void) switch_core_session_get_webrtc_counts(switch_core_session_t *session, uint32_t *read, uint32_t *insert,
-														   uint32_t *hot_read, uint32_t *errors, uint32_t *skip_read, uint32_t *empty);
+                                                           uint32_t *hot_read, uint32_t *errors, uint32_t *skip_read, uint32_t *empty);
 
 /*! 
   \brief Read a video frame from a session
@@ -1297,7 +1297,7 @@ SWITCH_DECLARE(void) switch_core_session_get_webrtc_counts(switch_core_session_t
   \return SWITCH_STATUS_SUCCESS a if the frame was read
 */
 SWITCH_DECLARE(switch_status_t) switch_core_session_read_video_frame(_In_ switch_core_session_t *session, switch_frame_t **frame, switch_io_flag_t flags,
-																	 int stream_id);
+                                                                     int stream_id);
 
 /*! 
   \brief Write a video frame to a session
@@ -1308,7 +1308,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_video_frame(_In_ switch
   \return SWITCH_STATUS_SUCCESS a if the frame was written
 */
 SWITCH_DECLARE(switch_status_t) switch_core_session_write_video_frame(_In_ switch_core_session_t *session, switch_frame_t *frame, switch_io_flag_t flags,
-																	  int stream_id);
+                                                                      int stream_id);
 
 SWITCH_DECLARE(switch_status_t) switch_core_session_set_read_impl(switch_core_session_t *session, const switch_codec_implementation_t *impp);
 SWITCH_DECLARE(switch_status_t) switch_core_session_set_write_impl(switch_core_session_t *session, const switch_codec_implementation_t *impp);
@@ -1331,20 +1331,20 @@ SWITCH_DECLARE(void) switch_core_session_reset(_In_ switch_core_session_t *sessi
   \return SWITCH_STATUS_SUCCESS a the frame was written
 */
 SWITCH_DECLARE(switch_status_t) switch_core_session_write_frame(_In_ switch_core_session_t *session, switch_frame_t *frame, switch_io_flag_t flags,
-																int stream_id);
+                                                                int stream_id);
 
 SWITCH_DECLARE(switch_status_t) switch_core_session_write_enc_frame(_In_ switch_core_session_t *session,
                                                                     switch_frame_t *frame,
                                                                     switch_io_flag_t flags,
                                                                     int stream_id,
-																	switch_time_t *timed);
+                                                                    switch_time_t *timed);
 
 SWITCH_DECLARE(switch_status_t) switch_core_session_enc_frame(_In_ switch_core_session_t *session,
                                                               switch_frame_t *frame, switch_io_flag_t flags,
                                                               int stream_id, switch_frame_t **ret_enc_frame);
 
 SWITCH_DECLARE(switch_status_t) switch_core_session_perform_kill_channel(_In_ switch_core_session_t *session,
-																		 const char *file, const char *func, int line, switch_signal_t sig);
+                                                                         const char *file, const char *func, int line, switch_signal_t sig);
 /*!
   \brief Send a signal to a channel
   \param session session to send signal to
@@ -1422,7 +1422,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_hash_insert_destructor(_In_ switch_h
   \note the string key must be a constant or a dynamic string
 */
 SWITCH_DECLARE(switch_status_t) switch_core_hash_insert_locked(_In_ switch_hash_t *hash, _In_z_ const char *key, _In_opt_ const void *data,
-															   _In_opt_ switch_mutex_t *mutex);
+                                                               _In_opt_ switch_mutex_t *mutex);
 /*! 
   \brief Retrieve data from a given hash
   \param hash the hash to retrieve from
@@ -1524,7 +1524,7 @@ SWITCH_DECLARE(switch_hash_index_t *) switch_core_hash_next(_In_ switch_hash_ind
  \param val [out] the value 
 */
 SWITCH_DECLARE(void) switch_core_hash_this(_In_ switch_hash_index_t *hi, _Out_opt_ptrdiff_cap_(klen)
-									  const void **key, _Out_opt_ switch_ssize_t *klen, _Out_ void **val);
+                                      const void **key, _Out_opt_ switch_ssize_t *klen, _Out_ void **val);
 
 
 
@@ -1543,7 +1543,7 @@ SWITCH_DECLARE(void) switch_core_hash_this(_In_ switch_hash_index_t *hi, _Out_op
   \return
 */
 SWITCH_DECLARE(switch_status_t) switch_core_timer_init(switch_timer_t *timer, const char *timer_name, int interval, int samples,
-													   switch_memory_pool_t *pool);
+                                                       switch_memory_pool_t *pool);
 
 SWITCH_DECLARE(void) switch_time_calibrate_clock(void);
 
@@ -1610,15 +1610,15 @@ SWITCH_DECLARE(switch_status_t) switch_core_timer_now_us(switch_timer_t *timer, 
   \return SWITCH_STATUS_SUCCESS if the handle is allocated
 */
 #define switch_core_codec_init(_codec, _codec_name, _fmtp, _rate, _ms, _channels, _flags, _codec_settings, _pool) \
-	switch_core_codec_init_with_bitrate(_codec, _codec_name, _fmtp, _rate, _ms, _channels, 0, _flags, _codec_settings, _pool)
+    switch_core_codec_init_with_bitrate(_codec, _codec_name, _fmtp, _rate, _ms, _channels, 0, _flags, _codec_settings, _pool)
 SWITCH_DECLARE(switch_status_t) switch_core_codec_init_with_bitrate(switch_codec_t *codec,
-													   const char *codec_name,
-													   const char *fmtp,
-													   uint32_t rate,
-													   int ms,
-													   int channels,
-													   uint32_t bitrate,
-													   uint32_t flags, const switch_codec_settings_t *codec_settings, switch_memory_pool_t *pool);
+                                                       const char *codec_name,
+                                                       const char *fmtp,
+                                                       uint32_t rate,
+                                                       int ms,
+                                                       int channels,
+                                                       uint32_t bitrate,
+                                                       uint32_t flags, const switch_codec_settings_t *codec_settings, switch_memory_pool_t *pool);
 
 SWITCH_DECLARE(switch_status_t) switch_core_codec_copy(switch_codec_t *codec, switch_codec_t *new_codec, switch_memory_pool_t *pool);
 SWITCH_DECLARE(switch_status_t) switch_core_codec_parse_fmtp(const char *codec_name, const char *fmtp, uint32_t rate, switch_codec_fmtp_t *codec_fmtp);
@@ -1639,11 +1639,11 @@ SWITCH_DECLARE(switch_status_t) switch_core_codec_reset(switch_codec_t *codec);
   \note encoded_data_len will be rewritten to the in-use size of encoded_data
 */
 SWITCH_DECLARE(switch_status_t) switch_core_codec_encode(switch_codec_t *codec,
-														 switch_codec_t *other_codec,
-														 void *decoded_data,
-														 uint32_t decoded_data_len,
-														 uint32_t decoded_rate,
-														 void *encoded_data, uint32_t *encoded_data_len, uint32_t *encoded_rate, unsigned int *flag);
+                                                         switch_codec_t *other_codec,
+                                                         void *decoded_data,
+                                                         uint32_t decoded_data_len,
+                                                         uint32_t decoded_rate,
+                                                         void *encoded_data, uint32_t *encoded_data_len, uint32_t *encoded_rate, unsigned int *flag);
 
 /*! 
   \brief Decode data using a codec handle
@@ -1660,11 +1660,11 @@ SWITCH_DECLARE(switch_status_t) switch_core_codec_encode(switch_codec_t *codec,
   \note decoded_data_len will be rewritten to the in-use size of decoded_data
 */
 SWITCH_DECLARE(switch_status_t) switch_core_codec_decode(switch_codec_t *codec,
-														 switch_codec_t *other_codec,
-														 void *encoded_data,
-														 uint32_t encoded_data_len,
-														 uint32_t encoded_rate,
-														 void *decoded_data, uint32_t *decoded_data_len, uint32_t *decoded_rate, unsigned int *flag);
+                                                         switch_codec_t *other_codec,
+                                                         void *encoded_data,
+                                                         uint32_t encoded_data_len,
+                                                         uint32_t encoded_rate,
+                                                         void *decoded_data, uint32_t *decoded_data_len, uint32_t *decoded_rate, unsigned int *flag);
 
 /*! 
   \brief Destroy an initalized codec handle
@@ -1813,10 +1813,10 @@ SWITCH_DECLARE(void) switch_core_db_test_reactive(switch_core_db_t *db, char *te
 ///\{
 
 SWITCH_DECLARE(switch_status_t) switch_core_perform_file_open(const char *file, const char *func, int line,
-															  _In_ switch_file_handle_t *fh,
-															  _In_opt_z_ const char *file_path,
-															  _In_ uint32_t channels,
-															  _In_ uint32_t rate, _In_ unsigned int flags, _In_opt_ switch_memory_pool_t *pool);
+                                                              _In_ switch_file_handle_t *fh,
+                                                              _In_opt_z_ const char *file_path,
+                                                              _In_ uint32_t channels,
+                                                              _In_ uint32_t rate, _In_ unsigned int flags, _In_opt_ switch_memory_pool_t *pool);
 
 /*! 
   \brief Open a media file using file format modules
@@ -1830,7 +1830,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_perform_file_open(const char *file, 
   \note the loadable module used is chosen based on the file extension
 */
 #define switch_core_file_open(_fh, _file_path, _channels, _rate, _flags, _pool) \
-	switch_core_perform_file_open(__FILE__, __SWITCH_FUNC__, __LINE__, _fh, _file_path, _channels, _rate, _flags, _pool)
+    switch_core_perform_file_open(__FILE__, __SWITCH_FUNC__, __LINE__, _fh, _file_path, _channels, _rate, _flags, _pool)
 
 /*! 
   \brief Read media from a file handle
@@ -1915,10 +1915,10 @@ SWITCH_DECLARE(switch_status_t) switch_core_file_truncate(switch_file_handle_t *
   \return SWITCH_STATUS_SUCCESS if the handle is opened
 */
 SWITCH_DECLARE(switch_status_t) switch_core_speech_open(_In_ switch_speech_handle_t *sh,
-														const char *module_name,
-														const char *voice_name,
-														_In_ unsigned int rate,
-														_In_ unsigned int interval, switch_speech_flag_t *flags, _In_opt_ switch_memory_pool_t *pool);
+                                                        const char *module_name,
+                                                        const char *voice_name,
+                                                        _In_ unsigned int rate,
+                                                        _In_ unsigned int interval, switch_speech_flag_t *flags, _In_opt_ switch_memory_pool_t *pool);
 /*! 
   \brief Feed text to the TTS module
   \param sh the speech handle to feed
@@ -1989,8 +1989,8 @@ SWITCH_DECLARE(switch_status_t) switch_core_speech_close(switch_speech_handle_t 
   \return SWITCH_STATUS_SUCCESS if the asr handle was opened
 */
 SWITCH_DECLARE(switch_status_t) switch_core_asr_open(switch_asr_handle_t *ah,
-													 const char *module_name,
-													 const char *codec, int rate, const char *dest, switch_asr_flag_t *flags, switch_memory_pool_t *pool);
+                                                     const char *module_name,
+                                                     const char *codec, int rate, const char *dest, switch_asr_flag_t *flags, switch_memory_pool_t *pool);
 
 /*!
   \brief Close an asr handle
@@ -2147,7 +2147,7 @@ SWITCH_DECLARE(void) switch_core_asr_float_param(switch_asr_handle_t *ah, char *
   \return SWITCH_STATUS_SUCCESS if the handle is opened
 */
 SWITCH_DECLARE(switch_status_t) switch_core_directory_open(switch_directory_handle_t *dh,
-														   char *module_name, char *source, char *dsn, char *passwd, switch_memory_pool_t *pool);
+                                                           char *module_name, char *source, char *dsn, char *passwd, switch_memory_pool_t *pool);
 
 /*! 
   \brief Query a directory handle
@@ -2297,7 +2297,7 @@ SWITCH_DECLARE(FILE *) switch_core_get_console(void);
   \brief Launch a thread
 */
 SWITCH_DECLARE(switch_thread_t *) switch_core_launch_thread(void *(SWITCH_THREAD_FUNC * func) (switch_thread_t *, void *),
-															void *obj, switch_memory_pool_t *pool);
+                                                            void *obj, switch_memory_pool_t *pool);
 #endif
 
 /*!
@@ -2370,7 +2370,7 @@ SWITCH_DECLARE(int) switch_stream_system(const char *cmd, switch_stream_handle_t
 SWITCH_DECLARE(void) switch_cond_yield(switch_interval_time_t t);
 SWITCH_DECLARE(void) switch_cond_next(void);
 SWITCH_DECLARE(switch_status_t) switch_core_chat_send_args(const char *dest_proto, const char *proto, const char *from, const char *to,
-														   const char *subject, const char *body, const char *type, const char *hint, switch_bool_t blocking);
+                                                           const char *subject, const char *body, const char *type, const char *hint, switch_bool_t blocking);
 SWITCH_DECLARE(switch_status_t) switch_core_chat_send(const char *dest_proto, switch_event_t *message_event);
 SWITCH_DECLARE(switch_status_t) switch_core_chat_deliver(const char *dest_proto, switch_event_t **message_event);
 
@@ -2389,40 +2389,40 @@ typedef int (*switch_core_db_event_callback_func_t) (void *pArg, switch_event_t 
 
 #define CACHE_DB_LEN 256
 typedef enum {
-	CDF_INUSE = (1 << 0),
-	CDF_PRUNE = (1 << 1)
+    CDF_INUSE = (1 << 0),
+    CDF_PRUNE = (1 << 1)
 } cache_db_flag_t;
 
 typedef enum {
-	SCDB_TYPE_CORE_DB,
-	SCDB_TYPE_ODBC,
-	SCDB_TYPE_PGSQL
+    SCDB_TYPE_CORE_DB,
+    SCDB_TYPE_ODBC,
+    SCDB_TYPE_PGSQL
 } switch_cache_db_handle_type_t;
 
 typedef union {
-	switch_core_db_t *core_db_dbh;
-	switch_odbc_handle_t *odbc_dbh;
-	switch_pgsql_handle_t *pgsql_dbh;
+    switch_core_db_t *core_db_dbh;
+    switch_odbc_handle_t *odbc_dbh;
+    switch_pgsql_handle_t *pgsql_dbh;
 } switch_cache_db_native_handle_t;
 
 typedef struct {
-	char *db_path;
+    char *db_path;
 } switch_cache_db_core_db_options_t;
 
 typedef struct {
-	char *dsn;
-	char *user;
-	char *pass;
+    char *dsn;
+    char *user;
+    char *pass;
 } switch_cache_db_odbc_options_t;
 
 typedef struct {
-	char *dsn;
+    char *dsn;
 } switch_cache_db_pgsql_options_t;
 
 typedef union {
-	switch_cache_db_core_db_options_t core_db_options;
-	switch_cache_db_odbc_options_t odbc_options;
-	switch_cache_db_pgsql_options_t pgsql_options;
+    switch_cache_db_core_db_options_t core_db_options;
+    switch_cache_db_odbc_options_t odbc_options;
+    switch_cache_db_pgsql_options_t pgsql_options;
 } switch_cache_db_connection_options_t;
 
 struct switch_cache_db_handle;
@@ -2430,59 +2430,59 @@ typedef struct switch_cache_db_handle switch_cache_db_handle_t;
 
 static inline const char *switch_cache_db_type_name(switch_cache_db_handle_type_t type)
 {
-	const char *type_str = "INVALID";
+    const char *type_str = "INVALID";
 
-	switch (type) {
-	case SCDB_TYPE_PGSQL:
-		{
-			type_str = "PGSQL";
-		}
-		break;
-	case SCDB_TYPE_ODBC:
-		{
-			type_str = "ODBC";
-		}
-		break;
-	case SCDB_TYPE_CORE_DB:
-		{
-			type_str = "CORE_DB";
-		}
-		break;
-	}
+    switch (type) {
+    case SCDB_TYPE_PGSQL:
+        {
+            type_str = "PGSQL";
+        }
+        break;
+    case SCDB_TYPE_ODBC:
+        {
+            type_str = "ODBC";
+        }
+        break;
+    case SCDB_TYPE_CORE_DB:
+        {
+            type_str = "CORE_DB";
+        }
+        break;
+    }
 
-	return type_str;
+    return type_str;
 }
 
 SWITCH_DECLARE(switch_cache_db_handle_type_t) switch_cache_db_get_type(switch_cache_db_handle_t *dbh);
 
 /*! 
  \brief Returns the handle to the pool, immediately available for other
- 		threads to use.
+        threads to use.
  \param [in] The handle
 */
 SWITCH_DECLARE(void) switch_cache_db_dismiss_db_handle(switch_cache_db_handle_t ** dbh);
 /*! 
  \brief Returns the handle to the pool, handle is NOT available to 
- 		other threads until the allocating thread actually terminates.
+        other threads until the allocating thread actually terminates.
  \param [in] The handle
 */
 SWITCH_DECLARE(void) switch_cache_db_release_db_handle(switch_cache_db_handle_t ** dbh);
 /*! 
  \brief Gets a new cached handle from the pool, potentially creating a new connection.
- 		The connection is bound to the thread until it (the thread) terminates unless
- 		you dismiss rather than release.
+        The connection is bound to the thread until it (the thread) terminates unless
+        you dismiss rather than release.
  \param [out] dbh The handle
  \param [in] type - ODBC or SQLLITE
  \param [in] connection_options (userid, password, etc)
 */
 SWITCH_DECLARE(switch_status_t) _switch_cache_db_get_db_handle(switch_cache_db_handle_t ** dbh,
-															   switch_cache_db_handle_type_t type,
-															   switch_cache_db_connection_options_t *connection_options,
-															   const char *file, const char *func, int line);
+                                                               switch_cache_db_handle_type_t type,
+                                                               switch_cache_db_connection_options_t *connection_options,
+                                                               const char *file, const char *func, int line);
 #define switch_cache_db_get_db_handle(_a, _b, _c) _switch_cache_db_get_db_handle(_a, _b, _c, __FILE__, __SWITCH_FUNC__, __LINE__)
 
 SWITCH_DECLARE(switch_status_t) _switch_cache_db_get_db_handle_dsn(switch_cache_db_handle_t **dbh, const char *dsn, 
-																   const char *file, const char *func, int line);
+                                                                   const char *file, const char *func, int line);
 #define switch_cache_db_get_db_handle_dsn(_a, _b) _switch_cache_db_get_db_handle_dsn(_a, _b, __FILE__, __SWITCH_FUNC__, __LINE__)
 
 /*! 
@@ -2510,7 +2510,7 @@ SWITCH_DECLARE(switch_status_t) switch_cache_db_execute_sql(switch_cache_db_hand
  \param [out] err - Error if it exists
 */
 SWITCH_DECLARE(switch_status_t) switch_cache_db_execute_sql_callback(switch_cache_db_handle_t *dbh, const char *sql,
-																	 switch_core_db_callback_func_t callback, void *pdata, char **err);
+                                                                     switch_core_db_callback_func_t callback, void *pdata, char **err);
 
 /*! 
  \brief Executes the sql and uses callback for row-by-row processing
@@ -2522,9 +2522,9 @@ SWITCH_DECLARE(switch_status_t) switch_cache_db_execute_sql_callback(switch_cach
  \param [out] err - Error if it exists
 */
 SWITCH_DECLARE(switch_status_t) switch_cache_db_execute_sql_callback_err(switch_cache_db_handle_t *dbh, const char *sql,
-																	 switch_core_db_callback_func_t callback,
-																	 switch_core_db_err_callback_func_t err_callback,
-																	 void *pdata, char **err);
+                                                                     switch_core_db_callback_func_t callback,
+                                                                     switch_core_db_err_callback_func_t err_callback,
+                                                                     void *pdata, char **err);
 
 /*!
  \brief Get the affected rows of the last performed query
@@ -2549,13 +2549,13 @@ SWITCH_DECLARE(switch_status_t) _switch_core_db_handle(switch_cache_db_handle_t 
 #define switch_core_db_handle(_a) _switch_core_db_handle(_a, __FILE__, __SWITCH_FUNC__, __LINE__)
 
 SWITCH_DECLARE(switch_bool_t) switch_cache_db_test_reactive(switch_cache_db_handle_t *db,
-															const char *test_sql, const char *drop_sql, const char *reactive_sql);
+                                                            const char *test_sql, const char *drop_sql, const char *reactive_sql);
 SWITCH_DECLARE(switch_status_t) switch_cache_db_persistant_execute(switch_cache_db_handle_t *dbh, const char *sql, uint32_t retries);
 SWITCH_DECLARE(switch_status_t) switch_cache_db_persistant_execute_trans_full(switch_cache_db_handle_t *dbh, char *sql, uint32_t retries,
-																			  const char *pre_trans_execute,
-																			  const char *post_trans_execute,
-																			  const char *inner_pre_trans_execute,
-																			  const char *inner_post_trans_execute);
+                                                                              const char *pre_trans_execute,
+                                                                              const char *post_trans_execute,
+                                                                              const char *inner_pre_trans_execute,
+                                                                              const char *inner_post_trans_execute);
 #define switch_cache_db_persistant_execute_trans(_d, _s, _r) switch_cache_db_persistant_execute_trans_full(_d, _s, _r, NULL, NULL, NULL, NULL)
 
 SWITCH_DECLARE(void) switch_core_set_signal_handlers(void);
@@ -2580,8 +2580,8 @@ SWITCH_DECLARE(uint32_t) switch_default_rate(const char *name, uint32_t number);
  \param [out] err - Error if it exists
 */
 SWITCH_DECLARE(switch_status_t) switch_core_add_registration(const char *user, const char *realm, const char *token, const char *url, uint32_t expires, 
-															 const char *network_ip, const char *network_port, const char *network_proto,
-															 const char *metadata);
+                                                             const char *network_ip, const char *network_port, const char *network_proto,
+                                                             const char *metadata);
 /*!
  \brief Delete user registration
  \param [in] user
@@ -2628,36 +2628,36 @@ SWITCH_DECLARE(switch_status_t) switch_sql_queue_manager_push_confirm(switch_sql
 SWITCH_DECLARE(switch_status_t) switch_sql_queue_manager_push(switch_sql_queue_manager_t *qm, const char *sql, uint32_t pos, switch_bool_t dup);
 SWITCH_DECLARE(switch_status_t) switch_sql_queue_manager_destroy(switch_sql_queue_manager_t **qmp);
 SWITCH_DECLARE(switch_status_t) switch_sql_queue_manager_init_name(const char *name,
-																   switch_sql_queue_manager_t **qmp, 
-																   uint32_t numq, const char *dsn, uint32_t max_trans,
-																   const char *pre_trans_execute,
-																   const char *post_trans_execute,
-																   const char *inner_pre_trans_execute,
-																   const char *inner_post_trans_execute);
+                                                                   switch_sql_queue_manager_t **qmp, 
+                                                                   uint32_t numq, const char *dsn, uint32_t max_trans,
+                                                                   const char *pre_trans_execute,
+                                                                   const char *post_trans_execute,
+                                                                   const char *inner_pre_trans_execute,
+                                                                   const char *inner_post_trans_execute);
 
 #define switch_sql_queue_manager_init(_q, _n, _d, _m, _p1, _p2, _ip1, _ip2) switch_sql_queue_manager_init_name(__FILE__, _q, _n, _d, _m, _p1, _p2, _ip1, _ip2)
 
 SWITCH_DECLARE(switch_status_t) switch_sql_queue_manager_start(switch_sql_queue_manager_t *qm);
 SWITCH_DECLARE(switch_status_t) switch_sql_queue_manager_stop(switch_sql_queue_manager_t *qm);
 SWITCH_DECLARE(switch_status_t) switch_cache_db_execute_sql_event_callback(switch_cache_db_handle_t *dbh,
-																		   const char *sql, switch_core_db_event_callback_func_t callback, void *pdata, char **err);
+                                                                           const char *sql, switch_core_db_event_callback_func_t callback, void *pdata, char **err);
 
 SWITCH_DECLARE(void) switch_sql_queue_manager_execute_sql_callback(switch_sql_queue_manager_t *qm, const char *sql,
-																   switch_core_db_callback_func_t callback,
-																   void *pdata);
+                                                                   switch_core_db_callback_func_t callback,
+                                                                   void *pdata);
 SWITCH_DECLARE(void) switch_sql_queue_manager_execute_sql_callback_err(switch_sql_queue_manager_t *qm, const char *sql,
-																	   switch_core_db_callback_func_t callback,
-																	   switch_core_db_err_callback_func_t err_callback,
-																	   void *pdata);
+                                                                       switch_core_db_callback_func_t callback,
+                                                                       switch_core_db_err_callback_func_t err_callback,
+                                                                       void *pdata);
 
 SWITCH_DECLARE(void) switch_sql_queue_manager_execute_sql_event_callback(switch_sql_queue_manager_t *qm, const char *sql,
-																		 switch_core_db_event_callback_func_t callback,
-																		 void *pdata);
+                                                                         switch_core_db_event_callback_func_t callback,
+                                                                         void *pdata);
 SWITCH_DECLARE(void) switch_sql_queue_manager_execute_sql_event_callback_err(switch_sql_queue_manager_t *qm, const char *sql,
-																			 switch_core_db_event_callback_func_t callback,
-																			 switch_core_db_err_callback_func_t err_callback,
-																			 void *pdata);
-							
+                                                                             switch_core_db_event_callback_func_t callback,
+                                                                             switch_core_db_err_callback_func_t err_callback,
+                                                                             void *pdata);
+                            
 SWITCH_DECLARE(pid_t) switch_fork(void);
 
 SWITCH_DECLARE(int) switch_core_gen_certs(const char *prefix);

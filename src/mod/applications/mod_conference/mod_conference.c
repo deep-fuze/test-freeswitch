@@ -330,11 +330,11 @@ typedef struct {
 
 /*
  * MAX_NUMBER_OF_OUTPUT_NTHREADS: Threads that are used to run conference mixers
- * MAX_NUMBER_OF_OUTPUT_OTHREADS: Threads that are used for conference overflow
+ * globals.othreads: Threads that are used for conference overflow
  */
-#define MAX_NUMBER_OF_OUTPUT_NTHREADS 12
-#define MAX_NUMBER_OF_OUTPUT_OTHREADS ((N_CWC-1)*MAX_NUMBER_OF_OUTPUT_NTHREADS)
-#define MAX_NUMBER_OF_OUTPUT_THREADS (MAX_NUMBER_OF_OUTPUT_NTHREADS+MAX_NUMBER_OF_OUTPUT_OTHREADS)
+//#define MAX_NUMBER_OF_OUTPUT_NTHREADS 12
+//#define globals.othreads ((N_CWC-1)*MAX_NUMBER_OF_OUTPUT_NTHREADS)
+//#define globals.tthreads (MAX_NUMBER_OF_OUTPUT_NTHREADS+globals.othreads)
 
 /* Fuze Encoder Optimization */
 
@@ -345,6 +345,8 @@ typedef enum {
     INPUT_LOOP_RET_CNG = 3,
     INPUT_LOOP_RET_BREAK = 4
 } INPUT_LOOP_RET;
+
+// #define PROFILE 1
 
 typedef struct {
     // switch_event_t *event;
@@ -359,7 +361,9 @@ typedef struct {
     int leadin_over;
     switch_io_flag_t io_flags;
     switch_thread_id_t tid;
-
+#ifdef PROFILE
+    switch_time_t ts[10];
+#endif
     switch_time_t rx_time, max_time, rx_period_start;
 } input_loop_data_t;
 
@@ -406,6 +410,7 @@ struct participant_thread_data {
     /* condition variable to synchronize "overflow" threads */
     switch_thread_cond_t *cond;
     switch_mutex_t *cond_mutex;
+
 };
 
 #define PROCESS_AVG_CNT 3
@@ -423,6 +428,8 @@ typedef struct {
 
     switch_thread_cond_t *cond;
     switch_mutex_t *cond_mutex;
+
+    switch_time_t lock_time;
 
     uint64_t signaled;
     uint64_t run;
@@ -446,19 +453,18 @@ static struct {
     switch_event_channel_id_t event_channel_id;
 
     /* for IVRs */
-    filelist_t *filelist[MAX_NUMBER_OF_OUTPUT_THREADS];
+    filelist_t **filelist;
     switch_mutex_t *filelist_mutex;
 
     /* global threads for conference processing */
-    int number_of_output_threads;
     int start;
     switch_mutex_t *conference_thread_lock;
-    conference_thread_data_t conference_thread[MAX_NUMBER_OF_OUTPUT_THREADS];
-    switch_thread_t *output_thread[MAX_NUMBER_OF_OUTPUT_THREADS];
-    switch_time_t output_thread_time[MAX_NUMBER_OF_OUTPUT_THREADS];
-    int output_thread_dead[MAX_NUMBER_OF_OUTPUT_THREADS];
-    uint32_t conference_thread_line[MAX_NUMBER_OF_OUTPUT_THREADS];
-    uint32_t conference_thread_tid[MAX_NUMBER_OF_OUTPUT_THREADS];
+    conference_thread_data_t *conference_thread;
+    switch_thread_t **output_thread;
+    switch_time_t *output_thread_time;
+    int *output_thread_dead;
+    uint32_t *conference_thread_line;
+    uint32_t *conference_thread_tid;
 
     uint32_t conference_thread_lock_line;
     uint32_t conference_thread_lock_tid;
@@ -466,6 +472,11 @@ static struct {
     uint16_t max_participants_per_thread;
     uint16_t max_participants_per_othread;
     uint16_t min_sleep_per_thread;
+    switch_time_t conference_thread_lock_time;
+
+    int nthreads;
+    int othreads;
+    int tthreads;
 } globals;
 
 struct conference_obj;
@@ -576,6 +587,7 @@ typedef struct conference_obj {
     uint32_t rate;
     uint32_t interval;
     switch_mutex_t *mutex;
+    switch_time_t mutex_time;
     
     /* */
     conference_member_t *member_lists[NUMBER_OF_MEMBER_LISTS];
@@ -791,6 +803,8 @@ struct conference_member {
     uint8_t ianacode;
     uint8_t codec_id;
     uint8_t impl_id;
+    switch_time_t time_of_first_packet;
+    uint64_t data_sent;
 };
 
 typedef enum {
@@ -1323,6 +1337,27 @@ static const char *audio_flow(conference_member_t *member)
     return flow;
 }
 
+void conference_mutex_lock(conference_obj_t *conference) {
+    switch_time_t now = switch_time_now();
+    switch_mutex_lock(conference->mutex);
+    now = switch_time_now() - now;
+    if ((now) > 10000) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                          "TIMELOCK: Conference locked for a long time to acquire %" PRId64 "ms\n", now);
+    }
+    conference->mutex_time = switch_time_now();
+}
+
+void conference_mutex_unlock(conference_obj_t *conference) {
+    switch_time_t now = switch_time_now();
+    if ((now - conference->mutex_time) > 10000) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                          "TIMELOCK: Conference locked for a long time %" PRId64 "ms\n", (now - conference->mutex_time)/1000);
+    }
+    switch_mutex_unlock(conference->mutex);
+}
+
+
 static char *conference_rfc4579_render(conference_obj_t *conference, switch_event_t *event, switch_event_t *revent)
 {
     switch_xml_t xml, x_tag, x_tag1, x_tag2, x_tag3, x_tag4;
@@ -1339,10 +1374,10 @@ static char *conference_rfc4579_render(conference_obj_t *conference, switch_even
         abort();
     }
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     switch_snprintf(tmp, sizeof(tmp), "%u", conference->doc_version);
     conference->doc_version++;
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 
     if (!event || !(name = switch_event_get_header(event, "conference-name"))) {
         if (!(name = conference->name)) {
@@ -1809,10 +1844,10 @@ static cJSON *conference_json_render(conference_obj_t *conference, cJSON *req)
 
     switch_assert(json);
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     switch_snprintf(tmp, sizeof(tmp), "%u", conference->doc_version);
     conference->doc_version++;
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 
     if (!(name = conference->name)) {
         name = "conference";
@@ -2512,7 +2547,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     switch_assert(conference != NULL);
     switch_assert(member != NULL);
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     switch_mutex_lock(member->audio_in_mutex);
     switch_mutex_lock(member->audio_out_mutex);
     lock_member(member);
@@ -2528,6 +2563,8 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     meo_initialize(&member->meo);
     
     switch_queue_create(&member->dtmf_queue, 100, member->pool);
+
+    member->time_of_first_packet = 0;
 
     if (!switch_test_flag(member,MFLAG_NOCHANNEL)){
 
@@ -2558,7 +2595,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                 unlock_member(member);
                 switch_mutex_unlock(member->audio_out_mutex);
                 switch_mutex_unlock(member->audio_in_mutex);
-                switch_mutex_lock(conference->mutex);
+                conference_mutex_lock(conference);
                 return SWITCH_STATUS_FALSE;
             }
         }
@@ -2574,7 +2611,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
         }
 
         if (pFL == NULL) {
-            for (int i = 0; i < MAX_NUMBER_OF_OUTPUT_THREADS; i++) {
+            for (int i = 0; i < globals.tthreads; i++) {
                 /* add new conference write codec, allocate new conference entry */
                 if ((pFL = switch_core_alloc(globals.playlist_pool, sizeof(*pFL))) == 0) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "no memory for new filelist\n");
@@ -2583,7 +2620,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                     unlock_member(member);
                     switch_mutex_unlock(member->audio_out_mutex);
                     switch_mutex_unlock(member->audio_in_mutex);
-                    switch_mutex_lock(conference->mutex);
+                    conference_mutex_lock(conference);
                     return SWITCH_STATUS_FALSE;
                 }
                 memset(pFL, 0, sizeof(*pFL));
@@ -2642,6 +2679,12 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, 
                           "Adding member %d to listeners list\n", member->id);
         add_member_to_list(&conference->member_lists[eMemberListTypes_Listeners], member);
+
+        if (switch_core_session_get_cn_state(member->session)) {
+            switch_rtp_silence_transport(member->channel, 79);
+        } else {
+            switch_rtp_silence_transport(member->channel, 1500);
+        }
 
         member->frame_max = member->frame_max_on_mute;
     }
@@ -2812,11 +2855,11 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             switch_core_session_refresh_video(member->session);
 
             if (conference->video_floor_holder) {
-                switch_mutex_lock(conference->mutex);
+                conference_mutex_lock(conference);
                 if (conference->video_floor_holder) {
                     switch_core_session_refresh_video(conference->video_floor_holder->session);
                 }
-                switch_mutex_unlock(conference->mutex);
+                conference_mutex_unlock(conference);
             }
         }
 
@@ -2982,7 +3025,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     send_rfc_event(conference);
     send_json_event(conference);
 
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
     status = SWITCH_STATUS_SUCCESS;
 
     return status;
@@ -2992,7 +3035,7 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
     conference_member_t *member = NULL, *last = NULL;
     uint32_t g722cnt = 0, g711ucnt = 0, g711acnt = 0, othercnt = 0;
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     switch_mutex_lock(conference->member_mutex);
     
     for (member = conference->member_lists[eMemberListTypes_Speakers]; member;) {
@@ -3012,6 +3055,12 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
             member->frame_max = member->frame_max_on_mute;
             member->one_of_active = SWITCH_FALSE;
 
+            if (switch_core_session_get_cn_state(member->session)) {
+                switch_rtp_silence_transport(member->channel, 79);
+            } else {
+                switch_rtp_silence_transport(member->channel, 1500);
+            }
+
             if (last) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, 
                                   "Moving member %d from speakers to listeners\n", member->id);
@@ -3020,7 +3069,7 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
                 conference->member_lists[eMemberListTypes_Listeners] = member;
 
                 clear_member_state_locked(member, MFLAG_TALKING);
-                // switch_set_flag(member, MFLAG_NOTIFY_ACTIVITY);
+                switch_set_flag(member, MFLAG_NOTIFY_ACTIVITY);
 
                 member = last->next;
             } else {
@@ -3032,7 +3081,7 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
                 conference->member_lists[eMemberListTypes_Speakers] = member_next;
 
                 clear_member_state_locked(member, MFLAG_TALKING);
-                // switch_set_flag(member, MFLAG_NOTIFY_ACTIVITY);
+                switch_set_flag(member, MFLAG_NOTIFY_ACTIVITY);
 
                 member = member_next;
             }
@@ -3058,6 +3107,8 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
             /* frame_max: how many frames to buffer before sending a packet out ... just for fun we buffer more frames
              * in an effort to send less packets when we're muted */
             member->frame_max = 1;
+
+            switch_rtp_silence_transport(member->channel, 0);
 
             if (last) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, 
@@ -3135,7 +3186,7 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
     }
 
     switch_mutex_unlock(conference->member_mutex);
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 }
 
 static void conference_set_video_floor_holder(conference_obj_t *conference, conference_member_t *member, switch_bool_t force)
@@ -3163,7 +3214,7 @@ static void conference_set_video_floor_holder(conference_obj_t *conference, conf
     }
 
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     if (!member) {
         for (int i = 0; i < NUMBER_OF_MEMBER_LISTS; i++) {
             for (imember = conference->member_lists[i]; imember; imember = imember->next) {
@@ -3212,7 +3263,7 @@ static void conference_set_video_floor_holder(conference_obj_t *conference, conf
     }
     
     set_conference_state_unlocked(conference, CFLAG_FLOOR_CHANGE);
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 
     if (test_eflag(conference, EFLAG_FLOOR_CHANGE)) {
         switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, CONF_EVENT_MAINT);
@@ -3256,7 +3307,7 @@ static void conference_set_floor_holder(conference_obj_t *conference, conference
         }
     }
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     if (member) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_DEBUG1, "Adding floor %s\n",
                           switch_channel_get_name(member->channel));
@@ -3274,7 +3325,7 @@ static void conference_set_floor_holder(conference_obj_t *conference, conference
     }
 
     set_conference_state_unlocked(conference, CFLAG_FLOOR_CHANGE);
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 
     if (test_eflag(conference, EFLAG_FLOOR_CHANGE)) {
         switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, CONF_EVENT_MAINT);
@@ -3379,7 +3430,7 @@ static switch_status_t conference_del_member(conference_obj_t *conference, confe
         switch_ivr_dmachine_destroy(&member->dmachine);
     }
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     switch_mutex_lock(conference->member_mutex);
     switch_mutex_lock(member->audio_in_mutex);
     switch_mutex_lock(member->audio_out_mutex);
@@ -3497,7 +3548,7 @@ static switch_status_t conference_del_member(conference_obj_t *conference, confe
         }
     }
 
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
     status = SWITCH_STATUS_SUCCESS;
 
     return status;
@@ -3587,7 +3638,7 @@ static void *SWITCH_THREAD_FUNC conference_video_thread_run(switch_thread_t *thr
             yield = 0;
         }
 
-        switch_mutex_lock(conference->mutex);
+        conference_mutex_lock(conference);
 
         if (conference->video_floor_holder) {
             floor_holder = conference->video_floor_holder;
@@ -3609,13 +3660,13 @@ static void *SWITCH_THREAD_FUNC conference_video_thread_run(switch_thread_t *thr
         session = floor_holder->session;
 
         if ((status = switch_core_session_read_lock(session)) == SWITCH_STATUS_SUCCESS) {
-            switch_mutex_unlock(conference->mutex);
+            conference_mutex_unlock(conference);
             if (!switch_channel_ready(switch_core_session_get_channel(session))) {
                 status = SWITCH_STATUS_FALSE;
             } else {
                 status = switch_core_session_read_video_frame(session, &vid_frame, SWITCH_IO_FLAG_NONE, 0);
             }
-            switch_mutex_lock(conference->mutex);
+            conference_mutex_lock(conference);
             switch_core_session_rwunlock(session);
         }
 
@@ -3631,8 +3682,8 @@ static void *SWITCH_THREAD_FUNC conference_video_thread_run(switch_thread_t *thr
 
         memcpy(buf, vid_frame->packet, vid_frame->packetlen);
 
-        switch_mutex_unlock(conference->mutex);
-        switch_mutex_lock(conference->mutex);
+        conference_mutex_unlock(conference);
+        conference_mutex_lock(conference);
         want_refresh = 0;
 
         if (switch_test_flag(conference, CFLAG_FLOOR_CHANGE)) {
@@ -3670,7 +3721,7 @@ static void *SWITCH_THREAD_FUNC conference_video_thread_run(switch_thread_t *thr
         }
 
     do_continue:
-        switch_mutex_unlock(conference->mutex);
+        conference_mutex_unlock(conference);
     }
 
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Video thread ending for conference %s\n", conference->name);
@@ -3914,7 +3965,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
     
     conference_reconcile_member_lists(conference);
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
 
     has_file_data = ready = total = 0;
 
@@ -4705,7 +4756,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             switch_mutex_unlock(omember->audio_out_mutex);
 
             if (!ok) {
-                switch_mutex_unlock(conference->mutex);
+                conference_mutex_unlock(conference);
                 return CONFERENCE_LOOP_RET_BAD_BUFFER_WRITE;
             }
         }
@@ -4736,7 +4787,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         set_conference_state_unlocked(conference, CFLAG_DESTRUCT | CFLAG_ENDCONF_FORCED);
     }
 
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 
     return CONFERENCE_LOOP_RET_OK;
 }
@@ -4770,10 +4821,10 @@ static void conference_thread_stop(conference_obj_t *conference)
         }
     }
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
 
     if (conference->stopping) {
-        switch_mutex_unlock(conference->mutex);
+        conference_mutex_unlock(conference);
         return;
     } else {
         conference->stopping = SWITCH_TRUE;
@@ -4857,7 +4908,7 @@ static void conference_thread_stop(conference_obj_t *conference)
         }
     }
     switch_mutex_unlock(conference->member_mutex);
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 
     /* allow other threads to give up mutex? */
     switch_yield(1000000);
@@ -5192,7 +5243,7 @@ static void conference_loop_fn_mute_all_toggle(conference_member_t *cmd_member, 
         return;
     }
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
 
     /*
      * (un)mute-all by host overwrites attendee's preference.
@@ -5239,7 +5290,7 @@ static void conference_loop_fn_mute_all_toggle(conference_member_t *cmd_member, 
         set_conference_state_unlocked(conference, CFLAG_INDICATE_MUTE);
     }
 
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 }
 
 static switch_status_t conf_api_mute_lock_all(conference_obj_t *conference, switch_stream_handle_t *stream, void *data)
@@ -6062,6 +6113,61 @@ static void process_dtmf(conference_member_t *member)
     }
 }
 
+
+/* marshall frames from the call leg to the conference thread for muxing to other call legs */
+static void conference_loop_input_socket_read(input_loop_data_t *il)
+{
+    conference_member_t *member = il->member;
+    switch_core_session_t *session = member->session;
+    switch_channel_t *channel = il->channel;
+
+    if (!(switch_test_flag(member, MFLAG_RUNNING) && switch_channel_ready(channel))) {
+        return;
+    }
+
+    if (!switch_test_flag(member, MFLAG_ITHREAD)) {
+        return;
+    }
+
+    if (switch_channel_ready(channel) && switch_channel_test_app_flag(channel, CF_APP_TAGGED)) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "Input Timer: switch yield\n");
+        /* switch_yield(100000); */
+        return;
+    }
+
+    /* Read a frame */
+    /* MQT-1766 */
+    if (switch_test_flag(member, MFLAG_CAN_SPEAK)) {
+        /* not muted */
+        if (il->io_flags & SWITCH_IO_FLAG_CANT_SPEAK) {
+            il->io_flags |= SWITCH_IO_FLAG_CLEAR_LOST;
+        }
+        il->io_flags &= ~SWITCH_IO_FLAG_CANT_SPEAK;
+    } else {
+        if (switch_test_flag(member, MFLAG_USE_FAKE_MUTE)) {
+            /* muted on the client side, we keep it unmuted here */
+            il->io_flags &= ~SWITCH_IO_FLAG_CANT_SPEAK;
+        } else {
+            /* muted, purge jitter buffer when entering muted state, or when using encoded frame rather than doing encoding */
+            il->io_flags |= SWITCH_IO_FLAG_CANT_SPEAK;
+        }
+    }
+
+    if (switch_core_session_get_cn_state(member->session)) {
+        switch_rtp_silence_transport(member->channel, 79);
+        il->io_flags |= SWITCH_IO_FLAG_CANT_SPEAK;
+    }
+
+    /* put packets into active speaker jitter buffer if not muted */
+    if ((member->one_of_active == SWITCH_TRUE) && (switch_test_flag(member, MFLAG_TALKING))) {
+        il->io_flags |= SWITCH_IO_FLAG_ACTIVE_TALKER;
+    } else {
+        il->io_flags &= ~SWITCH_IO_FLAG_ACTIVE_TALKER;
+    }
+
+    switch_core_session_fast_read_frame_from_socket(session, &il->read_frame, il->io_flags, 0);
+}
+
 /* marshall frames from the call leg to the conference thread for muxing to other call legs */
 static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
 {
@@ -6069,7 +6175,6 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
     switch_core_session_t *session = member->session;
     switch_channel_t *channel = il->channel;
     switch_status_t status;
-    switch_time_t send_time;
     switch_bool_t can_speak = SWITCH_FALSE;
 
     if (!(switch_test_flag(member, MFLAG_RUNNING) && switch_channel_ready(channel))) {
@@ -6079,7 +6184,6 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
     if (!switch_test_flag(member, MFLAG_ITHREAD)) {
         return INPUT_LOOP_RET_DONE;
     }
-
 
     if (switch_channel_ready(channel) && switch_channel_test_app_flag(channel, CF_APP_TAGGED)) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "Input Timer: switch yield\n");
@@ -6096,10 +6200,6 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
         }
         il->io_flags &= ~SWITCH_IO_FLAG_CANT_SPEAK;
     } else {
-#ifdef BEFORE_RADUS_CHANGE
-        /* muted, purge jitter buffer when entering muted state, or when using encoded frame rather than doing encoding */
-        il->io_flags |= SWITCH_IO_FLAG_CANT_SPEAK;
-#else
         if (switch_test_flag(member, MFLAG_USE_FAKE_MUTE)) {
             /* muted on the client side, we keep it unmuted here */
             il->io_flags &= ~SWITCH_IO_FLAG_CANT_SPEAK;
@@ -6107,10 +6207,10 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
             /* muted, purge jitter buffer when entering muted state, or when using encoded frame rather than doing encoding */
             il->io_flags |= SWITCH_IO_FLAG_CANT_SPEAK;
         }
-#endif
     }
 
     if (switch_core_session_get_cn_state(member->session)) {
+        switch_rtp_silence_transport(member->channel, 79);
         il->io_flags |= SWITCH_IO_FLAG_CANT_SPEAK;
     }
 
@@ -6121,8 +6221,17 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
         il->io_flags &= ~SWITCH_IO_FLAG_ACTIVE_TALKER;
     }
 
-    status = switch_core_session_fast_read_frame_from_socket(session, &il->read_frame, il->io_flags, 0, &send_time);
-    status = switch_core_session_fast_read_frame_from_jitterbuffer(session, &il->read_frame, il->io_flags, 0, &send_time);
+#ifdef PROFILE
+    il->ts[0] = switch_time_now();
+    status = switch_core_session_fast_read_frame_from_socket(session, &il->read_frame, il->io_flags, 0);
+    il->ts[0] = switch_time_now() - il->ts[0];
+    il->ts[1] = switch_time_now();
+    status = switch_core_session_fast_read_frame_from_jitterbuffer(session, &il->read_frame, il->io_flags, 0);
+    il->ts[1] = switch_time_now() - il->ts[1];
+#else
+    status = switch_core_session_fast_read_frame_from_socket(session, &il->read_frame, il->io_flags, 0);
+    status = switch_core_session_fast_read_frame_from_jitterbuffer(session, &il->read_frame, il->io_flags, 0);
+#endif
 
     if (status == SWITCH_STATUS_FALSE || !il->read_frame || !il->read_frame->datalen) {
         /*
@@ -6146,8 +6255,6 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
             }
         }
         
-        switch_mutex_unlock(member->read_mutex);
-
         return INPUT_LOOP_RET_NO_FRAME;
     }
 
@@ -6180,6 +6287,8 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
             if (++il->hangover_hits >= il->hangover) {
                 il->hangover_hits = il->hangunder_hits = 0;
                 clear_member_state_locked(member, MFLAG_TALKING);
+                switch_set_flag(member, MFLAG_NOTIFY_ACTIVITY);
+
                 member_update_status_field(member);
                 check_agc_levels(member);
                 clear_avg(member);
@@ -6348,7 +6457,6 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
     }
 
     /* skip frames that are not actual media or when we are muted or silent */
-/* xxx this is where i left off with can_speak */
     if ((switch_test_flag(member, MFLAG_TALKING) || 
          member->energy_level == 0 || 
          switch_test_flag(member->conference, CFLAG_AUDIO_ALWAYS) || 
@@ -6547,32 +6655,56 @@ static void launch_conference_thread(int i, switch_memory_pool_t *pool)
 }
     
 #define conference_thread_list_lock(i, tid) conference_thread_list_lock_line(i, tid, __LINE__)
+#define conference_thread_list_lock_low(i, tid) conference_thread_list_lock_low_line(i, tid, __LINE__)
 
 switch_bool_t conference_thread_list_lock_line(int i, uint32_t tid, int line) {
-#if 0
-    int j = 0;
-    switch_bool_t success = SWITCH_FALSE;
-    while (j < 1000) {
-        if (switch_mutex_trylock(globals.conference_thread[i].lock) == SWITCH_STATUS_SUCCESS) {
-            success = SWITCH_TRUE;
-            break;
-        }
-        j++;
-    }
-    if (!success) {
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "unable to acquire lock for loop %d held by T%x at line %d\n", 
-                          i, globals.conference_thread_tid[i], globals.conference_thread_line[i]);
-        return SWITCH_FALSE;
-    }
-#else
+    switch_time_t now = switch_time_now();
+    uint32_t prev_line = globals.conference_thread_line[i];
+    uint32_t prev_thread = globals.conference_thread_tid[i];
+
     switch_mutex_lock(globals.conference_thread[i].lock);
-#endif
+    now = switch_time_now() - now;
+    if (now > 20000) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                          "TIMELOCK: conference_thread_lock T%d:%d(<-T%u:%d) took a long time to acquire lock %" PRId64 "\n",
+                          i, line, prev_thread, prev_line, now/1000);
+    }
+    globals.conference_thread[i].lock_time = switch_time_now();
     globals.conference_thread_line[i] = line;
     globals.conference_thread_tid[i] = tid;
     return SWITCH_TRUE;
 }
 
-switch_bool_t release_conference_thread_list_lock(int i) {
+switch_bool_t conference_thread_list_lock_low_line(int i, uint32_t tid, int line) {
+    switch_time_t now = switch_time_now();
+    uint32_t prev_line = globals.conference_thread_line[i];
+    uint32_t prev_thread = globals.conference_thread_tid[i];
+
+    while (switch_mutex_trylock(globals.conference_thread[i].lock) != SWITCH_STATUS_SUCCESS) {
+        switch_yield(50);
+    }
+    now = switch_time_now() - now;
+
+    if (now > 1000*1000) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                          "TIMELOCK: conference_thread_lock LOW T%d:%d(<-T%u:%d) took a long time to acquire lock %" PRId64 "\n",
+                          i, line, prev_thread, prev_line, now/1000);
+    }
+    globals.conference_thread[i].lock_time = switch_time_now();
+    globals.conference_thread_line[i] = line;
+    globals.conference_thread_tid[i] = tid;
+    return SWITCH_TRUE;
+}
+
+
+switch_bool_t release_conference_thread_list_lock(int i, int runs) {
+    switch_time_t now = switch_time_now();
+    int runs_1 = runs ? runs : 1;
+    if ((now - globals.conference_thread[i].lock_time)/runs_1 > 40000) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                          "TIMELOCK: conference_thread_lock held by T%d:%d for a long time %" PRId64 "ms over %d runs\n",
+                          i, globals.conference_thread_line[i], (now - globals.conference_thread[i].lock_time)/1000, runs);
+    }
     globals.conference_thread_line[i] = 0;
     globals.conference_thread_tid[i] = 0;
     switch_mutex_unlock(globals.conference_thread[i].lock);
@@ -6582,30 +6714,29 @@ switch_bool_t release_conference_thread_list_lock(int i) {
 #define get_conference_thread_lock(tid) get_conference_thread_lock_line(tid, __LINE__)
 
 switch_bool_t get_conference_thread_lock_line(uint32_t tid, int line) {
-#if 0
-    int j = 0;
-    switch_bool_t success = SWITCH_FALSE;
-    while (j < 1000) {
-        if (switch_mutex_trylock(globals.conference_thread_lock) == SWITCH_STATUS_SUCCESS) {
-            success = SWITCH_TRUE;
-            break;
-        }
-        j++;
-    }
-    if (!success) {
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "unable to acquire global output lock by thread %d held by T%x at line %d\n",
-                          (uint32_t)switch_thread_self(), globals.conference_thread_lock_tid, globals.conference_thread_lock_line);
-        return SWITCH_FALSE;
-    }
-#else
+    switch_time_t now = switch_time_now();
+    uint32_t prev_line = globals.conference_thread_lock_line;
+    uint32_t prev_tid = globals.conference_thread_lock_tid;
     switch_mutex_lock(globals.conference_thread_lock);
-#endif
+    now = switch_time_now() - now;
+    if (now > 20000) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                          "TIMELOCK: conference_thread_lock T%d:%d(<-T%d:%d) took a long time to acquire lock %" PRId64"\n",
+                          tid, line, prev_tid, prev_line, now);
+    }
+    globals.conference_thread_lock_time = switch_time_now();
     globals.conference_thread_lock_line = line;
     globals.conference_thread_lock_tid = tid;
     return SWITCH_TRUE;
 }
 
 switch_bool_t release_conference_thread_lock() {
+    switch_time_t now = switch_time_now();
+    if ((now - globals.conference_thread_lock_time) > 20000) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                          "TIMELOCK: conference_thread_lock:%d long time %" PRId64 "\n",
+                          globals.conference_thread_lock_line, (now - globals.conference_thread_lock_time)/1000);
+    }
     globals.conference_thread_lock_line = 0;
     globals.conference_thread_lock_tid = 0;
     switch_mutex_unlock(globals.conference_thread_lock);
@@ -6745,10 +6876,13 @@ typedef enum {
     OUTPUT_LOOP_FAILED = 1,
     OUTPUT_LOOP_HANGUP = 2,
     PARTICIPANT_THREAD_DATA_TOO_SOON = 3,
-    OUTPUT_LOOP_ALREADY_STOPPED =4
+    OUTPUT_LOOP_ALREADY_STOPPED = 4,
+    OUTPUT_LOOP_OK_NULL_FRAME = 5,
+    OUTPUT_LOOP_OK_NOT_SENT = 6,
+    OUTPUT_LOOP_OK_NO_FRAME = 7
 } OUTPUT_LOOP_RET;
 
-OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switch_timer_t *timer);
+OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switch_timer_t *timer, uint32_t *time_since_last_send, int *sent_frames);
 OUTPUT_LOOP_RET process_participant_output_end_member(participant_thread_data_t *ols);
 SWITCH_DECLARE(void) switch_close_transport(switch_channel_t *channel);
 SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int level_in, int level_out, int active);
@@ -6778,9 +6912,9 @@ static void start_conference_loops(conference_member_t *member)
     ret = conference_list_add(member->conference, &ols);
 
     if (ret != -1) {
-        int idx = ret / MAX_NUMBER_OF_OUTPUT_NTHREADS;
-        member->meo.cwc = cwc_get(member->conference->ceo.cwc[idx], member->orig_read_impl.codec_id, member->orig_read_impl.impl_id);
-        member->meo.filelist = filelist_get(globals.filelist[ret], member->orig_read_impl.codec_id, member->orig_read_impl.impl_id);
+        int idx = ret / globals.nthreads;
+        member->meo.cwc = cwc_get(member->conference->ceo.cwc[idx], member->codec_id, member->impl_id);
+        member->meo.filelist = filelist_get(globals.filelist[ret], member->codec_id, member->impl_id);
     }
 
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "start_conference_loops mid:%s/%d conference_list_added to %d\n",
@@ -6837,7 +6971,7 @@ static void check_conference_loops(int idx)
 {
     switch_time_t now = switch_time_now();
     
-    for (int i = 0; i < MAX_NUMBER_OF_OUTPUT_NTHREADS; i++) {
+    for (int i = 0; i < globals.nthreads; i++) {
         /* 1 second */
         if (globals.conference_thread[i].count > 0) {
             if (now - globals.output_thread_time[i] > 1000000) {
@@ -6866,9 +7000,12 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
     switch_time_t next_wake_up;
     switch_time_t time_asleep_sum = 0;
     uint32_t behind = 0;
-    uint32_t overflow_number = list->idx/MAX_NUMBER_OF_OUTPUT_NTHREADS;
+    uint32_t overflow_number = list->idx/globals.nthreads;
     switch_time_t status_output_period = PROCESSING_PERIOD;
-    int delta = 0;
+    int runs = 0;
+#ifdef PROFILE
+    switch_time_t ts[10];
+#endif
 
     /*
      * There's an edge case where we might have 2 threads processing a single queue.  The last thread
@@ -6877,7 +7014,6 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
     get_conference_thread_lock(tid);
     list->tid = tid;
     release_conference_thread_lock();
-    //switch_mutex_unlock(globals.conference_thread_lock);
     
     if (switch_core_timer_init(&timer, "soft", interval, tsamples, NULL) != SWITCH_STATUS_SUCCESS) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Timer Setup Failed.  Conference Cannot Start\n");
@@ -6892,18 +7028,35 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
      * for overflows threads: run on condition variable
      * for normal threads: wake up every 20ms
      */
-    if (list->idx >= MAX_NUMBER_OF_OUTPUT_NTHREADS) {
+#if 0
+    if (list->idx >= globals.nthreads) {
         switch_mutex_lock(globals.conference_thread[list->idx].cond_mutex);
     }
+#endif
     next_wake_up = switch_time_now() + 20000;
 
-    list->signaled = 0;
-    list->run = 0;
+    conference_thread_list_lock(list->idx, tid);
+#ifdef PROFILE
+    ts[0] = ts[1] = ts[2] = ts[3] = ts[4] = ts[5] = ts[6] = switch_time_now();
+#endif
+
+    if (list->tid < globals.nthreads) {
+        switch_core_thread_set_cpu_affinity(list->tid);
+    }
 
     while (1) {
+        int count = 0, count_null = 0, count_not_sent = 0, count_ok = 0, count_no_frame = 0, count_long_sends = 0;
+        uint32_t time_since_last_output;
+        int sent_frames;
+        int count_sent_frames = 0;
+        float total_sent_frames = 0;
+        float avg_time_since_last_output = 0.0;
         globals.output_thread_time[list->idx] = loop_now;
 
         /* luke todo put in a stop condition */
+#ifdef PROFILE
+        ts[0] = switch_time_now();
+#endif
 
         if (list->count == 0) {
             status_output_period = PROCESSING_PERIOD_WHILE_IDLE;
@@ -6934,13 +7087,239 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             loop_period_start = loop_now;
             time_asleep_sum = 0;
             min_time = 20000;
+
+            for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
+                uint64_t data_time;
+                uint64_t time_in_meeting;
+                if (ols->stopping) { continue; }
+
+                time_in_meeting = (switch_time_now() - ols->member->time_of_first_packet)/1000;
+                data_time = (ols->member->data_sent/8);
+
+                if (abs(time_in_meeting-data_time) > 250 || ols->member->one_of_active) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_WARNING,
+                                      "time in meeting: %" PRId64 "ms data time: %" PRId64 "ms delta: %" PRId64 "ms\n",
+                                      time_in_meeting, data_time, time_in_meeting-data_time);
+                }
+            }
         }
 
-        if (conference_thread_list_lock(list->idx, tid) == SWITCH_TRUE) {
-            int count = 0;
+#ifdef PROFILE
+        ts[1] = switch_time_now();
+#endif
+        for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
+            INPUT_LOOP_RET ret;
+            switch_time_t now = switch_time_now();
+            count += 1;
+            if (count > 1000) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
+            }
+            if (ols->stopping) { continue; }
+
+            /* if conference belongs to this thread */
+            if (ols->member->conference->list_idx == list->idx && ols->member->conference->processed) {
+                ols->member->conference->processed = SWITCH_FALSE;
+            }
+
+            if ((now - ols->ild->rx_period_start) > PROCESSING_PERIOD) {
+                ols->ild->rx_period_start = now;
+                ols->ild->max_time = 0;
+                ols->ild->rx_time = 0;
+            }
+
+            now = switch_time_now();
+            ret = conference_loop_input(ols->ild);
+            now = switch_time_now() - now;
+
+#ifdef PROFILE
+            if (now > 2000) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_WARNING,
+                                  "conference_loop_input took %" PRId64 "us [%" PRId64 " %" PRId64 " %" PRId64 " %" PRId64 " %" PRId64 "]\n",
+                                  now, ols->ild->ts[0], ols->ild->ts[1], ols->ild->ts[2], ols->ild->ts[3],ols->ild->ts[4]);
+            }
+#endif
+
+            ols->ild->rx_time += now;
+            if (now > ols->ild->max_time) {
+                ols->ild->max_time = now;
+            }
+
+            if (ret == INPUT_LOOP_RET_YIELD) {
+                /* ok */
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                                  "input loop %d processing mid:%s/%d yield\n",
+                                  list->idx, ols->member->mname, ols->member->id);
+            } else if (ret == INPUT_LOOP_RET_NO_FRAME) {
+                /* ok */
+            } else if (ret == INPUT_LOOP_RET_CNG) {
+                /* ok */
+            } else if (ret == INPUT_LOOP_RET_BREAK) {
+                /* oh no! */
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                                  "input loop %d processing mid:%s/%d break\n",
+                                  list->idx, ols->member->mname, ols->member->id);
+                conference_loop_input_cleanup(ols->ild); /* luke todo!!!! */
+            }
+        }
+
+#ifdef PROFILE
+        ts[2] = switch_time_now();
+        if ((ts[2] - ts[1]) > 20000) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                              "1:%" PRId64 " 2:%" PRId64 " 3:%" PRId64 " 4:%" PRId64 " 5:%" PRId64 " 6:%" PRId64 "\n",
+                              (ts[1]-ts[0])/1000,
+                              (ts[2]-ts[1])/1000,
+                              (ts[3]-ts[2])/1000,
+                              (ts[4]-ts[3])/1000,
+                              (ts[5]-ts[4])/1000,
+                              (ts[6]-ts[5])/1000);
+        }
+#endif
+
+        /*
+         * this covers the synchronization for overflow threads
+         */
+        if (list->idx >= globals.nthreads) {
+            int move_count = 0;
+            participant_thread_data_t *prev = NULL;
+            switch_time_t time_asleep = 0;
+            switch_time_t current_time = switch_time_now();
+
+            switch_mutex_lock(globals.conference_thread[list->idx].cond_mutex);
+            release_conference_thread_list_lock(list->idx, runs);
+            while (globals.conference_thread[list->idx].run >= globals.conference_thread[list->idx].signaled) {
+                switch_thread_cond_timedwait(globals.conference_thread[list->idx].cond, globals.conference_thread[list->idx].cond_mutex, 20000);
+                conference_thread_list_lock(list->idx, tid);
+                for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
+                    if (ols->stopping) { continue; }
+                    /* if conference belongs to this thread */
+                    if (ols->member->conference->list_idx == list->idx && ols->member->conference->processed) {
+                        ols->member->conference->processed = SWITCH_FALSE;
+                    }
+                    conference_loop_input_socket_read(ols->ild);
+                }
+                release_conference_thread_list_lock(list->idx, runs);
+                runs = 0;
+            }
+            conference_thread_list_lock(list->idx, tid);
+            switch_mutex_unlock(globals.conference_thread[list->idx].cond_mutex);
+            time_asleep = switch_time_now() - current_time;
+            time_asleep_sum += time_asleep;
+            globals.conference_thread[list->idx].run += 1;
+            runs += 1;
+
+            loop_now = switch_time_now();
+            count = 0;
+            /*
+             * Make sure that each conference that we have here has some participants in the main thread.
+             * First check if we want to move any participants before making the decision to the "expensive" lock
+             * and move.
+             */
+            for (participant_thread_data_t *ols = list->loop; ols; ) {
+                count += 1;
+                if (count > 1000) {
+                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
+                }
+
+                if (ols->stopping) { ols = ols->next; continue; }
+                if ((ols->member->conference->participants_per_thread[0] < MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD) ||
+                    (ols->member->one_of_active)) {
+                    /* move me */
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO, "Moving member %d from list: %d to list: %d\n",
+                                      ols->member->id, list->idx, ols->member->conference->list_idx);
+                    move_count += 1;
+                }
+                ols = ols->next;
+            }
+
+#ifdef SIMULATE_MOVING
+            move_count += (rand() % 100 < 10 ? 1 : 0);
+#endif
+            if (move_count > 0) {
+                int moved = 0;
+                /*
+                 * This lock is expensive as there is only one such lock shared across all threads.
+                 * Grab this lock with extreme caution!
+                 */
+                count = 0;
+                /*
+                 * Make sure that each conference that we have here has some participants in the main thread.
+                 * The simplified conference processing model requires this otherwise mixing will not happen
+                 * as mixing ONLY happens on the main thread.
+                 */
+                for (participant_thread_data_t *ols = list->loop; ols; ) {
+#ifdef SIMULATE_MOVING
+                    int rand_move = rand() % 100;
+#else
+                    int rand_move = 100;
+#endif
+                    count += 1;
+                    if (count > 1000) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
+                    }
+
+                    if (ols->stopping) { ols = ols->next; continue; }
+                    if ((ols->member->conference->participants_per_thread[0] < MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD) ||
+                        (ols->member->one_of_active) || (rand_move < 10 && !moved)) {
+                        /* move me */
+                        int to = ols->member->conference->list_idx;
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO, "Moving member %d from list: %d to list: %d\n",
+                                          ols->member->id, list->idx, to);
+
+                        ols->member->meo.cwc = cwc_get(ols->member->conference->ceo.cwc[0],
+                                                       ols->member->codec_id, ols->member->impl_id);
+                        ols->member->meo.filelist = filelist_get(globals.filelist[0],
+                                                                 ols->member->codec_id, ols->member->impl_id);
+                        meo_reset_idx(&ols->member->meo);
+
+                        if (ols->member->meo.cwc == NULL || ols->member->meo.filelist == NULL) {
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_ERROR,
+                                              "FAILED to set cwc:%s filelist:%s on move of member %d codec: %d/%d\n",
+                                              (ols->member->meo.cwc == NULL ? "null" : "set"),
+                                              (ols->member->meo.filelist == NULL ? "null" : "set"),
+                                              ols->member->id, ols->member->codec_id, ols->member->impl_id);
+                        }
+
+                        if (prev == NULL) {
+                            list->loop = ols->next;
+                            ols->next = NULL;
+                            if (ols->member->conference->list_idx == -1) {
+                                ols->member->conference->list_idx = overflow_number;
+                            }
+                            conference_list_add_to_idx(ols->member->conference, ols, ols->member->conference->list_idx);
+                            ols->new_ol = SWITCH_TRUE;
+                            ols = list->loop;
+                            globals.conference_thread[list->idx].count -= 1;
+                        } else {
+                            prev->next = ols->next;
+                            ols->next = NULL;
+                            if (ols->member->conference->list_idx == -1) {
+                                ols->member->conference->list_idx = overflow_number;
+                            }
+                            conference_list_add_to_idx(ols->member->conference, ols, ols->member->conference->list_idx);
+                            ols->new_ol = SWITCH_TRUE;
+                            ols = prev->next;
+                            globals.conference_thread[list->idx].count -= 1;
+                        }
+                    } else {
+                        prev = ols;
+                        ols = ols->next;
+                    }
+                    if (rand_move < 10) {
+                        moved = 1;
+                    }
+                }
+            } /* move_count > 0 */
+        }
+
+#ifdef PROFILE
+        ts[3] = switch_time_now();
+#endif
+        if (list->idx < globals.nthreads) {
+            count = 0;
             for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
-                INPUT_LOOP_RET ret;
-                switch_time_t now = switch_time_now();
+                CONFERENCE_LOOP_RET ret;
+                switch_bool_t stop = SWITCH_FALSE;
                 count += 1;
                 if (count > 1000) {
                     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
@@ -6948,368 +7327,240 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                 if (ols->stopping) { continue; }
 
                 /* if conference belongs to this thread */
-                if (ols->member->conference->list_idx == list->idx && ols->member->conference->processed) {
-                    ols->member->conference->processed = SWITCH_FALSE;
+                if (ols->member->conference->list_idx != list->idx || ols->member->conference->processed) {
+                    continue;
                 }
 
-                if ((now - ols->ild->rx_period_start) > PROCESSING_PERIOD) {
-                    ols->ild->rx_period_start = now;
-                    ols->ild->max_time = 0;
-                    ols->ild->rx_time = 0;
+                /* Main monitor thread (1 per distinct conference room) */
+                ret = conference_thread_run(ols->member->conference);
+                ols->member->conference->processed = SWITCH_TRUE;
+
+                switch (ret) {
+                case CONFERENCE_LOOP_RET_STOP:
+                    /* conference is over ... end */
+                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                                      "conference stopping\n");
+                    stop = SWITCH_TRUE;
+                    break;
+                case CONFERENCE_LOOP_RET_BAD_BUFFER_WRITE:
+                    /* end the conference */
+                    stop = SWITCH_TRUE;
+                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
+                                      "conference stopping due to CONFERENCE_LOOP_RET_BAD_BUFFER_WRITE\n");
+                    break;
+                case CONFERENCE_LOOP_RET_OK:
+                default:
+                    /* do nothing! */
+                    break;
                 }
-                
-                now = switch_time_now();
-                ret = conference_loop_input(ols->ild);
+
+                if (stop) {
+                    /* we need to stop all channels in this loop? */
+                    for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
+                        set_ols_stopping(ols);
+                        if (ols->ild) {
+                            switch_close_transport(ols->ild->channel);
+                        }
+                        switch_monitor_change_tid(ols->oldtid, switch_core_get_monitor_index(ols->member->session));
+                        switch_thread_cond_signal(ols->cond);
+                    }
+                    break;
+                }
+            }
+        }
+
+        for (int idx = list->idx+globals.nthreads; idx < globals.tthreads; idx+=globals.nthreads) {
+            switch_mutex_lock(globals.conference_thread[idx].cond_mutex);
+            if (globals.conference_thread[idx].count > 0) {
+                globals.conference_thread[idx].signaled += 1;
+                switch_mutex_unlock(globals.conference_thread[idx].cond_mutex);
+                switch_thread_cond_signal(globals.conference_thread[idx].cond);
+            } else {
+                switch_mutex_unlock(globals.conference_thread[idx].cond_mutex);
+            }
+        }
+
+#ifdef PROFILE
+        ts[4] = switch_time_now();
+        if ((ts[4] - ts[5]) > 40000) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                              "1:%" PRId64 " 2:%" PRId64 " 3:%" PRId64 " 4:%" PRId64 " 5:%" PRId64 " 6:%" PRId64 "\n",
+                              (ts[1]-ts[0])/1000,
+                              (ts[2]-ts[1])/1000,
+                              (ts[3]-ts[2])/1000,
+                              (ts[4]-ts[3])/1000,
+                              (ts[5]-ts[4])/1000,
+                              (ts[6]-ts[5])/1000);
+        }
+#endif
+
+        for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
+            OUTPUT_LOOP_RET ret = OUTPUT_LOOP_OK;
+
+            if (ols->stopping) { continue; }
+            if (!ols->member->meo.cwc) { continue; }
+
+            if (!ols->initialized) {
+                switch_mutex_lock(ols->member->meo.cwc->codec_mutex);
+                meo_reset_idx(&ols->member->meo);
+                switch_mutex_unlock(ols->member->meo.cwc->codec_mutex);
+                meo_start(&ols->member->meo);
+                ols->initialized = SWITCH_TRUE;
+            }
+
+            if (ols->new_ol) {
+                ols->new_ol = SWITCH_FALSE;
+
+                if (conference_loop_input_setup(ols->ild) != SWITCH_STATUS_SUCCESS) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_ERROR,
+                                      "Failed to create input loop for mid:%s/%d\n",
+                                      ols->member->mname, ols->member->id);
+                }
+                ols->tid = tid;
+                switch_monitor_change_tid(tid, switch_core_get_monitor_index(ols->member->session));
+                switch_monitor_change_desc(tid, switch_core_get_monitor_index(ols->member->session), "conference_thread");
+                ols->member->meo.cwc = cwc_get(ols->member->conference->ceo.cwc[list->idx/globals.nthreads],
+                                               ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id);
+                ols->member->meo.filelist = filelist_get(globals.filelist[list->idx],
+                                                         ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id);
+                switch_channel_change_thread(ols->channel);
+            }
+
+            if (ols->starting && !switch_test_flag(ols->member, MFLAG_ITHREAD) && ols->sanity > 0) {
+                ols->sanity -= 1;
+                continue;
+            } else if (ols->starting && switch_test_flag(ols->member, MFLAG_ITHREAD)) {
+                ols->starting = SWITCH_FALSE;
+                ols->sanity = 0;
+            }
+
+            if (!switch_test_flag(ols->member, MFLAG_RUNNING) || !switch_test_flag(ols->member, MFLAG_ITHREAD) ||
+                !switch_channel_ready(ols->channel)) {
+                set_ols_stopping(ols);
+                if (ols->ild) {
+                    switch_close_transport(ols->ild->channel);
+                }
+                switch_monitor_change_tid(ols->oldtid, switch_core_get_monitor_index(ols->member->session));
+                switch_thread_cond_signal(ols->cond);
+                continue;
+            }
+
+            if (!ols->stopping) {
+                switch_time_t now = switch_time_now();
+
+                if ((now - ols->rx_period_start) > PROCESSING_PERIOD) {
+                    ols->rx_period_start = now;
+                    ols->max_time = 0;
+                    ols->rx_time = 0;
+                }
+
+                ret = process_participant_output(ols, &timer, &time_since_last_output, &sent_frames);
+                if (time_since_last_output > 0) {
+                    avg_time_since_last_output += time_since_last_output;
+                    count_long_sends += 1;
+                }
+                if (sent_frames > 1) {
+                    total_sent_frames += sent_frames;
+                    count_sent_frames += 1;
+                }
+
                 now = switch_time_now() - now;
                 
-                ols->ild->rx_time += now;
-                if (now > ols->ild->max_time) {
-                    ols->ild->max_time = now;
-                }
-                
-                if (ret == INPUT_LOOP_RET_YIELD) {
-                    /* ok */
-                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
-                                      "input loop %d processing mid:%s/%d yield\n",
-                                      list->idx, ols->member->mname, ols->member->id);
-                } else if (ret == INPUT_LOOP_RET_NO_FRAME) {
-                    /* ok */
-                } else if (ret == INPUT_LOOP_RET_CNG) {
-                    /* ok */
-                } else if (ret == INPUT_LOOP_RET_BREAK) {
-                    /* oh no! */
-                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
-                                      "input loop %d processing mid:%s/%d break\n",
-                                      list->idx, ols->member->mname, ols->member->id);
-                    conference_loop_input_cleanup(ols->ild); /* luke todo!!!! */
-                }
-            }
-            release_conference_thread_list_lock(list->idx);
-        }
-
-        if (list->idx >= MAX_NUMBER_OF_OUTPUT_NTHREADS) {
-            switch_time_t time_asleep = switch_time_now();
-            participant_thread_data_t *prev = NULL;
-            int move_count = 0;
-
-            while (globals.conference_thread[list->idx].run == globals.conference_thread[list->idx].signaled) {
-                time_asleep = switch_time_now();
-                switch_thread_cond_timedwait(globals.conference_thread[list->idx].cond, globals.conference_thread[list->idx].cond_mutex, 20000);
-                time_asleep = switch_time_now() - time_asleep;
-                if (time_asleep > 25000) {
-                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Slept too long %" PRId64 "ms\n", time_asleep/1000);
-				}
-				if (time_asleep > 0000) {
-                    time_asleep = 20000;
+                ols->rx_time += now;
+                if (now > ols->max_time) {
+                    ols->max_time = now;
                 }
             }
 
-            if (abs(globals.conference_thread[list->idx].signaled - globals.conference_thread[list->idx].run) > 10) {
-                delta = globals.conference_thread[list->idx].signaled - globals.conference_thread[list->idx].run;
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
-                                  "Signaled %" PRId64 " and Run %" PRId64 " diverging %d\n",
-                                  globals.conference_thread[list->idx].signaled, globals.conference_thread[list->idx].run, delta);
-            }
-            globals.conference_thread[list->idx].run += 1;
-
-            time_asleep = switch_time_now() - time_asleep;
-
-            if (time_asleep > 20000) {
-                time_asleep = 20000;
-            }
-            time_asleep_sum += time_asleep;
-            if (time_asleep < min_time) {
-                min_time = time_asleep;
+            if (ret == OUTPUT_LOOP_OK) {
+                count_ok += 1;
+            } else if (ret == OUTPUT_LOOP_OK_NULL_FRAME) {
+                count_null += 1;
+            } else if (ret == OUTPUT_LOOP_OK_NOT_SENT) {
+                count_not_sent += 1;
+            } else if (ret == OUTPUT_LOOP_OK_NO_FRAME) {
+                count_no_frame += 1;
             }
 
-            loop_now = switch_time_now();
+            if (!ols->stopping &&
+                !(ret == OUTPUT_LOOP_OK || ret == OUTPUT_LOOP_OK_NULL_FRAME ||
+                  ret == OUTPUT_LOOP_OK_NOT_SENT || ret == OUTPUT_LOOP_OK_NO_FRAME)) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
+                                  "Conference Output stopping:%d stopped:%d ret:%d\n",
+                                  ols->stopping, ols->stopped, ret);
 
-            if (conference_thread_list_lock(list->idx, tid)) {
-                int count = 0;
-                /*
-                 * Make sure that each conference that we have here has some participants in the main thread.
-                 * First check if we want to move any participants before making the decision to the "expensive" lock
-                 * and move.
-                 */
-                for (participant_thread_data_t *ols = list->loop; ols; ) {
-                    count += 1;
-                    if (count > 1000) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
-                    }
-
-                    if (ols->stopping) { ols = ols->next; continue; }
-                    if (ols->member->conference->participants_per_thread[0] < MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD) {
-                        /* move me */
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO, "Moving member %d from list: %d to list: %d\n",
-                                          ols->member->id, list->idx, ols->member->conference->list_idx);
-                        move_count += 1;
-                    }
-                    ols = ols->next;
-                }
-                release_conference_thread_list_lock(list->idx);
-            }
-            if (move_count > 0) {
-                /*
-                 * This lock is expensive as there is only one such lock shared across all threads.  
-                 * Grab this lock with extreme caution!
-                 */
-                if (get_conference_thread_lock(switch_thread_self())) {
-                    if (conference_thread_list_lock(list->idx, tid)) {
-                        int count = 0;
-                        /*
-                         * Make sure that each conference that we have here has some participants in the main thread.
-                         * The simplified conference processing model requires this otherwise mixing will not happen
-                         * as mixing ONLY happens on the main thread.
-                         */
-                        for (participant_thread_data_t *ols = list->loop; ols; ) {
-                            count += 1;
-                            if (count > 1000) {
-                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
-                            }
-                            
-                            if (ols->stopping) { ols = ols->next; continue; }
-                            if (ols->member->conference->participants_per_thread[0] < MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD) {
-                                /* move me */
-                                int to = ols->member->conference->list_idx;
-                                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO, "Moving member %d from list: %d to list: %d\n",
-                                                  ols->member->id, list->idx, to);
-
-                                ols->member->meo.cwc = cwc_get(ols->member->conference->ceo.cwc[0],
-                                                               ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id);
-                                ols->member->meo.filelist = filelist_get(globals.filelist[0],
-                                                                         ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id);
-                                if (prev == NULL) {
-                                    list->loop = ols->next;
-                                    ols->next = NULL;
-                                    if (ols->member->conference->list_idx == -1) {
-                                        ols->member->conference->list_idx = overflow_number;
-                                    }
-                                    conference_list_add_to_idx(ols->member->conference, ols, ols->member->conference->list_idx);
-                                    ols->new_ol = SWITCH_TRUE;
-                                    ols = list->loop;
-                                    globals.conference_thread[list->idx].count -= 1;
-                                } else {
-                                    prev->next = ols->next;
-                                    ols->next = NULL;
-                                    if (ols->member->conference->list_idx == -1) {
-                                        ols->member->conference->list_idx = overflow_number;
-                                    }
-                                    conference_list_add_to_idx(ols->member->conference, ols, ols->member->conference->list_idx);
-                                    ols = prev->next;
-                                    ols->new_ol = SWITCH_TRUE;
-                                    globals.conference_thread[list->idx].count -= 1;
-                                }
-                            } else {
-                                prev = ols;
-                                ols = ols->next;
-                            }
-                        }
-                        release_conference_thread_list_lock(list->idx);
-                    }
-                    release_conference_thread_lock();
-                }
-            } /* move_count > 0 */
-        }
-
-        if (list->idx < MAX_NUMBER_OF_OUTPUT_NTHREADS) {
-            if (conference_thread_list_lock(list->idx, tid)) {
-                int count = 0;
-                //switch_mutex_lock(list->lock);
-                for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
-                    CONFERENCE_LOOP_RET ret;
-                    switch_bool_t stop = SWITCH_FALSE;
-                    count += 1;
-                    if (count > 1000) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
-                    }
-
-                    if (ols->stopping) {
-                        continue;
-                    }
-                    
-                    /* if conference belongs to this thread */
-                    if (ols->member->conference->list_idx != list->idx || ols->member->conference->processed) {
-                        continue;
-                    }
-                    
-                    /* Main monitor thread (1 per distinct conference room) */
-                    ret = conference_thread_run(ols->member->conference);
-                    
-                    ols->member->conference->processed = SWITCH_TRUE;
-                    
-                    switch (ret) {
-                    case CONFERENCE_LOOP_RET_STOP:
-                        /* conference is over ... end */
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
-                                          "conference stopping\n");
-                        stop = SWITCH_TRUE;
-                        break;
-                    case CONFERENCE_LOOP_RET_BAD_BUFFER_WRITE:
-                        /* end the conference */
-                        stop = SWITCH_TRUE;
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
-                                          "conference stopping due to CONFERENCE_LOOP_RET_BAD_BUFFER_WRITE\n");
-                        break;
-                    case CONFERENCE_LOOP_RET_OK:
-                    default:
-                        /* do nothing! */
-                        break;
-                    }
-                    
-                    if (stop) {
-                        /* we need to stop all channels in this loop? */
-                        for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
-                            set_ols_stopping(ols);
-                            if (ols->ild) {
-                                switch_close_transport(ols->ild->channel);
-                            }
-                            switch_monitor_change_tid(ols->oldtid, switch_core_get_monitor_index(ols->member->session));
-                            switch_thread_cond_signal(ols->cond);
-                        }
-                        break;
-                    }
-                }
-                release_conference_thread_list_lock(list->idx);
-            }
-            //switch_mutex_unlock(list->lock);
-
-            for (int idx = list->idx+MAX_NUMBER_OF_OUTPUT_NTHREADS; idx < MAX_NUMBER_OF_OUTPUT_THREADS; idx += MAX_NUMBER_OF_OUTPUT_NTHREADS) {
-                if (globals.conference_thread[idx].count > 0) {
-                    switch_thread_cond_signal(globals.conference_thread[idx].cond);
-                    globals.conference_thread[idx].signaled += 1;
-                }
-            }
-        }
-
-        if (conference_thread_list_lock(list->idx, tid)) {
-            //switch_mutex_lock(list->lock);
-            for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
-                OUTPUT_LOOP_RET ret = OUTPUT_LOOP_OK;
-                
-                if (ols->stopping) { continue; }
-                if (!ols->member->meo.cwc) { continue; }
-                
-                if (!ols->initialized) {
-                    switch_mutex_lock(ols->member->meo.cwc->codec_mutex);
-                    meo_reset_idx(&ols->member->meo);
-                    switch_mutex_unlock(ols->member->meo.cwc->codec_mutex);
-                    meo_start(&ols->member->meo);
-                    ols->initialized = SWITCH_TRUE;
-                }
-                
-                if (ols->new_ol) {
-                    ols->new_ol = SWITCH_FALSE;
-                    
-                    if (conference_loop_input_setup(ols->ild) != SWITCH_STATUS_SUCCESS) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_ERROR,
-                                          "Failed to create input loop for mid:%s/%d\n",
-                                          ols->member->mname, ols->member->id);
-                    }
-                    ols->tid = tid;
-                    switch_monitor_change_tid(tid, switch_core_get_monitor_index(ols->member->session));
-                    switch_monitor_change_desc(tid, switch_core_get_monitor_index(ols->member->session), "conference_thread");
-                    ols->member->meo.cwc = cwc_get(ols->member->conference->ceo.cwc[list->idx/MAX_NUMBER_OF_OUTPUT_NTHREADS],
-                                                   ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id);
-                    ols->member->meo.filelist = filelist_get(globals.filelist[list->idx],
-                                                             ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id);
-                    switch_channel_change_thread(ols->channel);
-                }
-                
-                if (ols->starting && !switch_test_flag(ols->member, MFLAG_ITHREAD) && ols->sanity > 0) {
-                    ols->sanity -= 1;
-                    continue;
-                } else if (ols->starting && switch_test_flag(ols->member, MFLAG_ITHREAD)) {
-                    ols->starting = SWITCH_FALSE;
-                    ols->sanity = 0;
-                }
-                
-                if (!switch_test_flag(ols->member, MFLAG_RUNNING) || !switch_test_flag(ols->member, MFLAG_ITHREAD) ||
-                    !switch_channel_ready(ols->channel)) {
-                    set_ols_stopping(ols);
-                    if (ols->ild) {
-                        switch_close_transport(ols->ild->channel);
-                    }
-                    switch_monitor_change_tid(ols->oldtid, switch_core_get_monitor_index(ols->member->session));
-                    switch_thread_cond_signal(ols->cond);
-                    continue;
-                }
-    
-                if (!ols->stopping) {
-                    switch_time_t now = switch_time_now();
-                    
-                    if ((now - ols->rx_period_start) > PROCESSING_PERIOD) {
-                        ols->rx_period_start = now;
-                        ols->max_time = 0;
-                        ols->rx_time = 0;
-                    }
-                    
-                    now = switch_time_now();
-                    ret = process_participant_output(ols, &timer);
-                    now = switch_time_now() - now;
-                    
-                    ols->rx_time += now;
-                    if (now > ols->max_time) {
-                        ols->max_time = now;
-                    }
-                }
-                
-                if (!ols->stopping && ret != OUTPUT_LOOP_OK) {
+                if (ret ==  OUTPUT_LOOP_FAILED) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
-                                      "Conference Output stopping:%d stopped:%d ret:%d\n",
-                                      ols->stopping, ols->stopped, ret);
-                    
-                    if (ret ==  OUTPUT_LOOP_FAILED) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
-                                          "Loop failed\n");
-                    } else if (ret == OUTPUT_LOOP_HANGUP) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
-                                          "Hangup\n");
-                    } else if (ols->stopping && !ols->stopped) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
-                                          "Stopping\n");
-                    }
-                    
+                                      "Loop failed\n");
+                } else if (ret == OUTPUT_LOOP_HANGUP) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
-                                      "stopping ret=%d\n", ret);
-                    
+                                      "Hangup\n");
+                } else if (ols->stopping && !ols->stopped) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
-                                      "process_participant_output_end_member returned ok!\n");
-                    set_ols_stopping(ols);
-                    if (ols->ild) {
-                        switch_close_transport(ols->ild->channel);
-                    }
-                    switch_monitor_change_tid(ols->oldtid, switch_core_get_monitor_index(ols->member->session));
-                    switch_thread_cond_signal(ols->cond);
-                    continue;
+                                      "Stopping\n");
                 }
-            } /* for */
-            release_conference_thread_list_lock(list->idx);
+
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
+                                  "stopping ret=%d\n", ret);
+
+                set_ols_stopping(ols);
+                if (ols->ild) {
+                    switch_close_transport(ols->ild->channel);
+                }
+                switch_monitor_change_tid(ols->oldtid, switch_core_get_monitor_index(ols->member->session));
+                switch_thread_cond_signal(ols->cond);
+                continue;
+            }
+        } /* for */
+
+#ifdef DEBUG_OUTPUT_ERRORS
+        if (count_null || count_not_sent || count_no_frame || avg_time_since_last_output > 0 || count_sent_frames) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                              "output loop %d count_ok=%d, count_null=%d count_not_sent=%d count_no_frame=%d "
+                              "long time since last send=%0.2f/%d threads sent frame =%0.2f/%d threads\n",
+                              list->idx, count_ok, count_null, count_not_sent, count_no_frame,
+                              count_long_sends > 0 ? (avg_time_since_last_output/count_long_sends) : 0,
+                              count_long_sends,
+                              count_sent_frames > 0 ? total_sent_frames/count_sent_frames : 0,
+                              count_sent_frames);
         }
-        //switch_mutex_unlock(list->lock);
+#endif
 
         loop_count += 1;
-
-        if (list->idx < MAX_NUMBER_OF_OUTPUT_NTHREADS) {
+#ifdef PROFILE
+        ts[5] = switch_time_now();
+#endif
+        if (list->idx < globals.nthreads) {
             switch_time_t current_time = switch_time_now();
             switch_time_t wake_up_delta = (current_time < next_wake_up) ? (next_wake_up - current_time) : 0;
             switch_time_t time_asleep;
 #ifdef SIMULATE_DELAY
             int rand_delay = rand() % 100000;
 #endif
-
-            if (current_time < next_wake_up) {
+            runs += 1;
+            if (runs > 10 && current_time >= next_wake_up) {
+                wake_up_delta = 1000;
+            }
+            if (current_time < next_wake_up || runs > 10) {
                 switch_time_t delta2;
-                if (wake_up_delta > 1000) {
+                if (wake_up_delta > 1000 || runs > 10) {
 #ifdef SIMULATE_DELAY
                     if (rand_delay > 20000 && rand_delay < 60000) {
                         wake_up_delta += rand_delay;
                     }
 #endif
+                    release_conference_thread_list_lock(list->idx, runs);
                     switch_sleep(wake_up_delta);
+
                     delta2 = switch_time_now() - current_time;
+
+                    runs = 0;
+                    conference_thread_list_lock(list->idx, tid);
+
                     if (wake_up_delta > 0 && (delta2 - wake_up_delta) > 10000) {
                         if (behind == 0 && list->count) {
-                            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "output loop %d count=%d overslept sleep_target=%" PRId64 " actual=%" PRId64 "\n",
+                            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                                              "output loop %d count=%d overslept sleep_target=%" PRId64 " actual=%" PRId64 "\n",
                                               list->idx, list->count, wake_up_delta, delta2);
                         }
                         behind += 1;
@@ -7323,7 +7574,8 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                     time_asleep =  wake_up_delta;
                 } else {
                     if (behind == 0) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "output loop %d count=%d short sleep ... skipping sleep delta=%" PRId64 "\n",
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                                          "output loop %d count=%d short sleep ... skipping sleep delta=%" PRId64 "\n",
                                           list->idx, list->count, wake_up_delta);
                     }
                     behind += 1;
@@ -7331,7 +7583,8 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                 }
             } else {
                 if (behind == 0 && list->count) {
-                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "output loop %d count=%d falling behind, skipping sleep delta=%" PRId64 "\n",
+                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                                      "output loop %d count=%d falling behind, skipping sleep delta=%" PRId64 "\n",
                                       list->idx, list->count, wake_up_delta);
                 }
                 behind += 1;
@@ -7343,8 +7596,10 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                 min_time = time_asleep;
             }
             loop_now = switch_time_now();
-            // switch_core_timer_next(&timer);
         }
+#ifdef PROFILE
+        ts[6] = switch_time_now();
+#endif
     } /* while */
 
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "output loop %d stopping count=%d list->tid=%lld tid=%lld\n",
@@ -7352,7 +7607,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                       list->count, (long long)list->tid, (long long)tid);
 
     switch_core_timer_destroy(&timer);
-    
+
     return NULL;
 }
 
@@ -7397,6 +7652,13 @@ switch_status_t accumulate_and_send(participant_thread_data_t *ol, switch_frame_
                               member->id, to_frame->datalen, from_frame->datalen, equal, ol->frame_cnt, frame_max);
         }
 
+        if (!member->time_of_first_packet) {
+            member->time_of_first_packet = switch_time_now();
+            member->data_sent = 0;
+        } else {
+            member->data_sent += to_frame->datalen;
+        }
+
         if (switch_core_session_send_conference_frame(member->session, to_frame,
                                                       SWITCH_IO_FLAG_NONE, 0, before_send_time) != SWITCH_STATUS_SUCCESS) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "member %d failed to write_enc_frame\n", member->id);
@@ -7418,10 +7680,11 @@ typedef enum {
     PARTICIPANT_OUTPUT_PATH_ACTIVE = 2,
     PARTICIPANT_OUTPUT_PATH_FILE = 3,
     PARTICIPANT_OUTPUT_PATH_MIX = 4,
-    PARTICIPANT_OUTPUT_PATH_OTHER = 5
+    PARTICIPANT_OUTPUT_PATH_OTHER = 5,
+    PARTICIPANT_OUTPUT_ACTIVE_BUT_NO_DATA = 6
 } participant_output_path_t;
 
-OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switch_timer_t *timer)
+OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switch_timer_t *timer, uint32_t *time_since_last_send, int *sent_frames)
 {
     switch_event_t *event;
     switch_buffer_t *use_buffer = NULL;
@@ -7433,10 +7696,15 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
     switch_time_t sent_time = 0;
     switch_time_t before_mutex_time = 0;
     switch_time_t before_send_time;
-    int sent = 0;
+    OUTPUT_LOOP_RET ret = OUTPUT_LOOP_OK;
     participant_output_path_t path = PARTICIPANT_OUTPUT_PATH_UNDEF;
+    int sent = 0;
+
+    *sent_frames = 0;
 
     switch_mutex_lock(ols->member->write_mutex);
+
+    *time_since_last_send = 0;
 
     if (++ols->monitor_ticks >= ols->ticks_per_heartbeat) {
         switch_monitor_alive(ols->tid, switch_core_get_monitor_index(member->session));
@@ -7537,7 +7805,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "FLUSHING\n");
         set_member_state_locked(member, MFLAG_FLUSH_BUFFER);
         path = PARTICIPANT_OUTPUT_PATH_FLUSH;
-    } else if ((mux_used >= ols->bytes) && member->one_of_active) {
+    } else if (mux_used >= ols->bytes && member->one_of_active) {
         switch_frame_t *frame = NULL;
         
         path = PARTICIPANT_OUTPUT_PATH_ACTIVE;
@@ -7580,14 +7848,10 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             }
         
             if (member->fnode) {
-                // switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "member %d read file frame\n",member->id);
                 frame = process_file_play(member, &ols->write_frame, SWITCH_FALSE);
             }
             if (!member->fnode || (member->fnode && !member->fnode->exclusive_play)) {
                 /* Fuze: normal path encode */
-                if (member->fnode) {
-                    // switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "member %d encode file frame\n",member->id);
-                }
                 if (switch_core_session_enc_frame(member->session, &ols->write_frame, SWITCH_IO_FLAG_NONE, 0,
                                                   &frame) != SWITCH_STATUS_SUCCESS) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "member %d failed to encode\n", member->id);
@@ -7609,18 +7873,20 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
                 }
             }
         
-            send_time += before_send_time; // (switch_micro_time_now() - before_send_time);
+            send_time += before_send_time;
             
             sent_time = switch_micro_time_now() / 1000;
             if (sent_time - member->out_last_sent > 60) {
+                *time_since_last_send = (sent_time - member->out_last_sent);
+#if 0
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "Loop %d Time since last send: %lld ms\n",
                                   ols->list_idx, (long long)(sent_time - member->out_last_sent));
+#endif
             }
             member->out_last_sent = sent_time;
             
             switch_mutex_unlock(member->audio_out_mutex);
         }
-        
     } else if (member->fnode) {
         switch_frame_t *frame = NULL;
 
@@ -7650,16 +7916,19 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         send_time += before_send_time;
         
         sent_time = switch_micro_time_now() / 1000;
-#if 0
         if (sent_time - member->out_last_sent > 60) {
+            *time_since_last_send =(sent_time - member->out_last_sent);
+#if 0
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "Loop %d Time since last send: %lld ms\n",
                               ols->list_idx, (long long)(sent_time - member->out_last_sent));
-        }
 #endif
+        }
         member->out_last_sent = sent_time;
+    } else if (mux_used < ols->bytes && member->one_of_active) {
+        path = PARTICIPANT_OUTPUT_ACTIVE_BUT_NO_DATA;
+        ret = OUTPUT_LOOP_OK_NO_FRAME;
     } else if (!member->one_of_active) {
         switch_bool_t failed = SWITCH_FALSE;
-        int sent_frames = 0;
 
         path = PARTICIPANT_OUTPUT_PATH_MIX;
 
@@ -7688,6 +7957,12 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             mutex_time += (switch_micro_time_now() - before_mutex_time);
             
             if (!meo_frame_written(&member->meo)) {
+                if (i == 0) {
+#if 0
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "no frame written\n");
+#endif
+                    ret = OUTPUT_LOOP_OK_NO_FRAME;
+                }
                 switch_mutex_unlock(member->meo.cwc->codec_mutex);
                 mutex_time += (switch_micro_time_now() - before_mutex_time);
                 break;
@@ -7756,6 +8031,9 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             if (rdframe == NULL) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
                                   "member %d null read frame\n",member->id);
+                if (i == 0 ) {
+                    ret = OUTPUT_LOOP_OK_NULL_FRAME;
+                }
                 switch_mutex_unlock(member->meo.cwc->codec_mutex);
                 break;
             }
@@ -7767,15 +8045,19 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
                 break;
             } else {
                 sent = 1;
-                sent_frames += 1;
+                *sent_frames += 1;
             }
             
             send_time += before_send_time;
             
             sent_time = switch_micro_time_now() / 1000;
             if (sent_time - member->out_last_sent > 60) {
+#if 0
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "Loop %d Time since last send: %lld ms\n",
                                   ols->list_idx, (long long)(sent_time - member->out_last_sent));
+#else
+                *time_since_last_send =(sent_time - member->out_last_sent);
+#endif
             }
             member->out_last_sent = sent_time;
             
@@ -7786,10 +8068,11 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             i += 1;
             switch_mutex_unlock(member->meo.cwc->codec_mutex);
         } /* else not an active speaker */
-        if (sent_frames > 2) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "sent %d frames\n", sent_frames);
+#if 0
+        if (*sent_frames > 2) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "sent %d frames\n", *sent_frames);
         }
-
+#endif
         switch_mutex_unlock(member->audio_out_mutex);
         if (failed) {
             switch_mutex_unlock(member->write_mutex);
@@ -7800,8 +8083,17 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
     }
 
     if (!sent && path != PARTICIPANT_OUTPUT_PATH_MIX) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "didn't send a frame path:%d!\n", path);
-        switch_rtp_update_ts(member->channel, 160);
+        if (path == PARTICIPANT_OUTPUT_ACTIVE_BUT_NO_DATA) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "didn't send a frame path:%d ols->bytes=%d mux_used=%d fnode=%d\n",
+                              path, ols->bytes, mux_used, member->fnode == NULL);
+        } else if (path != PARTICIPANT_OUTPUT_PATH_FILE) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "didn't send a frame path:%d!\n", path);
+        }
+        if (path == PARTICIPANT_OUTPUT_PATH_OTHER || path == PARTICIPANT_OUTPUT_PATH_FILE) {
+            ret = OUTPUT_LOOP_OK_NOT_SENT;
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "adjusting timestamp by 160!\n");
+            switch_rtp_update_ts(member->channel, 160);
+        }
     }
     
     if (switch_test_flag(member, MFLAG_FLUSH_BUFFER)) {
@@ -7885,7 +8177,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         switch_ivr_parse_all_messages(member->session);
     }
     
-    return OUTPUT_LOOP_OK;
+    return ret;
 }
 
 OUTPUT_LOOP_RET process_participant_output_end_member(participant_thread_data_t *ols) {
@@ -7921,8 +8213,6 @@ OUTPUT_LOOP_RET process_participant_output_end_member(participant_thread_data_t 
                           ((float)(member->meo.ivr_encode_cnt+member->meo.ivr_copy_cnt)/member->meo.stats_cnt)*100);
     }
 
-    //    switch_core_log_periodic(member->session, SWITCH_TRUE, SWITCH_TRUE);
-    
     meo_destroy(&member->meo);
 
     if (channel) {
@@ -8293,7 +8583,6 @@ static void *SWITCH_THREAD_FUNC conference_record_thread_run(switch_thread_t *th
         if (mux_used >= data_buf_len) {
             /* Flush the output buffer and write all the data (presumably muxed) to the file */
             switch_mutex_lock(member->audio_out_mutex);
-            //low_count = 0;
 
             if ((rlen = (uint32_t) switch_buffer_read(member->mux_buffer, data_buf, data_buf_len))) {
                 len = (switch_size_t) rlen / sizeof(int16_t);
@@ -8416,7 +8705,7 @@ static uint32_t conference_stop_file(conference_obj_t *conference, file_stop_t s
 
     switch_assert(conference != NULL);
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
 
     if (stop == FILE_STOP_ALL) {
         for (nptr = conference->fnode; nptr; nptr = nptr->next) {
@@ -8439,7 +8728,7 @@ static uint32_t conference_stop_file(conference_obj_t *conference, file_stop_t s
         }
     }
 
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 
     return count;
 }
@@ -8477,7 +8766,7 @@ static void conference_send_all_dtmf(conference_member_t *member, conference_obj
 {
     conference_member_t *imember;
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     switch_mutex_lock(conference->member_mutex);
 
     for (int i = 0; i < eMemberListTypes_Recorders; i++) {
@@ -8501,7 +8790,7 @@ static void conference_send_all_dtmf(conference_member_t *member, conference_obj
     }
     
     switch_mutex_unlock(conference->member_mutex);
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 }
 
 /* Play a file in the conference room */
@@ -8520,11 +8809,11 @@ static switch_status_t conference_play_file(conference_obj_t *conference, char *
         return SWITCH_STATUS_NOTFOUND;
     }
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     switch_mutex_lock(conference->member_mutex);
     count = conference->count;
     switch_mutex_unlock(conference->member_mutex);
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 
     if (!count) {
         return SWITCH_STATUS_FALSE;
@@ -8619,7 +8908,7 @@ static switch_status_t conference_play_file(conference_obj_t *conference, char *
     fnode->exclusive_play = exclusive;
 
     /* Queue the node */
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
 
     if (async) {
         if (conference->async_fnode) {
@@ -8644,7 +8933,7 @@ static switch_status_t conference_play_file(conference_obj_t *conference, char *
         }
     }
 
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 
   done:
 
@@ -8854,14 +9143,14 @@ static switch_status_t conference_say(conference_obj_t *conference, const char *
         return SWITCH_STATUS_GENERR;
     }
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     switch_mutex_lock(conference->member_mutex);
     count = conference->count;
     if (!(conference->tts_engine && conference->tts_voice)) {
         count = 0;
     }
     switch_mutex_unlock(conference->member_mutex);
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 
     if (!count) {
         return SWITCH_STATUS_FALSE;
@@ -8896,7 +9185,7 @@ static switch_status_t conference_say(conference_obj_t *conference, const char *
     fnode->pool = pool;
 
     /* Queue the node */
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     for (nptr = conference->fnode; nptr && nptr->next; nptr = nptr->next);
 
     if (nptr) {
@@ -8921,7 +9210,7 @@ static switch_status_t conference_say(conference_obj_t *conference, const char *
     /* Begin Generation */
     switch_sleep(200000);
     switch_core_speech_feed_tts(fnode->sh, (char *) text, &flags);
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
     status = SWITCH_STATUS_SUCCESS;
 
     return status;
@@ -9629,20 +9918,22 @@ static switch_status_t conf_api_sub_volume_out(conference_member_t *member, swit
 static void conference_thread_print(switch_stream_handle_t *stream, char *delim, int detail)
 {
 
-    stream->write_function(stream, "Number of threads:%d, Max participants/thread: %d, Min sleep/thread:%d lock(T%x, %d)\n",
-                           MAX_NUMBER_OF_OUTPUT_THREADS, globals.max_participants_per_thread, globals.min_sleep_per_thread,
+    stream->write_function(stream, "Number of threads:%d (cpus=%d), Max participants/thread: %d, Min sleep/thread:%d lock(T%x, %d)\n",
+                           globals.tthreads, switch_core_cpu_count(),
+                           globals.max_participants_per_thread, globals.min_sleep_per_thread,
                            globals.conference_thread_lock_tid, globals.conference_thread_lock_line);
 
-    for (int i = 0; i < MAX_NUMBER_OF_OUTPUT_THREADS; i++) {
-        if (i < MAX_NUMBER_OF_OUTPUT_NTHREADS ||
+    for (int i = 0; i < globals.tthreads; i++) {
+        if (i < globals.nthreads ||
             globals.conference_thread[i].count > 0 ||
             globals.output_thread_dead[i] > 0) {
-            stream->write_function(stream, "T%2d, [%8x] %3d participants avg:%5.0f %5.0f %5.0f min:%5.0f %5.0f %5.0f dead:%d lock(T%x,%d)\n",
+            stream->write_function(stream, "T%2d, [%8x] %3d participants avg:%5.0f %5.0f %5.0f min:%5.0f %5.0f %5.0f dead:%d lock(T%x,%d,%"PRId64"ms)\n",
                                    i, (uint32_t)globals.conference_thread[i].tid, globals.conference_thread[i].count,
                                    globals.conference_thread[i].process_avg[0], globals.conference_thread[i].process_avg[1], globals.conference_thread[i].process_avg[2],
                                    globals.conference_thread[i].process_avg_min[0], globals.conference_thread[i].process_avg_min[1],
                                    globals.conference_thread[i].process_avg_min[2], globals.output_thread_dead[i],
-                                   globals.conference_thread_tid[i], globals.conference_thread_line[i]
+                                   globals.conference_thread_tid[i], globals.conference_thread_line[i],
+                                   (globals.conference_thread_line[i] ? (switch_time_now()-globals.conference_thread[i].lock_time)/1000 : 0)
                                    );
             if (detail >= 2) {
                 if (get_conference_thread_lock(switch_thread_self())) {
@@ -9670,7 +9961,7 @@ static void conference_thread_print(switch_stream_handle_t *stream, char *delim,
                                 j++;
                             }
                         }
-                        release_conference_thread_list_lock(i);
+                        release_conference_thread_list_lock(i, 0);
                     }
                     release_conference_thread_lock();
                 }
@@ -9682,7 +9973,7 @@ static void conference_thread_print(switch_stream_handle_t *stream, char *delim,
 static void conference_file_print(switch_stream_handle_t *stream, char *delim, int detail)
 {
     int j = 0;
-    for (int i = 0; i < MAX_NUMBER_OF_OUTPUT_THREADS; i++) {
+    for (int i = 0; i < globals.tthreads; i++) {
         encoded_file_t *pFile;
 
         for (filelist_t *pFl = globals.filelist[i]; pFl != NULL; pFl = pFl->next) {
@@ -9993,10 +10284,10 @@ static switch_status_t conf_api_sub_clear_vid_floor(conference_obj_t *conference
         return SWITCH_STATUS_FALSE;
     }
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     clear_conference_state_unlocked(conference, CFLAG_VID_FLOOR_LOCK);
     //conference_set_video_floor_holder(conference, NULL);
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 
     return SWITCH_STATUS_SUCCESS;
 }
@@ -10358,7 +10649,7 @@ static switch_status_t conf_api_sub_xml_list(conference_obj_t *conference, switc
 static switch_status_t conf_api_sub_pause_play(conference_obj_t *conference, switch_stream_handle_t *stream, int argc, char **argv)
 {
     if (argc == 2) {
-        switch_mutex_lock(conference->mutex);
+        conference_mutex_lock(conference);
         if (conference->fnode) {
             if (switch_test_flag(conference->fnode, NFLAG_PAUSE)) {
                 stream->write_function(stream, "+OK Resume\n");
@@ -10368,7 +10659,7 @@ static switch_status_t conf_api_sub_pause_play(conference_obj_t *conference, swi
                 switch_set_flag(conference->fnode, NFLAG_PAUSE);
             }
         }
-        switch_mutex_unlock(conference->mutex);
+        conference_mutex_unlock(conference);
 
         return SWITCH_STATUS_SUCCESS;
     }
@@ -10382,7 +10673,7 @@ static switch_status_t conf_api_sub_file_seek(conference_obj_t *conference, swit
         unsigned int samps = 0;
         unsigned int pos = 0;
 
-        switch_mutex_lock(conference->mutex);
+        conference_mutex_lock(conference);
 
         if (conference->fnode && conference->fnode->type == NODE_TYPE_FILE) {
             if (*argv[2] == '+' || *argv[2] == '-') {
@@ -10407,7 +10698,7 @@ static switch_status_t conf_api_sub_file_seek(conference_obj_t *conference, swit
                 switch_core_file_seek(&conference->fnode->fh, &pos, samps, SEEK_SET);
             }
         }
-        switch_mutex_unlock(conference->mutex);
+        conference_mutex_unlock(conference);
 
         return SWITCH_STATUS_SUCCESS;
     }
@@ -11152,7 +11443,7 @@ static switch_status_t conf_api_sub_file_vol(conference_obj_t *conference, switc
             return SWITCH_STATUS_GENERR;
         }
 
-        switch_mutex_lock(conference->mutex);
+        conference_mutex_lock(conference);
 
         fnode = conference->fnode;
 
@@ -11168,7 +11459,7 @@ static switch_status_t conf_api_sub_file_vol(conference_obj_t *conference, switc
             fnode->fh.vol = vol;
             ok = 1;
         }
-        switch_mutex_unlock(conference->mutex);
+        conference_mutex_unlock(conference);
 
 
         if (ok) {
@@ -11213,9 +11504,9 @@ static void write_debug_stats(conference_obj_t *conference, switch_stream_handle
 {
     int i, j, k;
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     if (!switch_test_flag(conference, CFLAG_DEBUG_STATS_ACTIVE) || !conference->debug_stats) {
-        switch_mutex_unlock(conference->mutex);
+        conference_mutex_unlock(conference);
         return;
     }
 
@@ -11277,7 +11568,7 @@ static void write_debug_stats(conference_obj_t *conference, switch_stream_handle
     } while (i != conference->debug_stats->cur_index);
 
 
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 }
 
 static switch_status_t conf_api_sub_get(conference_obj_t *conference,
@@ -11839,9 +12130,9 @@ static switch_status_t conference_outcall(conference_obj_t *conference,
 
     /* establish an outbound call leg */
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     conference->originating++;
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 
     if (track) {
         send_conference_notify(conference, "SIP/2.0 100 Trying\r\n", call_id, SWITCH_FALSE);
@@ -11849,9 +12140,9 @@ static switch_status_t conference_outcall(conference_obj_t *conference,
 
 
     status = switch_ivr_originate(session, &peer_session, cause, bridgeto, timeout, NULL, cid_name, cid_num, NULL, var_event, SOF_NO_LIMITS, cancel_cause);
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     conference->originating--;
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 
     if (status != SWITCH_STATUS_SUCCESS) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Cannot create outgoing channel, cause: %s\n",
@@ -13195,11 +13486,11 @@ SWITCH_STANDARD_APP(conference_function)
     switch_buffer_destroy(&member.mux_buffer);
 
     if (conference) {
-        switch_mutex_lock(conference->mutex);
+        conference_mutex_lock(conference);
         if (switch_test_flag(conference, CFLAG_DYNAMIC) && conference->count == 0) {
             set_conference_state_locked(conference, CFLAG_DESTRUCT);
         }
-        switch_mutex_unlock(conference->mutex);
+        conference_mutex_unlock(conference);
     }
 
     /* Release the config registry handle */
@@ -13397,8 +13688,8 @@ static conference_obj_t *conference_find(char *name, char *domain)
     return conference;
 }
 
-#define MAX_PARTICIPANTS_PER_THREAD 300
-#define MAX_PARTICIPANTS_PER_OTHREAD 300
+#define MAX_PARTICIPANTS_PER_THREAD 400
+#define MAX_PARTICIPANTS_PER_OTHREAD 400
 
 /* create a new conferene with a specific profile */
 static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_core_session_t *session, switch_memory_pool_t *pool)
@@ -14133,25 +14424,22 @@ float calculate_thread_utilization(int idx)
 
 static void conference_list_add_to_idx(conference_obj_t *conference, participant_thread_data_t *ol, int idx)
 {
-    if (get_conference_thread_lock(switch_thread_self())) {
-        if (conference_thread_list_lock(idx, switch_thread_self())) {
-            if (globals.conference_thread[idx].loop) {
-                participant_thread_data_t *olp;
-                for (olp = globals.conference_thread[idx].loop; olp->next; olp = olp->next) {
-                }
-                olp->next = ol;
-                ol->next = NULL;
-            } else {
-                ol->next = globals.conference_thread[idx].loop;
-                globals.conference_thread[idx].loop = ol;
+    if (conference_thread_list_lock(idx, switch_thread_self())) {
+        if (globals.conference_thread[idx].loop) {
+            participant_thread_data_t *olp;
+            for (olp = globals.conference_thread[idx].loop; olp->next; olp = olp->next) {
             }
-            ol->list_idx = idx;
-            conference->participants_per_thread[idx/MAX_NUMBER_OF_OUTPUT_NTHREADS] += 1;
-            globals.conference_thread[idx].count += 1;
-            ol->debug = SWITCH_TRUE;
-            release_conference_thread_list_lock(idx);
+            olp->next = ol;
+            ol->next = NULL;
+        } else {
+            ol->next = globals.conference_thread[idx].loop;
+            globals.conference_thread[idx].loop = ol;
         }
-        release_conference_thread_lock();
+        ol->list_idx = idx;
+        conference->participants_per_thread[idx/globals.nthreads] += 1;
+        globals.conference_thread[idx].count += 1;
+        ol->debug = SWITCH_TRUE;
+        release_conference_thread_list_lock(idx, 0);
     }
 }
 
@@ -14166,18 +14454,14 @@ static int conference_list_add(conference_obj_t *conference, participant_thread_
     uint16_t max_participants_per_othread;
     uint16_t min_sleep_per_thread;
 
-    switch_mutex_lock(globals.conference_mutex);
     max_participants_per_thread = globals.max_participants_per_thread;
     max_participants_per_othread = globals.max_participants_per_othread;
     min_sleep_per_thread = globals.min_sleep_per_thread;
-    switch_mutex_unlock(globals.conference_mutex);
 
-    if (get_conference_thread_lock(switch_thread_self())) {
-        //switch_mutex_lock(globals.conference_thread_lock);
     first = (conference->list_idx == -1);
     if (first) {
         int i;
-        for (i = 0; i < MAX_NUMBER_OF_OUTPUT_NTHREADS; i++) {
+        for (i = 0; i < globals.nthreads; i++) {
             if (globals.output_thread_dead[i] > 10) {
                 continue;
             }
@@ -14186,21 +14470,21 @@ static int conference_list_add(conference_obj_t *conference, participant_thread_
                 break;
             }
         }
-        if (i == MAX_NUMBER_OF_OUTPUT_NTHREADS) {
+        if (i == globals.nthreads) {
             start = globals.start;
-            globals.start = (globals.start + 1) % MAX_NUMBER_OF_OUTPUT_NTHREADS;
+            globals.start = (globals.start + 1) % globals.nthreads;
         }
     } else {
         start = conference->list_idx;
     }
     if (first) {
-        for (int i = 0; i < MAX_NUMBER_OF_OUTPUT_NTHREADS; i++) {
+        for (int i = 0; i < globals.nthreads; i++) {
             avg = 0;
-            idx = (start + i) % MAX_NUMBER_OF_OUTPUT_NTHREADS;
+            idx = (start + i) % globals.nthreads;
 
             if (globals.output_thread_dead[idx] > 100) {
                 if (idx == lowest) {
-                    lowest = (lowest + 1) % MAX_NUMBER_OF_OUTPUT_NTHREADS;
+                    lowest = (lowest + 1) % globals.nthreads;
                 }
                 continue;
             }
@@ -14220,8 +14504,8 @@ static int conference_list_add(conference_obj_t *conference, participant_thread_
             }
         }
     } else {
-        for (idx = conference->list_idx; idx < MAX_NUMBER_OF_OUTPUT_THREADS; idx += MAX_NUMBER_OF_OUTPUT_NTHREADS) {
-            if (idx < MAX_NUMBER_OF_OUTPUT_NTHREADS) {
+        for (idx = conference->list_idx; idx < globals.tthreads; idx += globals.nthreads) {
+            if (idx < globals.nthreads) {
                 if (globals.conference_thread[idx].count < max_participants_per_thread) {
                     lowest = idx;
                     break;
@@ -14238,8 +14522,7 @@ static int conference_list_add(conference_obj_t *conference, participant_thread_
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ol->member->session), SWITCH_LOG_INFO, "Adding member to list: %d utilization:%f part=%d first=%d\n",
                       lowest, calculate_thread_utilization(lowest), globals.conference_thread[lowest].count, first);
 
-    if (conference_thread_list_lock(lowest, switch_thread_self())) {
-        //switch_mutex_lock(globals.conference_thread[lowest].lock);
+    if (conference_thread_list_lock_low(lowest, switch_thread_self())) {
         if (globals.conference_thread[lowest].loop) {
             participant_thread_data_t *olp;
             for (olp = globals.conference_thread[lowest].loop; olp->next; olp = olp->next) {
@@ -14255,13 +14538,9 @@ static int conference_list_add(conference_obj_t *conference, participant_thread_
         if (first) {
             conference->list_idx = lowest;
         }
-        conference->participants_per_thread[lowest/MAX_NUMBER_OF_OUTPUT_NTHREADS] += 1;
+        conference->participants_per_thread[lowest/globals.nthreads] += 1;
         globals.conference_thread[lowest].count += 1;
-        release_conference_thread_list_lock(idx);
-    }
-    //    switch_mutex_unlock(globals.conference_thread[lowest].lock);
-    //switch_mutex_unlock(globals.conference_thread_lock);
-    release_conference_thread_lock();
+        release_conference_thread_list_lock(lowest, 0);
     }
     return lowest;
 }
@@ -14272,36 +14551,31 @@ int conference_list_remove(conference_obj_t *conference, participant_thread_data
     uint32_t i = 0;
     participant_thread_data_t *iol, *iollast = NULL;
 
-    if (get_conference_thread_lock(switch_thread_self())) {
-        if (conference_thread_list_lock(idx, switch_thread_self())) {
-            for (iol = globals.conference_thread[idx].loop; iol; iol = iol->next) {
-                if (iol == ol) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ol->member->session), SWITCH_LOG_INFO,
-                                      "Removing from output loop list %d!\n", idx);
-                    if (iollast) {
-                        iollast->next = ol->next;
-                    } else {
-                        globals.conference_thread[idx].loop = ol->next;
-                    }
-                    break;
+    if (conference_thread_list_lock_low(idx, switch_thread_self())) {
+        for (iol = globals.conference_thread[idx].loop; iol; iol = iol->next) {
+            if (iol == ol) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ol->member->session), SWITCH_LOG_INFO,
+                                  "Removing from output loop list %d!\n", idx);
+                if (iollast) {
+                    iollast->next = ol->next;
+                } else {
+                    globals.conference_thread[idx].loop = ol->next;
                 }
-                iollast = iol;
-                if (i++ > 1000) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ol->member->session), SWITCH_LOG_ERROR,
-                                      "Removing from output loop list %d! i=%d\n", idx, i);
-                }
+                break;
             }
-            
-            globals.conference_thread[idx].count -= 1;
-            
-            ret = globals.conference_thread[idx].count;
-            conference->participants_per_thread[idx/MAX_NUMBER_OF_OUTPUT_NTHREADS] -= 1;
-            
-            release_conference_thread_list_lock(idx);
+            iollast = iol;
+            if (i++ > 1000) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ol->member->session), SWITCH_LOG_ERROR,
+                                  "Removing from output loop list %d! i=%d\n", idx, i);
+            }
         }
-        //switch_mutex_unlock(globals.conference_thread[idx].lock);
-        release_conference_thread_lock();
-        switch_mutex_unlock(globals.conference_thread_lock);
+            
+        globals.conference_thread[idx].count -= 1;
+            
+        ret = globals.conference_thread[idx].count;
+        conference->participants_per_thread[idx/globals.nthreads] -= 1;
+            
+        release_conference_thread_list_lock(idx, 0);
     }
     return ret;
 }
@@ -14349,7 +14623,7 @@ static uint32_t kickall_matching_var(conference_obj_t *conference, const char *v
     const char *vval = NULL;
     uint32_t r = 0;
 
-    switch_mutex_lock(conference->mutex);
+    conference_mutex_lock(conference);
     switch_mutex_lock(conference->member_mutex);
 
     for (int i = 0; i < eMemberListTypes_Recorders; i++) {
@@ -14373,7 +14647,7 @@ static uint32_t kickall_matching_var(conference_obj_t *conference, const char *v
     }
     
     switch_mutex_unlock(conference->member_mutex);
-    switch_mutex_unlock(conference->mutex);
+    conference_mutex_unlock(conference);
 
     return r;
 }
@@ -14834,34 +15108,32 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_conference_load)
     switch_mutex_init(&globals.setup_mutex, SWITCH_MUTEX_NESTED, globals.conference_pool);
     switch_mutex_init(&globals.filelist_mutex, SWITCH_MUTEX_NESTED, globals.conference_pool);
 
-    for (int i = 0; i < MAX_NUMBER_OF_OUTPUT_THREADS; i++) {
-        globals.filelist[i] = NULL;
-    }
 
     globals.thread_pool = globals.conference_pool;
 
-#if 0
-    /* luke define this based on number of cores */
-    if (switch_core_new_memory_pool(&globals.thread_pool) != SWITCH_STATUS_SUCCESS) {
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Pool Failure\n");
-        return SWITCH_STATUS_TERM;
+    globals.nthreads = switch_core_cpu_count();
+    globals.othreads = (N_CWC-1)*globals.nthreads;
+    globals.tthreads = globals.nthreads+globals.othreads;
+
+    globals.filelist = (filelist_t **)switch_core_alloc(globals.thread_pool,globals.tthreads*sizeof(filelist_t *));
+    globals.conference_thread = (conference_thread_data_t *)switch_core_alloc(globals.thread_pool,globals.tthreads*sizeof(conference_thread_data_t));
+    globals.output_thread = (switch_thread_t **)switch_core_alloc(globals.thread_pool,globals.tthreads*sizeof(switch_thread_t *));
+    globals.output_thread_time = (switch_time_t *)switch_core_alloc(globals.thread_pool,globals.tthreads*sizeof(switch_time_t));
+    globals.output_thread_dead = (int *)switch_core_alloc(globals.thread_pool,globals.tthreads*sizeof(int));
+    globals.conference_thread_line = (uint32_t *)switch_core_alloc(globals.thread_pool,globals.tthreads*sizeof(uint32_t));
+    globals.conference_thread_tid = (uint32_t *)switch_core_alloc(globals.thread_pool,globals.tthreads*sizeof(uint32_t));
+
+    for (int i = 0; i < globals.tthreads; i++) {
+        globals.filelist[i] = NULL;
     }
-#endif
 
     switch_mutex_init(&globals.conference_thread_lock, SWITCH_MUTEX_NESTED, globals.thread_pool);
 
-    globals.number_of_output_threads = MAX_NUMBER_OF_OUTPUT_THREADS;
     globals.start = 0;
 
     globals.playlist_pool = globals.conference_pool;
-#if 0
-    if (switch_core_new_memory_pool(&globals.playlist_pool) != SWITCH_STATUS_SUCCESS) {
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Pool Failure\n");
-        return SWITCH_STATUS_TERM;
-    }
-#endif
 
-    for (int i = MAX_NUMBER_OF_OUTPUT_THREADS-1; i >= 0; i--) {
+    for (int i = globals.tthreads-1; i >= 0; i--) {
         switch_mutex_init(&globals.conference_thread[i].lock, SWITCH_MUTEX_NESTED, globals.thread_pool);
         globals.output_thread_time[i] = switch_time_now();
         globals.output_thread_dead[i] = 0;
@@ -14870,6 +15142,8 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_conference_load)
         globals.conference_thread[i].count = 0;
         globals.conference_thread[i].idx = i;
         globals.conference_thread[i].process_avg_idx = 0;
+        globals.conference_thread[i].signaled = 0;
+        globals.conference_thread[i].run = 0;
         for (int j = 0; j < PROCESS_AVG_CNT; j++) {
             globals.conference_thread[i].process_avg[j] = 20000;
             globals.conference_thread[i].process_avg_min[j] = 20000;

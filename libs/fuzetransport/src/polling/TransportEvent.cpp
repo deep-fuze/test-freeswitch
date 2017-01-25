@@ -15,6 +15,9 @@ namespace fuze {
 
 TransportEvent::TransportEvent()
 {
+#ifdef COPY_TO_BUFFER
+  len = 0;
+#endif
 }
 
 const char* TransportEvent::TETypeStr()

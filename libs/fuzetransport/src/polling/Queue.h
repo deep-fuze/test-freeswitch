@@ -59,7 +59,13 @@ fuze_shared_ptr<T> FuzeQ<T>::GetNext(bool blocking)
 {
     fuze_shared_ptr<T> next;
    
-    lock_.Lock();
+    if (blocking) {
+        lock_.Lock();
+    } else {
+        if (!lock_.Trylock()) {
+	    return next;
+        }
+    }
  
     while (!size_) {
         if (blocking == true) {

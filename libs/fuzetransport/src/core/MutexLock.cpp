@@ -105,4 +105,16 @@ void MutexLock::Unlock()
     }
 }
 
+bool MutexLock::Trylock()
+  {
+    if (isExternal_ == false)
+      {
+#if defined(WIN32)
+#else
+        return (pthread_mutex_trylock(mutex_) == 0);
+#endif
+      }
+  }
+
+
 } // namespace live

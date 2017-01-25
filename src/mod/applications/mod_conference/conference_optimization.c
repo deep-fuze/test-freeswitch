@@ -82,7 +82,7 @@ switch_bool_t cwc_initialize(conference_write_codec_t *cwc, switch_memory_pool_t
         cwc->num_conf_frames = 1;
     } else {
         cwc->encoder = NULL;
-        cwc->num_conf_frames = 5;
+        cwc->num_conf_frames = 10;
     }
 
     cwc->frames = switch_core_alloc(frame_pool, cwc->num_conf_frames*sizeof(conference_frame_t));
@@ -176,7 +176,6 @@ switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t
         cwc->frames[cwc->write_idx].written = SWITCH_TRUE;
     }
 #else
-    cwc->frames[cwc->write_idx].written = SWITCH_TRUE;
     ret = SWITCH_TRUE;
 #endif
 
@@ -193,6 +192,7 @@ switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t
 #else
         memcpy(cwc->frames[cwc->write_idx].frame.data, data, bytes);
         cwc->frames[cwc->write_idx].frame.datalen = bytes;
+        cwc->frames[cwc->write_idx].written = SWITCH_TRUE;
 #endif
         cwc->frames[cwc->write_idx].frame.samples = bytes/2;
         cwc->frames[cwc->write_idx].frame.codec = &cwc->frame_codec;
@@ -231,12 +231,14 @@ switch_bool_t cwc_write_and_copy_buffer(conference_write_codec_t *cwc, conferenc
         cwc->frames[cwc->write_idx].written = SWITCH_TRUE;
     }
 #else
-    cwc->frames[cwc->write_idx].written = SWITCH_TRUE;
     ret = SWITCH_TRUE;
 #endif
 
     if (cwc0->frames[cwc0->write_idx].written && cwc0->frames[cwc0->write_idx].encoded && !cwc->frames[cwc->write_idx].encoded) {
         cwc_set_frame(cwc, cwc->write_idx, &cwc0->frames[cwc0->write_idx].frame);
+#ifndef USE_BUFFER
+        cwc->frames[cwc->write_idx].written = SWITCH_TRUE;
+#endif
     }
     switch_mutex_unlock(cwc->codec_mutex);
 

@@ -253,7 +253,7 @@ SWITCH_DECLARE(void) switch_core_session_get_webrtc_counts(switch_core_session_t
 #define PAUSE_THRESHOLD 20
 
 SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterbuffer(switch_core_session_t *session, switch_frame_t **frame, switch_io_flag_t flags,
-                                                                                      int stream_id, switch_time_t *time_after_wait)
+                                                                                      int stream_id)
 {
     switch_status_t status = SWITCH_STATUS_FALSE;
     int i;
@@ -402,7 +402,7 @@ even_more_done:
 }
 
 SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_socket(switch_core_session_t *session, switch_frame_t **frame, switch_io_flag_t flags,
-                                                                                int stream_id, switch_time_t *time_after_wait)
+                                                                                int stream_id)
 {
     switch_io_event_hook_read_frame_t *ptr;
     switch_status_t status = SWITCH_STATUS_FALSE;

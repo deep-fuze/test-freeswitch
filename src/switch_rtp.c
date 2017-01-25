@@ -518,6 +518,8 @@ struct switch_rtp {
     switch_time_t last_pkt_sent;
     int last_read_log_time_cnt;
     uint32_t last_read_bucket[N_LAST_READ_BUCKETS];
+    switch_size_t ignore_rtp_size;
+    int ignore_rtp_cnt;
 };
 
 struct switch_rtcp_report_block {
@@ -990,21 +992,10 @@ static switch_status_t rtp_sendto(switch_rtp_t *rtp_session, switch_socket_t *so
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_sendto len is -1\n");
         return -1;
     }
-#ifdef CHECK_FOR_LARGE_PKTS
-    else if (*len > 1000 && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_sendto len too large:%zu\n", *len);
-        return -1;
-    }
-#endif
     if (rtp_session && rtp_session->rtp_conn && where) {
         return fuze_transport_socket_write(rtp_session->rtp_conn, (const uint8_t *) buf, *len);
     } 
     return SWITCH_STATUS_SUCCESS;
-#ifdef OLD_TRANSPORT
-    else {
-        return switch_socket_sendto(sock, where, flags, buf, len);
-    }
-#endif
 }
 
 #define LONG_TIME_BETWEEN_READS 100000
@@ -1016,8 +1007,33 @@ static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t
         __sockaddr_t saddr;
         switch_status_t ret = SWITCH_STATUS_FALSE;
         switch_time_t now = switch_time_now();
-        transport_status_t tret = (switch_status_t) fuze_transport_socket_read(rtp_session->rtp_conn, &saddr, (uint8_t *) buf, len);
+        transport_status_t tret = TR_STATUS_FALSE;
         switch_time_t threshold = 0;
+
+		/*
+		 * If the session is muted then transport will just drop the packets
+		 * don't even bother going doing to transport except every once in a while
+		 * to see if any events are waiting
+		 */
+        if (rtp_session->ignore_rtp_size == 1500) {
+            rtp_session->ignore_rtp_cnt += 1;
+            if (rtp_session->ignore_rtp_cnt >= 50) {
+                rtp_session->ignore_rtp_cnt = 0;
+            } else {
+                *len = 0;
+                return SWITCH_STATUS_SUCCESS;
+            }
+        }
+
+        tret = (switch_status_t) fuze_transport_socket_read(rtp_session->rtp_conn, &saddr, (uint8_t *) buf, len);
+
+#if 0
+        if ((switch_time_now() - now) > 1000 && rtp_session->ignore_rtp_size == 0) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+                              "Took a long time to read from Fuze Transport %" PRId64 " tret=%d "
+                              "len=%" PRId64 "\n", switch_time_now() - now, tret, *len);
+        }
+#endif
 
         if (switch_core_session_get_cn_state(rtp_session->session)) {
             threshold = LONG_TIME_BETWEEN_READS * 10;
@@ -1027,7 +1043,7 @@ static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t
 
         if (rtp_session->last_read) {
             switch_time_t delta = now - rtp_session->last_read;
-            if (delta > threshold) {
+            if (delta > threshold && rtp_session->ignore_rtp_size == 0) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
                                   "Long time since last read: %" PRId64 "ms\n", delta/1000);
             }
@@ -1035,7 +1051,7 @@ static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t
             if (*len) {
                 if (rtp_session->last_read_w_data) {
                     delta = now - rtp_session->last_read_w_data;
-                    if ((now - rtp_session->last_read_log_time) > LONG_TIME_BETWEEN_READS*10*10) {
+                    if ((now - rtp_session->last_read_log_time) > LONG_TIME_BETWEEN_READS*10*10 && rtp_session->ignore_rtp_size == 0) {
                         if (rtp_session->last_read_log_time_cnt) {
                             if (delta > threshold) {
                                 int bucket = delta/(1000*LAST_READ_BUCKET_SIZE);
@@ -1081,12 +1097,6 @@ static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t
             }
         }
 
-#ifdef CHECK_FOR_LARGE_PKTS
-        if (*len > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_recvfrom len too large:%zu ret=%x\n", *len, tret);
-        }
-#endif
-        
         switch (tret) {
             case TR_STATUS_SUCCESS:
                 ret = SWITCH_STATUS_SUCCESS;
@@ -1108,18 +1118,6 @@ static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t
         return ret;
     }
     return SWITCH_STATUS_SUCCESS;
-#ifdef OLD_TRANSPORT
-    else {
-        switch_status_t ret = switch_socket_recvfrom(from, sock, flags, buf, len);
-        
-#ifdef CHECK_FOR_LARGE_PKTS
-        if (*len > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_recvfrom len too large:%zu ret=%x\n", *len, ret);
-        }
-#endif
-        return ret;
-    }
-#endif
 }
 
 static switch_status_t rtcp_sendto(switch_rtp_t *rtp_session, switch_socket_t *sock,
@@ -1129,21 +1127,11 @@ static switch_status_t rtcp_sendto(switch_rtp_t *rtp_session, switch_socket_t *s
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtcp_sendto len is -1\n");
         return -1;
     }
-#ifdef CHECK_FOR_LARGE_PKTS
-    else if (*len > 1000 && (!rtp_session->rtcp_dtls || (rtp_session->rtcp_dtls && rtp_session->rtcp_dtls->state == DS_READY))) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtcp_sendto len too large:%zu\n", *len);
-        return -1;
-    }
-#endif
+
     if (rtp_session && rtp_session->rtcp_conn && where) {
         return fuze_transport_socket_write(rtp_session->rtcp_conn, (const uint8_t *) buf, *len);
     }
     return SWITCH_STATUS_SUCCESS;
-#ifdef OLD_TRANSPORT
-    else {
-        return switch_socket_sendto(sock, where, flags, buf, len);
-    }
-#endif
 }
 
 static switch_status_t rtcp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t *from,
@@ -1155,12 +1143,6 @@ static switch_status_t rtcp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_
 
         transport_status_t tret = (switch_status_t) fuze_transport_socket_read(rtp_session->rtcp_conn, &saddr, (uint8_t *) buf, len);
         
-#ifdef CHECK_FOR_LARGE_PKTS
-        if (*len > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtcp_recvfrom len too large:%zu ret=%x\n", *len, tret);
-        }
-#endif
-        
         switch (tret) {
             case TR_STATUS_SUCCESS:
                 ret = SWITCH_STATUS_SUCCESS;
@@ -1182,11 +1164,6 @@ static switch_status_t rtcp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_
         return ret;
     }
     return SWITCH_STATUS_SUCCESS;
-#ifdef OLD_TRANSPORT
-    else {
-        return switch_socket_recvfrom(from, sock, flags, buf, len);
-    }
-#endif
 }
 
 static switch_bool_t do_2833(switch_rtp_t *rtp_session);
@@ -1540,7 +1517,9 @@ static handle_rfc2833_result_t handle_rfc2833(switch_rtp_t *rtp_session, switch_
                     if (!switch_rtp_ready(rtp_session)) {
                         return RESULT_GOTO_END;
                     }
-                    switch_cond_next();
+                    if (!rtp_session->dontwait) {
+                        switch_cond_next();
+                    }
                     return RESULT_GOTO_RECVFROM;
                 }
 
@@ -1560,7 +1539,9 @@ static handle_rfc2833_result_t handle_rfc2833(switch_rtp_t *rtp_session, switch_
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "drop: %c %u %u %u %u %d %d\n",
                    key, in_digit_seq, rtp_session->dtmf_data.in_digit_seq, ts, duration, rtp_session->recv_msg.header.m, end);
 #endif
-            switch_cond_next();
+            if (!rtp_session->dontwait) {
+                switch_cond_next();
+            }
             return RESULT_GOTO_RECVFROM;
         }
     }
@@ -1669,12 +1650,6 @@ static switch_status_t ice_out(switch_rtp_t *rtp_session, switch_rtp_ice_t *ice)
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_CRIT, "%s send %s stun\n", rtp_session_name(rtp_session), rtp_type(rtp_session));
 #endif
     
-#ifdef CHECK_FOR_LARGE_PKTS
-    if (bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_sendto len too large:%zu\n", bytes);
-    }
-#endif
-
     rtp_sendto(rtp_session, sock_output, ice->addr, 0, (void *) packet, &bytes);
     //switch_socket_sendto(sock_output, ice->addr, 0, (void *) packet, &bytes);
 
@@ -2009,6 +1984,14 @@ static void handle_ice(switch_rtp_t *rtp_session, switch_rtp_ice_t *ice, void *d
 
                 for (i = 0; i <= ice->ice_params->cand_idx; i++) {
                     if (ice->ice_params->cands[i][ice->proto].con_port == port) {
+						if (!ice->ice_params->cands[i][ice->proto].con_addr ||
+							!ice->ice_params->cands[i][ice->proto].cand_type) {
+							switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+											  "Invalid ICE param addr:%d type:%d\n",
+											  ice->ice_params->cands[i][ice->proto].con_addr != 0,
+											  ice->ice_params->cands[i][ice->proto].cand_type != 0);
+							continue;
+						}
                         if (!strcmp(ice->ice_params->cands[i][ice->proto].con_addr, host) &&
                             !strcmp(ice->ice_params->cands[i][ice->proto].cand_type, "relay")) {
 
@@ -2060,12 +2043,6 @@ static void handle_ice(switch_rtp_t *rtp_session, switch_rtp_ice_t *ice, void *d
                 }
 
             }
-
-#ifdef CHECK_FOR_LARGE_PKTS
-            if (bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_sendto len too large:%zu\n", bytes);
-            }
-#endif
 
             rtp_sendto(rtp_session, sock_output, from_addr, 0, (void *) rpacket, &bytes);
         }
@@ -2461,11 +2438,6 @@ static void send_fir(switch_rtp_t *rtp_session)
                           rtp_session_name(rtp_session),
                           rtp_session->flags[SWITCH_RTP_FLAG_VIDEO] ? "video" : "audio", rtcp_bytes);
 #endif
-#ifdef CHECK_FOR_LARGE_PKTS
-        if (rtcp_bytes > SIZE_OF_30MS_PKT && (!rtp_session->rtcp_dtls || (rtp_session->rtcp_dtls && rtp_session->rtcp_dtls->state == DS_READY))) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_sendto len too large:%zu\n", rtcp_bytes);
-        }
-#endif
         if (rtp_sendto(rtp_session, rtp_session->rtcp_sock_output, rtp_session->rtcp_remote_addr, 0, (void *)&rtp_session->rtcp_ext_send_msg, &rtcp_bytes ) != SWITCH_STATUS_SUCCESS) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_DEBUG,"RTCP packet not written\n");
         } else {
@@ -2553,12 +2525,6 @@ static void send_pli(switch_rtp_t *rtp_session)
                           rtp_session->flags[SWITCH_RTP_FLAG_VIDEO] ? "video" : "audio", rtcp_bytes);
 #endif
         
-#ifdef CHECK_FOR_LARGE_PKTS
-        if (rtcp_bytes > SIZE_OF_30MS_PKT && (!rtp_session->rtcp_dtls || (rtp_session->rtcp_dtls && rtp_session->rtcp_dtls->state == DS_READY))) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_sendto len too large:%zu\n", rtcp_bytes);
-        }
-#endif
-
         if (rtp_sendto(rtp_session, rtp_session->rtcp_sock_output, rtp_session->rtcp_remote_addr, 0, (void *)&rtp_session->rtcp_ext_send_msg, &rtcp_bytes ) != SWITCH_STATUS_SUCCESS) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_DEBUG,"RTCP packet not written\n");
         } else {
@@ -3443,12 +3409,6 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_set_local_address(switch_rtp_t *rtp_s
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "ERROR on setting TOS Value.\n");
         }
         
-#ifdef CHECK_FOR_LARGE_PKTS
-        if (len > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_sendto len too large:%zu\n", len);
-        }
-#endif
-
         rtp_sendto(rtp_session, new_sock, rtp_session->local_addr, 0, (void *) o, &len);
 
         x = 0;
@@ -3464,6 +3424,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_set_local_address(switch_rtp_t *rtp_s
             if (++x > 1000) {
                 break;
             }
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "This shouldn't be called\n");
             switch_cond_next();
         }
         switch_socket_opt_set(new_sock, SWITCH_SO_NONBLOCK, FALSE);
@@ -3570,12 +3531,6 @@ static void ping_socket(switch_rtp_t *rtp_session)
     uint32_t o = UINT_MAX;
     switch_size_t len = sizeof(o);
     
-#ifdef CHECK_FOR_LARGE_PKTS
-    if (len > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_sendto len too large:%zu\n", len);
-    }
-#endif
-
     rtp_sendto(rtp_session, rtp_session->sock_input, rtp_session->local_addr, 0, (void *) &o, &len);
 
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
@@ -3897,12 +3852,6 @@ static int do_dtls(switch_rtp_t *rtp_session, switch_dtls_t *dtls)
     if ((len = BIO_read(dtls->write_bio, buf, sizeof(buf))) > 0) {
         bytes = len;
 
-#ifdef CHECK_FOR_LARGE_PKTS
-        if (bytes > SIZE_OF_30MS_PKT && dtls->state == DS_READY) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "do_dtls len too large:%zu\n", bytes);
-        }
-#endif
-        
         if (rtp_sendto(rtp_session, dtls->sock_output, dtls->remote_addr, 0, (void *)buf, &bytes ) != SWITCH_STATUS_SUCCESS) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "%s DTLS packet not written\n", rtp_type(rtp_session));
         }
@@ -4644,6 +4593,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
 
     rtp_session->last_adjust_cn_count = switch_time_now();
     rtp_session->bad_packet_size_recv = 0;
+    rtp_session->ignore_rtp_size = 0;
 
     rtp_session->stats.recv_rate_history_idx = 0;
     rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
@@ -5766,13 +5716,14 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
     uint32_t ts = 0;
     unsigned char *b = NULL;
     int sync = 0;
-    switch_time_t now;
+    switch_time_t now = switch_time_now();
     switch_size_t xcheck_jitter = 0;
     switch_size_t ebytes;
-
     switch_assert(bytes);
 
  more:
+
+    now = switch_time_now();
 
     *bytes = sizeof(rtp_msg_t);
     sync = 0;
@@ -5780,6 +5731,11 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
     memset(&rtp_session->recv_msg, 0, sizeof(rtp_session->recv_msg));
 
     status = rtp_recvfrom(rtp_session, rtp_session->from_addr, rtp_session->sock_input, 0, (void *) &rtp_session->recv_msg, bytes);
+    now = switch_time_now() - now;
+    if (now > 1000) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_DEBUG10,
+                          "long rtp_recvfrom %" PRId64 "\n", now);
+    }
     ts = ntohl(rtp_session->recv_msg.header.ts);
 
     ebytes = *bytes;
@@ -5787,13 +5743,6 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
     if (status != SWITCH_STATUS_SUCCESS) {
         return status;
     }
-    
-#ifdef CHECK_FOR_LARGE_PKTS
-    if (*bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "read_rtp_packet len too large:%zu status=%x\n",
-                          *bytes, status);
-    }
-#endif
     
     if (*bytes) {
         rtp_session->missed_count = 0;
@@ -5928,7 +5877,7 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
 
 
     if (sync) {
-        if (!rtp_session->flags[SWITCH_RTP_FLAG_USE_TIMER] && rtp_session->timer.interval) {
+        if (!rtp_session->flags[SWITCH_RTP_FLAG_USE_TIMER] && rtp_session->timer.interval && !rtp_session->dontwait) {
             switch_core_timer_sync(&rtp_session->timer);
             reset_jitter_seq(rtp_session);
         }
@@ -5989,13 +5938,6 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
                 *bytes -= ((length * 4) + 4);
             }
         }
-
-#ifdef CHECK_FOR_LARGE_PKTS
-        if (*bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "read_rtp_packet len too large:%zu status=%x\n",
-                              *bytes, status);
-        }
-#endif
 
         if (rtp_session->last_seq && rtp_session->last_seq+1 != seq) {
             //2012-11-28 18:33:11.799070 [ERR] switch_rtp.c:2883 Missed -65536 RTP frames from sequence [65536] to [-1] (missed). Time since last read [20021]
@@ -6153,14 +6095,6 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
                 default:
                     break;
                 }
-                
-#ifdef CHECK_FOR_LARGE_PKTS
-                if (*bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "read_rtp_packet len too large:%zu status=%x\n",
-                                      *bytes, status);
-                }
-#endif
-
             }
 #endif
 
@@ -6211,13 +6145,6 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
 
                 *bytes = sbytes;
                     
-#ifdef CHECK_FOR_LARGE_PKTS
-                if (*bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "read_rtp_packet len too large:%zu status=%x\n",
-                                      *bytes, status);
-                }
-#endif
-
             }
 #endif
         }
@@ -6257,7 +6184,9 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
         }
 
         if (!rtp_session->flags[SWITCH_RTP_FLAG_USE_TIMER] && rtp_session->timer.interval) {
-            switch_core_timer_sync(&rtp_session->timer);
+            if (!rtp_session->dontwait) {
+                switch_core_timer_sync(&rtp_session->timer);
+            }
             reset_jitter_seq(rtp_session);
         }
 
@@ -6670,13 +6599,6 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                     }
 #endif
                     
-#ifdef CHECK_FOR_LARGE_PKTS
-                    if (bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "read_rtp_packet len too large:%zu status=%x\n",
-                                          bytes, status);
-                    }
-#endif
-                    
                     if (status == SWITCH_STATUS_GENERR) {
                         ret = -1;
                         goto end;
@@ -6798,13 +6720,6 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                     char tmpbuf[32];
                     switch_snprintf(tmpbuf, 32, "(%"PRId64"),", bytes);
                     strncat(trace_buffer, tmpbuf, 1023);
-                }
-#endif
-
-#ifdef CHECK_FOR_LARGE_PKTS
-                if (bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "read_rtp_packet len too large:%zu status=%x\n",
-                                      bytes, status);
                 }
 #endif
 
@@ -6947,13 +6862,6 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                                         }
                                         rtcp_bytes = sbytes;
 
-#ifdef CHECK_FOR_LARGE_PKTS
-                                        if (rtcp_bytes > SIZE_OF_30MS_PKT && (!rtp_session->rtcp_dtls || (rtp_session->rtcp_dtls && rtp_session->rtcp_dtls->state == DS_READY))) {
-                                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "srtp len too large:%zu status=%x\n",
-                                                              rtcp_bytes, stat);
-                                        }
-#endif
-
                                     }
 #endif
 
@@ -6982,23 +6890,9 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
 
                                         bytes = sbytes;
                                         
-#ifdef CHECK_FOR_LARGE_PKTS
-                                        if (bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-                                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "zrtp len too large:%zu status=%x\n",
-                                                              bytes, stat);
-                                        }
-#endif
-
                                     }
 #endif
                                     
-#ifdef CHECK_FOR_LARGE_PKTS
-                                    if (rtcp_bytes > SIZE_OF_30MS_PKT && (!rtp_session->rtcp_dtls || (rtp_session->rtcp_dtls && rtp_session->rtcp_dtls->state == DS_READY))) {
-                                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtcp sendto len too large:%zu\n",
-                                                          rtcp_bytes);
-                                    }
-#endif
-
                                     if (rtcp_sendto(other_rtp_session, other_rtp_session->rtcp_sock_output, other_rtp_session->rtcp_remote_addr, 0,
                                                              (const char*)&other_rtp_session->rtcp_send_msg, &rtcp_bytes ) != SWITCH_STATUS_SUCCESS) {
                                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_DEBUG,"RTCP packet not written\n");
@@ -7016,7 +6910,9 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                             ret = 1;
 
                             if (!rtp_session->flags[SWITCH_RTP_FLAG_USE_TIMER] && rtp_session->timer.interval) {
-                                switch_core_timer_sync(&rtp_session->timer);
+                                if (!rtp_session->dontwait) {
+                                    switch_core_timer_sync(&rtp_session->timer);
+                                }
                                 reset_jitter_seq(rtp_session);
                             }
 
@@ -7398,7 +7294,9 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
         if (check || (bytes && !rtp_session->flags[SWITCH_RTP_FLAG_USE_TIMER])) {
             if (!bytes && rtp_session->flags[SWITCH_RTP_FLAG_USE_TIMER]) {  /* We're late! We're Late! */
                 if (!rtp_session->flags[SWITCH_RTP_FLAG_NOBLOCK] && status == SWITCH_STATUS_BREAK) {
-                    switch_cond_next();
+                    if (!rtp_session->dontwait) {
+                        switch_cond_next();
+                    }
                     continue;
                 }
 
@@ -7462,13 +7360,6 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
 
  end:
     
-#ifdef CHECK_FOR_LARGE_PKTS
-    if (bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_common_read len too large:%zu ret=%d\n",
-                          bytes, ret);
-    }
-#endif
-
     READ_DEC(rtp_session);
 
 #ifdef TRACE_READ
@@ -7735,12 +7626,6 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_zerocopy_read_frame(switch_rtp_t *rtp
         bytes -= rtp_header_len;
     }
 
-#ifdef CHECK_FOR_LARGE_PKTS
-    if ((bytes < 0 || bytes > SIZE_OF_30MS_PKT) && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "something went horribly wrong (bytes=%d)!\n", bytes);
-    }
-#endif
-
     /* fuze: optional 10 bytes at end of packet for srtp? */
     if (frame->payload == 9 || frame->payload == 8 || frame->payload == 0) {
         int frames = bytes / 80;
@@ -7774,12 +7659,6 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_zerocopy_read(switch_rtp_t *rtp_sessi
     }
 
     *datalen = bytes;
-
-#ifdef CHECK_FOR_LARGE_PKTS
-    if ((bytes < 0 || bytes > SIZE_OF_30MS_PKT) && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "something went horribly wrong (bytes=%d)!\n", bytes);
-    }
-#endif
 
     return SWITCH_STATUS_SUCCESS;
 }
@@ -7923,12 +7802,6 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 
         memcpy(send_msg->body, data, datalen);
         bytes = datalen + rtp_header_len;
-
-#ifdef CHECK_FOR_LARGE_PKTS
-        if (bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "something went horribly wrong (bytes=%zu)!\n", bytes);
-        }
-#endif
 
     }
     
@@ -8307,23 +8180,23 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                     int delta_ts = (this_ts - (rtp_session->last_write_ts+adjust_ts_step))/160;
                     int delta = seq_out_of_order_step - delta_ts;
                     if (delta >= -8 && delta <= 8 && delta != 0) {
-						/*
-						 * only adjust if directionally the sequence numbers and timestamps
-						 * are the same.
-						 */
-						if ((delta > 0 && seq_out_of_order_step > 0) || (delta < 0 && seq_out_of_order_step < 0)) {
-							if (delta != rtp_session->last_ts_delta) {
-								switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
-												  "adjust timestamp: dl:%u seq %u -> %u ts %u -> %u delta_seq %d delta_ts %d --> delta %d ts %u --> %u\n",
-												  datalen, rtp_session->last_bridge_seq[0] + 1, seq_no_from_rtp,
-												  rtp_session->last_write_ts+adjust_ts_step, this_ts,
-												  seq_out_of_order_step, delta_ts, delta,
-												  this_ts, (uint32_t)(this_ts + (delta*adjust_ts_step)));
-							}
-							rtp_session->last_ts_delta = delta;
-							this_ts += (delta*adjust_ts_step);
-							send_msg->header.ts = htonl(this_ts);
-						}
+                        /*
+                         * only adjust if directionally the sequence numbers and timestamps
+                         * are the same.
+                         */
+                        if ((delta > 0 && seq_out_of_order_step > 0) || (delta < 0 && seq_out_of_order_step < 0)) {
+                            if (delta != rtp_session->last_ts_delta) {
+                                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+                                                  "adjust timestamp: dl:%u seq %u -> %u ts %u -> %u delta_seq %d delta_ts %d --> delta %d ts %u --> %u\n",
+                                                  datalen, rtp_session->last_bridge_seq[0] + 1, seq_no_from_rtp,
+                                                  rtp_session->last_write_ts+adjust_ts_step, this_ts,
+                                                  seq_out_of_order_step, delta_ts, delta,
+                                                  this_ts, (uint32_t)(this_ts + (delta*adjust_ts_step)));
+                            }
+                            rtp_session->last_ts_delta = delta;
+                            this_ts += (delta*adjust_ts_step);
+                            send_msg->header.ts = htonl(this_ts);
+                        }
                     }
                 }
             }
@@ -8548,12 +8421,6 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 
         }
         
-#ifdef CHECK_FOR_LARGE_PKTS
-        if (bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_sendto len too large:%zu\n", bytes);
-        }
-#endif
-
         if (rtp_sendto(rtp_session, rtp_session->sock_output, rtp_session->remote_addr, 0, (void *) send_msg, &bytes) != SWITCH_STATUS_SUCCESS) {
             if (rtp_session->rtp_send_fail_count == 0) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_sendto of seq=%u %zu bytes failed START\n", rtp_session->seq, bytes);
@@ -8763,12 +8630,6 @@ SWITCH_DECLARE(int) switch_rtp_write_frame(switch_rtp_t *rtp_session, switch_fra
             send_msg->header.seq = htons(++rtp_session->seq);
         }
 
-#ifdef CHECK_FOR_LARGE_PKTS
-        if (bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_sendto len too large:%zu\n", bytes);
-        }
-#endif
-
         if (rtp_sendto(rtp_session, rtp_session->sock_output, rtp_session->remote_addr, 0, frame->packet, &bytes) != SWITCH_STATUS_SUCCESS) {
             return -1;
         }
@@ -8911,13 +8772,6 @@ SWITCH_DECLARE(int) switch_rtp_write_frame(switch_rtp_t *rtp_session, switch_fra
       }
     */
 
-#ifdef CHECK_FOR_LARGE_PKTS
-    if (len > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "Calling rtp_common_write with a too large len: %u pl=%u dl=%u fwd=%d\n",
-                          len, frame->packetlen, frame->datalen, fwd);
-    }
-#endif
-    
     return rtp_common_write(rtp_session, send_msg, data, len, payload, ts, &frame->flags);
 }
 
@@ -9044,12 +8898,6 @@ SWITCH_DECLARE(int) switch_rtp_write_manual(switch_rtp_t *rtp_session,
     }
 #endif
     
-#ifdef CHECK_FOR_LARGE_PKTS
-    if (bytes > SIZE_OF_30MS_PKT && (!rtp_session->dtls || (rtp_session->dtls && rtp_session->dtls->state == DS_READY))) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_sendto len too large:%zu\n", bytes);
-    }
-#endif
-
     if (rtp_sendto(rtp_session, rtp_session->sock_output, rtp_session->remote_addr, 0, (void *) &rtp_session->write_msg, &bytes) != SWITCH_STATUS_SUCCESS) {
         rtp_session->seq--;
         ret = -1;
@@ -9485,6 +9333,32 @@ SWITCH_DECLARE(void) switch_check_bridge_channel_timestamps(switch_channel_t *ch
     rtp_session_a->time_of_last_xchannel_ts_check = now;
     rtp_session_b->time_of_last_xchannel_ts_check = now;
 }
+
+SWITCH_DECLARE(void) switch_rtp_silence_transport(switch_channel_t *channel, int size)
+{
+    switch_rtp_t *rtp_session;
+
+    rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session) {
+        return;
+    }
+
+    if (rtp_session->ignore_rtp_size != size && !rtp_session->flags[SWITCH_ZRTP_FLAG_SECURE_RECV]) {
+        if (size > 0) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+                              "Silencing session for packets < %d bytes\n", size);
+        } else {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+                              "Disabling silencing for session\n");
+        }
+
+        fuze_transport_ignore_packets(rtp_session->rtp_conn, size);
+        rtp_session->ignore_rtp_size = size;
+    }
+    return;
+}
+
 
 
 /* For Emacs:
