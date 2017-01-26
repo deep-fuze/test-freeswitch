@@ -688,6 +688,7 @@ typedef struct conference_obj {
 
     uint32_t participants_per_thread[N_CWC];
     uint32_t g711acnt, g711ucnt, g722cnt;
+    int lineno;
 } conference_obj_t;
 
 /* Relationship with another member */
@@ -1337,7 +1338,9 @@ static const char *audio_flow(conference_member_t *member)
     return flow;
 }
 
-void conference_mutex_lock(conference_obj_t *conference) {
+#define conference_mutex_lock(conference) conference_mutex_lock_line(conference, __LINE__)
+
+void conference_mutex_lock_line(conference_obj_t *conference, int line) {
     switch_time_t now = switch_time_now();
     switch_mutex_lock(conference->mutex);
     now = switch_time_now() - now;
@@ -1346,14 +1349,17 @@ void conference_mutex_lock(conference_obj_t *conference) {
                           "TIMELOCK: Conference locked for a long time to acquire %" PRId64 "ms\n", now);
     }
     conference->mutex_time = switch_time_now();
+    conference->lineno = line;
 }
 
 void conference_mutex_unlock(conference_obj_t *conference) {
     switch_time_t now = switch_time_now();
     if ((now - conference->mutex_time) > 10000) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
-                          "TIMELOCK: Conference locked for a long time %" PRId64 "ms\n", (now - conference->mutex_time)/1000);
+                          "TIMELOCK: Conference locked (mod_conference.c:%d) for a long time %" PRId64 "ms\n",
+                          conference->lineno, (now - conference->mutex_time)/1000);
     }
+    conference->lineno = 0;
     switch_mutex_unlock(conference->mutex);
 }
 
@@ -7104,7 +7110,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                 time_in_meeting = (switch_time_now() - ols->member->time_of_first_packet)/1000;
                 data_time = (ols->member->data_sent/8);
 
-                if (abs(time_in_meeting-data_time) > 250 || ols->member->one_of_active) {
+                if (abs(time_in_meeting-data_time) > 250) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_WARNING,
                                       "time in meeting: %" PRId64 "ms data time: %" PRId64 "ms delta: %" PRId64 "ms\n",
                                       time_in_meeting, data_time, time_in_meeting-data_time);
@@ -8095,7 +8101,8 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         } else if (path != PARTICIPANT_OUTPUT_PATH_FILE) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "didn't send a frame path:%d!\n", path);
         }
-        if (path == PARTICIPANT_OUTPUT_PATH_OTHER || path == PARTICIPANT_OUTPUT_PATH_FILE) {
+        if (path == PARTICIPANT_OUTPUT_PATH_OTHER || path == PARTICIPANT_OUTPUT_PATH_FILE ||
+            path == PARTICIPANT_OUTPUT_ACTIVE_BUT_NO_DATA) {
             ret = OUTPUT_LOOP_OK_NOT_SENT;
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "adjusting timestamp by 160!\n");
             switch_rtp_update_ts(member->channel, 160);
