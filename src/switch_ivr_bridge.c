@@ -793,7 +793,11 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
                 continue;
             }
 
-            /* fuze */
+            if (!(read_frame->flags & SFF_TIMEOUT)) {
+                switch_bridge_channel_get_ts_and_seq(chan_a, chan_b);
+            }
+
+            /* Fuze */
             if (status != SWITCH_STATUS_BREAK && !skip && !switch_channel_test_flag(chan_a, CF_HOLD)) {
                 if (switch_core_session_write_frame(session_b, read_frame, SWITCH_IO_FLAG_NONE, stream_id) != SWITCH_STATUS_SUCCESS) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), SWITCH_LOG_DEBUG,

@@ -520,6 +520,12 @@ struct switch_rtp {
     uint32_t last_read_bucket[N_LAST_READ_BUCKETS];
     switch_size_t ignore_rtp_size;
     int ignore_rtp_cnt;
+
+    uint32_t anchor_next_ts;
+    uint16_t anchor_next_seq;
+
+    uint32_t anchor_base_ts;
+    uint16_t anchor_base_seq;
 };
 
 struct switch_rtcp_report_block {
@@ -1010,11 +1016,11 @@ static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t
         transport_status_t tret = TR_STATUS_FALSE;
         switch_time_t threshold = 0;
 
-		/*
-		 * If the session is muted then transport will just drop the packets
-		 * don't even bother going doing to transport except every once in a while
-		 * to see if any events are waiting
-		 */
+        /*
+         * If the session is muted then transport will just drop the packets
+         * don't even bother going doing to transport except every once in a while
+         * to see if any events are waiting
+         */
         if (rtp_session->ignore_rtp_size == 1500) {
             rtp_session->ignore_rtp_cnt += 1;
             if (rtp_session->ignore_rtp_cnt >= 50) {
@@ -1093,7 +1099,7 @@ static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t
         } else {
             rtp_session->last_read = now;
             if (*len) {
-                rtp_session->last_read_w_data =now;
+                rtp_session->last_read_w_data = now;
             }
         }
 
@@ -1984,14 +1990,14 @@ static void handle_ice(switch_rtp_t *rtp_session, switch_rtp_ice_t *ice, void *d
 
                 for (i = 0; i <= ice->ice_params->cand_idx; i++) {
                     if (ice->ice_params->cands[i][ice->proto].con_port == port) {
-						if (!ice->ice_params->cands[i][ice->proto].con_addr ||
-							!ice->ice_params->cands[i][ice->proto].cand_type) {
-							switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
-											  "Invalid ICE param addr:%d type:%d\n",
-											  ice->ice_params->cands[i][ice->proto].con_addr != 0,
-											  ice->ice_params->cands[i][ice->proto].cand_type != 0);
-							continue;
-						}
+                        if (!ice->ice_params->cands[i][ice->proto].con_addr ||
+                            !ice->ice_params->cands[i][ice->proto].cand_type) {
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+                                              "Invalid ICE param addr:%d type:%d\n",
+                                              ice->ice_params->cands[i][ice->proto].con_addr != 0,
+                                              ice->ice_params->cands[i][ice->proto].cand_type != 0);
+                            continue;
+                        }
                         if (!strcmp(ice->ice_params->cands[i][ice->proto].con_addr, host) &&
                             !strcmp(ice->ice_params->cands[i][ice->proto].cand_type, "relay")) {
 
@@ -4591,6 +4597,11 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->stats.last_variance = -1;
     rtp_session->stats.last_flaws = -1;
 
+    rtp_session->anchor_base_ts = 0;
+    rtp_session->anchor_next_ts = 0;
+    rtp_session->anchor_base_seq = 0;
+    rtp_session->anchor_next_seq = 0;
+
     rtp_session->last_adjust_cn_count = switch_time_now();
     rtp_session->bad_packet_size_recv = 0;
     rtp_session->ignore_rtp_size = 0;
@@ -5763,7 +5774,6 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
         goto udptl;
     }
 
-
     if (*bytes) {
         b = (unsigned char *) &rtp_session->recv_msg;
 
@@ -5831,6 +5841,8 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
             *flags |= SFF_RTCP;
             rtp_session->flags[SWITCH_RTP_FLAG_RTCP_MUX]++;
             //*bytes = 0;
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+                              "dropping\n");
             return SWITCH_STATUS_SUCCESS;
     }
 
@@ -8089,20 +8101,10 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
     /* fuze */
     if (send) {
         switch_time_t cn_delta = (switch_time_now() - rtp_session->last_adjust_cn_count)/(1000*1000); /* seconds */
-        switch_bool_t log_cn = (rtp_session->adjust_cn_count == 0 && cn_delta > 10);
 
         if (rtp_session->use_webrtc_neteq) {
             /* this is the case where we have a jitter buffer and we're just generating our own sequence numbers */
             send_msg->header.seq = htons(++rtp_session->seq);
-#if 0
-            if (rtp_session->last_pkt_sent) {
-                switch_time_t delta = (switch_time_now() - rtp_session->last_pkt_sent)/1000;
-                if (delta < 10) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
-                                      "short time between sends: %" PRId64 "ms\n", delta);
-                }
-            }
-#endif
             rtp_session->last_pkt_sent  = switch_time_now();
         } else if (*flags & SFF_IVR_FRAME) {
             switch_time_t now = switch_time_now();
@@ -8141,14 +8143,15 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             uint16_t new_seq_no = rtp_session->seq;
             uint16_t seq_no_from_rtp = ntohs(send_msg->header.seq);
             switch_bool_t out_of_order = SWITCH_FALSE;
-            switch_bool_t adjusted_cn = SWITCH_FALSE;
-            int seq_out_of_order_step = 0;
 
-            if (rtp_session->is_ivr == SWITCH_TRUE) {
+            if (rtp_session->is_ivr == SWITCH_TRUE && !rtp_session->is_bridge) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s ivr -> bridge (%u) seq=%u bpath=%d x=%d\n",
                                   rtp_session->rtp_conn_name, rtp_session->write_count, rtp_session->seq, bpath, send_msg->header.x);
-                rtp_session->is_ivr = SWITCH_FALSE;
+                // rtp_session->is_ivr = SWITCH_FALSE; REMEMBER THAT WE WERE AN IVR SESSION
                 rtp_session->write_count = 0;
+                rtp_session->is_bridge = SWITCH_TRUE;
+                rtp_session->anchor_base_ts = rtp_session->anchor_next_seq;
+                rtp_session->anchor_base_seq = rtp_session->anchor_next_seq;
             }
 
             if (rtp_session->write_count % LOG_OUT_FREQUENCY == 0) {
@@ -8163,7 +8166,6 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 rtp_session->seq += 1;
             } else if ((rtp_session->last_bridge_seq[0] + 1) != seq_no_from_rtp) {
                 out_of_order = SWITCH_TRUE;
-                seq_out_of_order_step = (seq_no_from_rtp - (rtp_session->last_bridge_seq[0] + 1));
             }
 
             if (rtp_session->write_count == 0) {
@@ -8175,127 +8177,47 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 goto end;
             }
 
-            if (seq_out_of_order_step && !(*flags & SFF_CNG)) {
-                if (seq_out_of_order_step >= -8 && seq_out_of_order_step <= 8 && rtp_session->last_write_ts_set) {
-                    int delta_ts = (this_ts - (rtp_session->last_write_ts+adjust_ts_step))/160;
-                    int delta = seq_out_of_order_step - delta_ts;
-                    if (delta >= -8 && delta <= 8 && delta != 0) {
-                        /*
-                         * only adjust if directionally the sequence numbers and timestamps
-                         * are the same.
-                         */
-                        if ((delta > 0 && seq_out_of_order_step > 0) || (delta < 0 && seq_out_of_order_step < 0)) {
-                            if (delta != rtp_session->last_ts_delta) {
-                                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
-                                                  "adjust timestamp: dl:%u seq %u -> %u ts %u -> %u delta_seq %d delta_ts %d --> delta %d ts %u --> %u\n",
-                                                  datalen, rtp_session->last_bridge_seq[0] + 1, seq_no_from_rtp,
-                                                  rtp_session->last_write_ts+adjust_ts_step, this_ts,
-                                                  seq_out_of_order_step, delta_ts, delta,
-                                                  this_ts, (uint32_t)(this_ts + (delta*adjust_ts_step)));
-                            }
-                            rtp_session->last_ts_delta = delta;
-                            this_ts += (delta*adjust_ts_step);
-                            send_msg->header.ts = htonl(this_ts);
-                        }
-                    }
-                }
-            }
-
             if (*flags & SFF_CNG) {
-                uint16_t oseq, aseq;
-                uint32_t ots, ats;
-                uint8_t opt, apt;
-
-                oseq = seq_no_from_rtp;
-                aseq = seq_no_from_rtp;
-                if (out_of_order) {
-                    seq_no_from_rtp = rtp_session->last_bridge_seq[0] + 1;
-                    aseq = seq_no_from_rtp;
-                    adjusted_cn = SWITCH_TRUE;
-                }
-
-                ots = this_ts;
-                ats = this_ts;
-                if (this_ts == rtp_session->last_write_ts) {
-                    this_ts += adjust_ts_step;
-                    send_msg->header.ts = htonl(this_ts);
-                    ats = this_ts;
-                    adjusted_cn = SWITCH_TRUE;
-                }
-
-                send_msg->header.m = 0;
-
-                opt = send_msg->header.pt;
-                apt = send_msg->header.pt;
                 if (rtp_session->cng_pt) {
                     if (send_msg->header.pt != rtp_session->cng_pt) {
                         send_msg->header.pt = rtp_session->cng_pt;
-                        apt = send_msg->header.pt;
-                        adjusted_cn = SWITCH_TRUE;
                     }
                 } else {
                     if (send_msg->header.pt != 13) {
                         send_msg->header.pt = 13;
-                        apt = send_msg->header.pt;
-                        adjusted_cn = SWITCH_TRUE;
                     }
                 }
-
-                if (log_cn) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "start cn adjust pt: %d -> %d sq: %u -> %u ts: %u -> %u len=%u\n",
-                                      opt, apt, oseq, aseq, ots, ats, datalen);
-                }
-
-                if (adjusted_cn) {
-                    rtp_session->last_adjust_cn_count = switch_time_now();
-                    rtp_session->adjust_cn_count +=1;
-                } else {
-                    rtp_session->last_adjust_cn_count = switch_time_now();
-                    rtp_session->adjust_cn_count = 0;
-                }
-            } else {
-                if (rtp_session->adjust_cn_count > 0) {
-                    rtp_session->last_adjust_cn_count = switch_time_now();
-                    rtp_session->adjust_cn_count = 0;
-                }
             }
 
-            new_seq_no += seq_no_from_rtp; // rtp_session->last_seq;
-            new_seq_no -= rtp_session->base_seq;
+            send_msg->header.m = 0;
 
-            if (rtp_session->sync_seq_no) {
-                if (new_seq_no != rtp_session->last_bridge_seq[1]+1) {
-                    int16_t diff = rtp_session->last_bridge_seq[1] + 1 - new_seq_no;
-                    rtp_session->base_seq -= diff;
-                    new_seq_no -= (-diff);
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "adjust sequence number: diff=%d\n", diff);
-                }
-                rtp_session->sync_seq_no = SWITCH_FALSE;
+            if (rtp_session->is_bridge) {
+                uint16_t bseq;
+                uint32_t bts;
+
+                bseq = rtp_session->anchor_next_seq + rtp_session->anchor_base_seq;
+                bts = rtp_session->anchor_next_ts + rtp_session->anchor_base_ts;
+
+                send_msg->header.seq = htons(bseq);
+                send_msg->header.ts = htonl(bts);
+                rtp_session->last_bridge_seq[0] = bseq;
+                rtp_session->last_write_ts = bts;
+                new_seq_no = bseq;
             }
-
-            if (out_of_order == SWITCH_TRUE) {
-                rtp_session->out_of_order_sent += 1;
-                
-            }
-
-            rtp_session->last_bridge_seq[0] = seq_no_from_rtp;
 
             if (rtp_session->write_count == 0) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s wr=%u seq=%u base=%u from_rtp=%u new=%u\n",
                                   rtp_session->rtp_conn_name, rtp_session->write_count, rtp_session->seq,
                                   rtp_session->base_seq, seq_no_from_rtp, new_seq_no);
             }
-                
+
             rtp_session->write_count += 1;
-                
+
             if (rtp_session->write_count % LOG_OUT_FREQUENCY == 0) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s write cnt=%u from_seq=%u to_seq=%u (0x%x) out of order=%u\n",
                                   rtp_session->rtp_conn_name, rtp_session->write_count, seq_no_from_rtp, new_seq_no, htons(new_seq_no),
                                   rtp_session->out_of_order_sent);
             }
-                
-            send_msg->header.seq = htons(new_seq_no);
-            rtp_session->last_bridge_seq[1] = new_seq_no;
         }
 
         if (*flags & SFF_CNG) {
@@ -8456,7 +8378,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 switch_time_t delta = (now - rtp_session->time_of_first_ts)/1000; // ms
                 uint64_t delta_ts = (this_ts - rtp_session->first_ts)/8; // ms
                 int64_t difference = delta_ts - delta;
-                uint64_t delta_thresold = (datalen/8)+80;
+                uint64_t delta_thresold = (datalen/8)*2;
                 if (abs(difference) > delta_thresold) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
                                       "Timestamp delta %" PRId64 " [ts delta:%" PRId64 " vs time delta:%" PRId64 "] first=%u curr=%u\n",
@@ -8501,7 +8423,6 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
         } else {
             rtp_session->last_write_timestamp = switch_micro_time_now();
         }
-
     } /* if (send) */
 
     ret = (int) bytes;
@@ -9280,6 +9201,29 @@ SWITCH_DECLARE(void) switch_rtp_update_ts(switch_channel_t *channel, int increme
         rtp_session->next_ts += increment;
     }
 }
+
+
+SWITCH_DECLARE(void) switch_bridge_channel_get_ts_and_seq(switch_channel_t *chana, switch_channel_t *chanb) {
+    switch_rtp_t *rtp_session_a = switch_channel_get_private(chana, "__rtcp_audio_rtp_session");
+    switch_rtp_t *rtp_session_b = switch_channel_get_private(chanb, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session_a || !rtp_session_b) {
+        return;
+    }
+
+    if (rtp_session_b->anchor_next_seq != rtp_session_b->last_bridge_seq[0]) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session_a->session), SWITCH_LOG_WARNING,
+                          "missed a send seq=%u ts=%u\n", rtp_session_b->anchor_next_seq, rtp_session_b->anchor_next_ts);
+    }
+    if ((rtp_session_b->anchor_next_seq+1) != (rtp_session_a->last_seq)) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session_a->session), SWITCH_LOG_WARNING,
+                          "missed a send prev seq=%u curr seq=%u base=%u\n", rtp_session_b->anchor_next_seq, rtp_session_a->last_seq, rtp_session_b->anchor_base_seq);
+    }
+
+    rtp_session_b->anchor_next_ts = rtp_session_a->last_ts;
+    rtp_session_b->anchor_next_seq = rtp_session_a->last_seq;
+}
+
 
 SWITCH_DECLARE(void) switch_check_bridge_channel_timestamps(switch_channel_t *chana, switch_channel_t *chanb) {
     switch_rtp_t *rtp_session_a, *rtp_session_b;

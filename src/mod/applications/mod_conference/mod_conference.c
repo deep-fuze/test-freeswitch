@@ -2530,6 +2530,23 @@ static void add_member_to_list(conference_member_t **list, conference_member_t *
     *list = member;
 }
 
+#define CONFERENCE_OPTIMIZE_HIGH_PARTICIPANT_LIMIT 400
+#define CONFERENCE_PARTICIPANT_LIMIT_BEFORE_ACCUMULATION CONFERENCE_OPTIMIZE_HIGH_PARTICIPANT_LIMIT
+
+static void silence_transport_for_member(conference_member_t *member)
+{
+    if (member->conference->count > CONFERENCE_OPTIMIZE_HIGH_PARTICIPANT_LIMIT) {
+        if (switch_core_session_get_cn_state(member->session)) {
+            switch_rtp_silence_transport(member->channel, 79);
+        } else {
+            switch_rtp_silence_transport(member->channel, 1500);
+        }
+    } else {
+        switch_rtp_silence_transport(member->channel, 0);
+    }
+}
+
+
 /* Gain exclusive access and add the member to the list */
 static switch_status_t conference_add_member(conference_obj_t *conference, conference_member_t *member)
 {
@@ -2680,12 +2697,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                           "Adding member %d to listeners list\n", member->id);
         add_member_to_list(&conference->member_lists[eMemberListTypes_Listeners], member);
 
-        if (switch_core_session_get_cn_state(member->session)) {
-            switch_rtp_silence_transport(member->channel, 79);
-        } else {
-            switch_rtp_silence_transport(member->channel, 1500);
-        }
-
+        silence_transport_for_member(member);
         member->frame_max = member->frame_max_on_mute;
     }
 
@@ -3055,11 +3067,7 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
             member->frame_max = member->frame_max_on_mute;
             member->one_of_active = SWITCH_FALSE;
 
-            if (switch_core_session_get_cn_state(member->session)) {
-                switch_rtp_silence_transport(member->channel, 79);
-            } else {
-                switch_rtp_silence_transport(member->channel, 1500);
-            }
+            silence_transport_for_member(member);
 
             if (last) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, 
@@ -6154,7 +6162,7 @@ static void conference_loop_input_socket_read(input_loop_data_t *il)
     }
 
     if (switch_core_session_get_cn_state(member->session)) {
-        switch_rtp_silence_transport(member->channel, 79);
+        silence_transport_for_member(member);
         il->io_flags |= SWITCH_IO_FLAG_CANT_SPEAK;
     }
 
@@ -6210,7 +6218,7 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
     }
 
     if (switch_core_session_get_cn_state(member->session)) {
-        switch_rtp_silence_transport(member->channel, 79);
+        silence_transport_for_member(member);
         il->io_flags |= SWITCH_IO_FLAG_CANT_SPEAK;
     }
 
@@ -7610,8 +7618,6 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
 
     return NULL;
 }
-
-#define CONFERENCE_PARTICIPANT_LIMIT_BEFORE_ACCUMULATION 400
 
 SWITCH_DECLARE(switch_status_t) switch_core_session_send_conference_frame(switch_core_session_t *session, switch_frame_t *frame,
                                                                           switch_io_flag_t flags, int stream_id, switch_time_t *timed);
