@@ -543,6 +543,8 @@ SWITCH_DECLARE(switch_bool_t) switch_set_rtcp_passthru(switch_channel_t *channel
 SWITCH_DECLARE(void) switch_check_bridge_channel_timestamps(switch_channel_t *chana, switch_channel_t *chanb);
 SWITCH_DECLARE(void) switch_rtp_silence_transport(switch_channel_t *channel, int size);
 SWITCH_DECLARE(void) switch_bridge_channel_get_ts_and_seq(switch_channel_t *chana, switch_channel_t *chanb);
+SWITCH_DECLARE(void) switch_rtp_set_muted(switch_channel_t *channel, switch_bool_t muted);
+SWITCH_DECLARE(void) switch_rtp_set_active(switch_channel_t *channel, switch_bool_t active);
 
 /*!
   \}

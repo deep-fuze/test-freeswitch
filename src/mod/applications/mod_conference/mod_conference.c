@@ -698,6 +698,20 @@ typedef struct conference_relationship {
     struct conference_relationship *next;
 } conference_relationship_t;
 
+typedef enum {
+    MS_UNMUTED,
+    MS_UNMUTING,
+    MS_MUTED,
+    MS_CN
+} mute_state_t;
+
+typedef enum {
+    ME_PKTS,
+    ME_CN,
+    ME_MUTE,
+    ME_UNMUTE
+} mute_event_t;
+
 /* Conference Member Object */
 struct conference_member {
     uint32_t id;
@@ -806,6 +820,10 @@ struct conference_member {
     uint8_t impl_id;
     switch_time_t time_of_first_packet;
     uint64_t data_sent;
+
+    switch_bool_t in_cn;
+    mute_state_t ms;
+    mute_event_t me;
 };
 
 typedef enum {
@@ -867,6 +885,7 @@ static int conference_list_remove(conference_obj_t *conference, participant_thre
 static void conference_list_add_to_idx(conference_obj_t *conference, participant_thread_data_t *ol, int idx);
 static void recording_stop(conference_obj_t *conference, conference_record_t *rec);
 static switch_bool_t recording_start(conference_obj_t *conference, conference_record_t *rec, switch_file_handle_t *fh, char *path, switch_memory_pool_t *pool);
+static void notify_muted(conference_member_t *member);
 
 SWITCH_STANDARD_API(conf_api_main);
 
@@ -2067,9 +2086,110 @@ static switch_status_t conference_add_event_data(conference_obj_t *conference, s
     return status;
 }
 
+static void update_mute_state(conference_member_t *member, mute_event_t event)
+{
+
+    if (!member)
+        return;
+
+    switch (member->ms) {
+    case MS_UNMUTED:
+        switch (event) {
+        case ME_PKTS:
+        case ME_UNMUTE:
+            break;
+        case ME_CN:
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                              "update_mute_state(UNMUTED,CN) -> (CN)\n");
+            member->ms = MS_CN;
+            switch_rtp_set_muted(member->channel, SWITCH_TRUE);
+            notify_muted(member);
+            break;
+        case ME_MUTE:
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                              "update_mute_state(UNMUTED,MUTE) -> (MUTED)\n");
+            member->ms = MS_MUTED;
+            switch_rtp_set_muted(member->channel, SWITCH_TRUE);
+            notify_muted(member);
+            break;
+        default:
+            break;
+        }
+        break;
+    case MS_MUTED:
+        switch (event) {
+        case ME_PKTS:
+        case ME_MUTE:
+            break;
+        case ME_CN:
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                              "update_mute_state(MUTED,CN) -> (CN)\n");
+            member->ms = MS_CN;
+            break;
+        case ME_UNMUTE:
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                              "update_mute_state(MUTED,UNMUTE) -> (UNMUTED)\n");
+            member->ms = MS_UNMUTED;
+            switch_rtp_set_muted(member->channel, SWITCH_FALSE);
+            notify_muted(member);
+            break;
+        default:
+            break;
+        }
+        break;
+    case MS_CN:
+        switch (event) {
+        case ME_PKTS:
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                              "update_mute_state(CN,PKTS) -> (UNMUTED)\n");
+            member->ms = MS_UNMUTED;
+            switch_rtp_set_muted(member->channel, SWITCH_FALSE);
+            notify_muted(member);
+            break;
+        case ME_UNMUTE:
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                              "update_mute_state(CN,UNMUTE) -> (UNMUTING)\n");
+            member->ms = MS_UNMUTING;
+            switch_rtp_set_muted(member->channel, SWITCH_FALSE);
+            notify_muted(member);
+            break;
+        case ME_CN:
+        case ME_MUTE:
+            break;
+        default:
+            break;
+        }
+        break;
+    case MS_UNMUTING:
+        switch (event) {
+        case ME_PKTS:
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                              "update_mute_state(UNMUTING,PKTS) -> (UNMUTED)\n");
+            member->ms = MS_UNMUTED;
+            break;
+        case ME_UNMUTE:
+        case ME_CN:
+            break;
+        case ME_MUTE:
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                              "update_mute_state(UNMUTING,MUTE) -> (MUTED)\n");
+            member->ms = MS_MUTED;
+            switch_rtp_set_muted(member->channel, SWITCH_TRUE);
+            notify_muted(member);
+            break;
+        default:
+            break;
+        }
+        break;
+    default:
+        break;
+    }
+ }
+
 static switch_status_t conference_add_event_member_data(conference_member_t *member, switch_event_t *event)
 {
     switch_status_t status = SWITCH_STATUS_SUCCESS;
+    switch_bool_t muted;
 
     if (!member)
         return status;
@@ -2089,11 +2209,16 @@ static switch_status_t conference_add_event_member_data(conference_member_t *mem
         }
         switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Video", "%s",
                                 switch_channel_test_flag(switch_core_session_get_channel(member->session), CF_VIDEO) ? "true" : "false" );
+    }
 
+    if (switch_test_flag(member, MFLAG_CLIENT_SIDE_TONES)) {
+        muted = (member->ms == MS_MUTED || member->ms == MS_CN);
+    } else {
+        muted = switch_test_flag(member, MFLAG_CAN_SPEAK) ? SWITCH_FALSE : SWITCH_TRUE;
     }
 
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Hear", "%s", switch_test_flag(member, MFLAG_CAN_HEAR) ? "true" : "false" );
-    switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Speak", "%s", switch_test_flag(member, MFLAG_CAN_SPEAK) ? "true" : "false");
+    switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Speak", "%s", muted ? "false" : "true");
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Talking", "%s", switch_test_flag(member, MFLAG_TALKING) ? "true" : "false" );
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Mute-Detect", "%s", switch_test_flag(member, MFLAG_MUTE_DETECT) ? "true" : "false" );
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Mute-Fake", "%s", switch_test_flag(member, MFLAG_USE_FAKE_MUTE) ? "true" : "false" );
@@ -2582,6 +2707,8 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     member->score_iir = 0;
     member->verbose_events = conference->verbose_events;
     member->was_active = SWITCH_FALSE;
+    member->in_cn = SWITCH_FALSE;
+    member->ms = MS_UNMUTED;
 
     meo_initialize(&member->meo);
     
@@ -2671,6 +2798,8 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
         clear_member_state_locked(member, MFLAG_TALKING);
         
         set_member_state_locked(member, MFLAG_INDICATE_MUTE);
+
+        update_mute_state(member, ME_MUTE);
     }
     /* check for mute_nonmoderator conference flag */
     /* temporary comment this because i'm not sure if we still need it
@@ -2693,7 +2822,6 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, 
                           "Adding member %d to speakers list\n", member->id);
         add_member_to_list(&conference->member_lists[eMemberListTypes_Speakers], member);
-
     } else if (member->rec) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
                           "Adding member %d to recorders list\n", member->id);
@@ -3035,10 +3163,11 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                         switch_channel_get_caller_profile(channel)->caller_id_number, 31);
     }
     member->one_of_active = SWITCH_FALSE;
+    switch_rtp_set_active(member->channel, member->one_of_active);
+
     member->consecutive_active_slots = 0;
     member->consecutive_inactive_slots = 0;
     clear_member_state_unlocked(member, MFLAG_ACTIVE_TALKER);
-
 
     send_rfc_event(conference);
     send_json_event(conference);
@@ -3072,6 +3201,7 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
              */
             member->frame_max = member->frame_max_on_mute;
             member->one_of_active = SWITCH_FALSE;
+            switch_rtp_set_active(member->channel, member->one_of_active);
 
             silence_transport_for_member(member);
 
@@ -4272,6 +4402,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                 break;
 
             conference->last_active_talkers[i]->one_of_active = SWITCH_FALSE;
+            switch_rtp_set_active(conference->last_active_talkers[i]->channel, conference->last_active_talkers[i]->one_of_active);
             conference->last_active_talkers[i]->last_time_active = now;
             codec = conference->last_active_talkers[i]->ianacode;
 
@@ -4316,6 +4447,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         for (i = 0, j = 0; i < MAX_ACTIVE_TALKERS; ++i) {
             if (temp_active_talkers[i]) {
                 temp_active_talkers[i]->one_of_active = SWITCH_TRUE;
+                switch_rtp_set_active(temp_active_talkers[i]->channel, temp_active_talkers[i]->one_of_active);
                 temp_active_talkers[i]->was_active = SWITCH_TRUE;
                 j++;
                 no_active_speakers += 1;
@@ -5177,7 +5309,6 @@ static switch_status_t conf_api_unmute_all(conference_obj_t *conference, switch_
         conference_member_play_file (cmd_member, conference->unmuted_all_sound, CONF_DEFAULT_LEADIN, 1);
     }
 
-
     if (attendee_list_empty && stream)
     {
         stream->write_function(stream, "OK unmute");
@@ -5364,14 +5495,14 @@ static switch_status_t conf_api_sub_lock_mute(conference_member_t *member, switc
         if (test_eflag(member->conference, EFLAG_LOCK_MUTE_MEMBER) &&
             switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, CONF_EVENT_MAINT) == SWITCH_STATUS_SUCCESS) {
             conference_add_event_member_data(member, event);
-        switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Action", "lock-mute-member");
-        switch_event_fire(&event);
+            switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Action", "lock-mute-member");
+            switch_event_fire(&event);
+        }
+        else {
+            if (stream != NULL) {
+                stream->write_function(stream, "%u is already mute locked!\n", member->id);
             }
-            else {
-                if (stream != NULL) {
-                    stream->write_function(stream, "%u is already mute locked!\n", member->id);
-                }
-            }
+        }
     }
     return SWITCH_STATUS_SUCCESS;
 }
@@ -6190,6 +6321,7 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
     switch_channel_t *channel = il->channel;
     switch_status_t status;
     switch_bool_t can_speak = SWITCH_FALSE;
+    switch_bool_t cn_state;
 
     if (!(switch_test_flag(member, MFLAG_RUNNING) && switch_channel_ready(channel))) {
         return INPUT_LOOP_RET_DONE;
@@ -6221,6 +6353,13 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
             /* muted, purge jitter buffer when entering muted state, or when using encoded frame rather than doing encoding */
             il->io_flags |= SWITCH_IO_FLAG_CANT_SPEAK;
         }
+    }
+
+    cn_state = switch_core_session_get_cn_state(member->session);
+    update_mute_state(member, cn_state ? ME_CN : ME_PKTS);
+
+    if (cn_state != member->in_cn) {
+        member->in_cn = cn_state;
     }
 
     if (switch_core_session_get_cn_state(member->session)) {
@@ -9525,6 +9664,37 @@ static void conference_list_count_only(conference_obj_t *conference, switch_stre
     stream->write_function(stream, "%d", conference->count);
 }
 
+static void notify_muted(conference_member_t *member)
+{
+    switch_event_t *event;
+
+    if (member == NULL)
+        return;
+
+    if (switch_test_flag(member, MFLAG_CLIENT_SIDE_TONES)) {
+        return;
+    }
+
+    if (member->session) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "notify_muted member:%s/%d %d\n", member->mname, member->id, member->ms);
+    }
+
+    if (!test_eflag(member->conference, EFLAG_MUTE_MEMBER)) {
+        return;
+    }
+
+    if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, CONF_EVENT_MAINT) != SWITCH_STATUS_SUCCESS) {
+        return;
+    }
+
+    conference_add_event_member_data(member, event);
+    switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Action", "mute-member");
+
+    switch_event_fire(&event);
+
+    return;
+}
+
 static switch_status_t conf_api_sub_mute(conference_member_t *member, switch_stream_handle_t *stream, void *data)
 {
     switch_event_t *event;
@@ -9535,6 +9705,8 @@ static switch_status_t conf_api_sub_mute(conference_member_t *member, switch_str
     if (member->session) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "conf_api_sub_mute member:%s/%d\n", member->mname, member->id);
     }
+
+    update_mute_state(member, ME_MUTE);
 
     if(!switch_test_flag(member,MFLAG_CAN_SPEAK)) {
         if (stream != NULL) {
@@ -9645,6 +9817,8 @@ static switch_status_t conf_api_sub_unmute(conference_member_t *member, switch_s
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "conf_api_sub_unmute member:%s/%d\n", member->mname, member->id);
     }
 
+    update_mute_state(member, ME_UNMUTE);
+
     if(switch_test_flag(member,MFLAG_CAN_SPEAK)) {
         if (stream != NULL) {
             stream->write_function(stream, "%u is already unmuted\n", member->id);
@@ -9660,6 +9834,7 @@ static switch_status_t conf_api_sub_unmute(conference_member_t *member, switch_s
     }
 
     set_member_state_locked(member, MFLAG_CAN_SPEAK);
+
     if (!(data) || !strstr((char *) data, "quiet")) {
         set_member_state_unlocked(member, MFLAG_INDICATE_UNMUTE);
     }

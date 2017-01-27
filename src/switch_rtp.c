@@ -526,6 +526,9 @@ struct switch_rtp {
 
     uint32_t anchor_base_ts;
     uint16_t anchor_base_seq;
+
+    switch_bool_t active;
+    switch_bool_t muted;
 };
 
 struct switch_rtcp_report_block {
@@ -606,7 +609,20 @@ struct switch_rtcp_app_specific {
 typedef struct switch_rtcp_app_rx_congestion {
     unsigned ssrc:32;
     unsigned name:32;
-    uint16_t degraded;
+#if SWITCH_BYTE_ORDER == __BIG_ENDIAN
+    unsigned version:2;
+    unsigned degraded:2;
+    unsigned active:2;
+    unsigned muted:1
+    unsigned cn:1
+#else
+    unsigned cn:1;
+    unsigned muted:1;
+    unsigned active:2;
+    unsigned degraded:2;
+    unsigned version:2;
+#endif
+    unsigned pad2:8;
     uint16_t jitter;
     uint16_t lost_percent;
     uint16_t pad;
@@ -2750,8 +2766,15 @@ static int add_rx_congestion(switch_rtp_t *rtp_session, void *body, switch_rtcp_
     rx_congestion->ssrc = htonl(rtp_session->ssrc);
     rx_congestion->name = htonl(0x66757a72);
 
+    rx_congestion->version = 1;
+
     rx_congestion->jitter = htons(rtp_session->stats.last_jitter);
     rx_congestion->degraded = htons(rtp_session->stats.rx_congestion_state);
+
+    rx_congestion->active = rtp_session->active;
+    rx_congestion->muted = rtp_session->muted;
+    rx_congestion->cn = switch_core_session_get_cn_state(rtp_session->session);
+
     rx_congestion->lost_percent = htons(rtp_session->stats.jb_period_lost_percent);
 
     for (i = 0; i < APP_RX_NUM_STATS; i++) {
@@ -9303,6 +9326,31 @@ SWITCH_DECLARE(void) switch_rtp_silence_transport(switch_channel_t *channel, int
     return;
 }
 
+SWITCH_DECLARE(void) switch_rtp_set_active(switch_channel_t *channel, switch_bool_t active)
+{
+    switch_rtp_t *rtp_session;
+
+    rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session) {
+        return;
+    }
+
+    rtp_session->active = active;
+}
+
+SWITCH_DECLARE(void) switch_rtp_set_muted(switch_channel_t *channel, switch_bool_t muted)
+{
+    switch_rtp_t *rtp_session;
+
+    rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session) {
+        return;
+    }
+
+    rtp_session->muted = muted;
+}
 
 
 /* For Emacs:
