@@ -9214,6 +9214,8 @@ SWITCH_DECLARE(void) switch_rtp_set_been_active_talker(switch_rtp_t *rtp_session
 SWITCH_DECLARE(void) switch_rtp_update_ts(switch_channel_t *channel, int increment) {
     switch_rtp_t *rtp_session;
 
+    if (!channel) { return;}
+
     rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
 
     if (!rtp_session) {
@@ -9227,8 +9229,12 @@ SWITCH_DECLARE(void) switch_rtp_update_ts(switch_channel_t *channel, int increme
 
 
 SWITCH_DECLARE(void) switch_bridge_channel_get_ts_and_seq(switch_channel_t *chana, switch_channel_t *chanb) {
-    switch_rtp_t *rtp_session_a = switch_channel_get_private(chana, "__rtcp_audio_rtp_session");
-    switch_rtp_t *rtp_session_b = switch_channel_get_private(chanb, "__rtcp_audio_rtp_session");
+    switch_rtp_t *rtp_session_a, *rtp_session_b;
+
+    if (!chana || !chanb) { return; }
+
+    rtp_session_a = switch_channel_get_private(chana, "__rtcp_audio_rtp_session");
+    rtp_session_b = switch_channel_get_private(chanb, "__rtcp_audio_rtp_session");
 
     if (!rtp_session_a || !rtp_session_b) {
         return;
@@ -9255,6 +9261,8 @@ SWITCH_DECLARE(void) switch_check_bridge_channel_timestamps(switch_channel_t *ch
     switch_time_t now = switch_time_now();
     int64_t diff[2][2];
     int64_t diff_rx_tx[2];
+
+    if (!chana || !chanb) { return; }
 
     rtp_session_a = switch_channel_get_private(chana, "__rtcp_audio_rtp_session");
     rtp_session_b = switch_channel_get_private(chanb, "__rtcp_audio_rtp_session");
@@ -9330,6 +9338,8 @@ SWITCH_DECLARE(void) switch_rtp_set_active(switch_channel_t *channel, switch_boo
 {
     switch_rtp_t *rtp_session;
 
+    if (!channel) { return; }
+
     rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
 
     if (!rtp_session) {
@@ -9342,6 +9352,8 @@ SWITCH_DECLARE(void) switch_rtp_set_active(switch_channel_t *channel, switch_boo
 SWITCH_DECLARE(void) switch_rtp_set_muted(switch_channel_t *channel, switch_bool_t muted)
 {
     switch_rtp_t *rtp_session;
+
+    if (!channel) { return; }
 
     rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
 

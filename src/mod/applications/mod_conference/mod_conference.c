@@ -3163,7 +3163,9 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                         switch_channel_get_caller_profile(channel)->caller_id_number, 31);
     }
     member->one_of_active = SWITCH_FALSE;
-    switch_rtp_set_active(member->channel, member->one_of_active);
+	if (!member->rec) {
+		switch_rtp_set_active(member->channel, member->one_of_active);
+	}
 
     member->consecutive_active_slots = 0;
     member->consecutive_inactive_slots = 0;
