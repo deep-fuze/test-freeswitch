@@ -2990,6 +2990,11 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             }
         }
 
+        if (member->mname && strcmp(member->mname, "recorder@fuze.com") == 0) {
+            set_member_state_locked(member, MFLAG_GHOST);
+            conference->count_ghosts++;
+        }
+
         if (switch_channel_test_flag(channel, CF_VIDEO)) {
             if (switch_test_flag(conference, CFLAG_VIDEO_BRIDGE)) {
                 switch_channel_set_flag(channel, CF_VIDEO_ECHO);
