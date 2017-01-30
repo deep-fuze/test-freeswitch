@@ -451,6 +451,7 @@ struct switch_rtp {
     switch_bool_t is_bridge;
     switch_bool_t is_fuze_app;
     switch_bool_t is_ivr;
+    switch_bool_t is_conf;
     switch_bool_t last_write_ts_set;
 
     switch_time_t time_of_first_ts;
@@ -3479,7 +3480,20 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_set_local_address(switch_rtp_t *rtp_s
         }
         sprintf(rtp_session->rtp_conn_name, "BRTP%04x", rtp_session->id);
         fuze_transport_set_connection_name(rtp_session->rtp_conn, rtp_session->rtp_conn_name);
-        rtp_session->is_bridge = SWITCH_TRUE;
+
+        if (rtp_session->is_ivr == SWITCH_TRUE && !rtp_session->is_bridge) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is IVR -> BRIDGE\n");
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s ivr -> bridge (%u) seq=%u\n",
+                              rtp_session->rtp_conn_name, rtp_session->write_count, rtp_session->seq);
+            rtp_session->write_count = 0;
+            rtp_session->is_bridge = SWITCH_TRUE;
+            rtp_session->anchor_base_ts = rtp_session->anchor_next_seq;
+            rtp_session->anchor_base_seq = rtp_session->anchor_next_seq;
+        }
+        if (!rtp_session->is_bridge) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is BRIDGE\n");;
+            rtp_session->is_bridge = SWITCH_TRUE;
+        }
 
         if (fuze_transport_connection_set_local_address(rtp_session->rtp_conn, host, port) < 0) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "Error on setting local address: %s:%u.\n", host, port);
@@ -4585,6 +4599,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->is_bridge = SWITCH_FALSE;
     rtp_session->is_fuze_app = SWITCH_FALSE;
     rtp_session->is_ivr = SWITCH_FALSE;
+    rtp_session->is_conf = SWITCH_FALSE;
 
     rtp_session->high_drift_packets = 0;
     rtp_session->high_drift_log_suppress = 0;
@@ -8131,12 +8146,17 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             /* this is the case where we have a jitter buffer and we're just generating our own sequence numbers */
             send_msg->header.seq = htons(++rtp_session->seq);
             rtp_session->last_pkt_sent  = switch_time_now();
+            if (!rtp_session->is_conf) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is CONFERENCE\n");;
+                rtp_session->is_conf = SWITCH_TRUE;
+            }
         } else if (*flags & SFF_IVR_FRAME) {
             switch_time_t now = switch_time_now();
             uint32_t diff = 0;
 
             /* this is the case where we are an IVR session and we're just generating our own sequence numbers */
             if (rtp_session->is_ivr == SWITCH_FALSE) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is IVR\n");
                 rtp_session->is_ivr = SWITCH_TRUE;
                 rtp_session->write_count = 0;
                 rtp_session->last_ivr_send_time = now;
@@ -8170,6 +8190,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             switch_bool_t out_of_order = SWITCH_FALSE;
 
             if (rtp_session->is_ivr == SWITCH_TRUE && !rtp_session->is_bridge) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is IVR -> BRIDGE\n");
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s ivr -> bridge (%u) seq=%u bpath=%d x=%d\n",
                                   rtp_session->rtp_conn_name, rtp_session->write_count, rtp_session->seq, bpath, send_msg->header.x);
                 // rtp_session->is_ivr = SWITCH_FALSE; REMEMBER THAT WE WERE AN IVR SESSION
@@ -8177,6 +8198,10 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 rtp_session->is_bridge = SWITCH_TRUE;
                 rtp_session->anchor_base_ts = rtp_session->anchor_next_seq;
                 rtp_session->anchor_base_seq = rtp_session->anchor_next_seq;
+            }
+            if (!rtp_session->is_bridge) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is BRIDGE\n");;
+                rtp_session->is_bridge = SWITCH_TRUE;
             }
 
             if (rtp_session->write_count % LOG_OUT_FREQUENCY == 0) {
