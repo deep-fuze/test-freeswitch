@@ -5126,12 +5126,10 @@ SWITCH_DECLARE(uint8_t) switch_rtp_ready(switch_rtp_t *rtp_session)
     uint8_t ret;
 
     if (!rtp_session) {
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "switch_rtp_ready session null\n");
         return 0;
     }
     
     if (!rtp_session->flag_mutex || rtp_session->flags[SWITCH_RTP_FLAG_SHUTDOWN]) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "switch_rtp_ready session ret 0\n");
         return 0;
     }
 
