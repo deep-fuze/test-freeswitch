@@ -523,6 +523,7 @@ struct switch_rtp {
 
     uint32_t anchor_next_ts;
     uint16_t anchor_next_seq;
+    switch_bool_t anchor_next_set;
 
     uint32_t anchor_base_ts;
     uint16_t anchor_base_seq;
@@ -4624,6 +4625,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->anchor_next_ts = 0;
     rtp_session->anchor_base_seq = 0;
     rtp_session->anchor_next_seq = 0;
+    rtp_session->anchor_next_set = SWITCH_FALSE;
 
     rtp_session->last_adjust_cn_count = switch_time_now();
     rtp_session->bad_packet_size_recv = 0;
@@ -8218,11 +8220,17 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 uint16_t bseq;
                 uint32_t bts;
 
-                bseq = rtp_session->anchor_next_seq + rtp_session->anchor_base_seq;
-                bts = rtp_session->anchor_next_ts + rtp_session->anchor_base_ts;
+                if (rtp_session->anchor_next_set) {
+                    bseq = rtp_session->anchor_next_seq + rtp_session->anchor_base_seq;
+                    bts = rtp_session->anchor_next_ts + rtp_session->anchor_base_ts;
+                } else {
+                    bseq = rtp_session->seq;
+                    bts = ntohl(send_msg->header.ts);
+                }
 
                 send_msg->header.seq = htons(bseq);
                 send_msg->header.ts = htonl(bts);
+
                 rtp_session->last_bridge_seq[0] = bseq;
                 rtp_session->last_write_ts = bts;
                 new_seq_no = bseq;
@@ -9251,6 +9259,8 @@ SWITCH_DECLARE(void) switch_bridge_channel_get_ts_and_seq(switch_channel_t *chan
 
     rtp_session_b->anchor_next_ts = rtp_session_a->last_ts;
     rtp_session_b->anchor_next_seq = rtp_session_a->last_seq;
+    rtp_session_a->anchor_next_set = SWITCH_TRUE;
+    rtp_session_b->anchor_next_set = SWITCH_TRUE;
 }
 
 
