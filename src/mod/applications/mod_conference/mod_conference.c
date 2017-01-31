@@ -824,6 +824,11 @@ struct conference_member {
     switch_bool_t in_cn;
     mute_state_t ms;
     mute_event_t me;
+
+    switch_time_t audio_in_mutex_time;
+    switch_time_t audio_out_mutex_time;
+    int audio_in_mutex_line;
+    int audio_out_mutex_line;
 };
 
 typedef enum {
@@ -1345,6 +1350,34 @@ static const char *audio_flow(conference_member_t *member)
     }
 
     return flow;
+}
+
+#define audio_in_mutex_lock(member) member_mutex_lock_line(member, member->audio_in_mutex, "in", &member->audio_in_mutex_time, &member->audio_in_mutex_line, __LINE__)
+#define audio_out_mutex_lock(member) member_mutex_lock_line(member, member->audio_out_mutex, "out", &member->audio_out_mutex_time, &member->audio_out_mutex_line, __LINE__)
+#define audio_in_mutex_unlock(member) member_mutex_unlock(member, member->audio_in_mutex, "in", &member->audio_in_mutex_time, &member->audio_in_mutex_line)
+#define audio_out_mutex_unlock(member) member_mutex_unlock(member, member->audio_out_mutex, "out", &member->audio_out_mutex_time, &member->audio_out_mutex_line)
+
+void member_mutex_lock_line(conference_member_t *member, switch_mutex_t *mutex, char *type, switch_time_t *time, int *line, int cline) {
+    switch_time_t now = switch_time_now();
+    switch_mutex_lock(mutex);
+    now = switch_time_now() - now;
+    if ((now) > 10000) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
+                          "TIMELOCK: Member lock %s took a long time to acquire %" PRId64 "ms\n", type, now);
+    }
+    *time = switch_time_now();
+    *line = cline;
+}
+
+void member_mutex_unlock(conference_member_t *member, switch_mutex_t *mutex, char *type, switch_time_t *time, int *line) {
+    switch_time_t now = switch_time_now();
+    if ((now - *time) > 10000) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                          "TIMELOCK: Member locked %s (mod_conference.c:%d) for a long time %" PRId64 "ms\n",
+                          type, *line, (now - *time)/1000);
+    }
+    *line = 0;
+    switch_mutex_unlock(mutex);
 }
 
 #define conference_mutex_lock(conference) conference_mutex_lock_line(conference, __LINE__)
@@ -2681,8 +2714,8 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     switch_assert(member != NULL);
 
     conference_mutex_lock(conference);
-    switch_mutex_lock(member->audio_in_mutex);
-    switch_mutex_lock(member->audio_out_mutex);
+    audio_in_mutex_lock(member);
+    audio_out_mutex_lock(member);
     lock_member(member);
     switch_mutex_lock(conference->member_mutex);
 
@@ -2728,9 +2761,9 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                                  impl.codec_id, impl.impl_id, impl.ianacode) != SWITCH_STATUS_SUCCESS) {
                 switch_mutex_unlock(conference->member_mutex);
                 unlock_member(member);
-                switch_mutex_unlock(member->audio_out_mutex);
-                switch_mutex_unlock(member->audio_in_mutex);
-                conference_mutex_lock(conference);
+                audio_out_mutex_unlock(member);
+                audio_in_mutex_unlock(member);
+                conference_mutex_unlock(conference);
                 return SWITCH_STATUS_FALSE;
             }
         }
@@ -2753,9 +2786,9 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                     switch_mutex_unlock(globals.filelist_mutex);
                     switch_mutex_unlock(conference->member_mutex);
                     unlock_member(member);
-                    switch_mutex_unlock(member->audio_out_mutex);
+                    audio_out_mutex_unlock(member);
                     switch_mutex_unlock(member->audio_in_mutex);
-                    conference_mutex_lock(conference);
+                    conference_mutex_unlock(conference);
                     return SWITCH_STATUS_FALSE;
                 }
                 memset(pFL, 0, sizeof(*pFL));
@@ -3128,8 +3161,8 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
 
     }
     unlock_member(member);
-    switch_mutex_unlock(member->audio_out_mutex);
-    switch_mutex_unlock(member->audio_in_mutex);
+    audio_out_mutex_unlock(member);
+    audio_in_mutex_unlock(member);
 
     if (conference->la && member->channel) {
         member->json = cJSON_CreateArray();
@@ -3574,8 +3607,8 @@ static switch_status_t conference_del_member(conference_obj_t *conference, confe
 
     conference_mutex_lock(conference);
     switch_mutex_lock(conference->member_mutex);
-    switch_mutex_lock(member->audio_in_mutex);
-    switch_mutex_lock(member->audio_out_mutex);
+    audio_in_mutex_lock(member);
+    audio_out_mutex_lock(member);
     lock_member(member);
     clear_member_state_unlocked(member, MFLAG_INTREE);
     
@@ -3662,8 +3695,9 @@ static switch_status_t conference_del_member(conference_obj_t *conference, confe
     }
     switch_mutex_unlock(conference->member_mutex);
     unlock_member(member);
-    switch_mutex_unlock(member->audio_out_mutex);
-    switch_mutex_unlock(member->audio_in_mutex);
+    audio_out_mutex_unlock(member);
+    audio_in_mutex_unlock(member);
+
 
 
     if (conference->la && member->session) {
@@ -3918,7 +3952,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
     // int32_t z = 0;
     int32_t main_frame[SWITCH_RECOMMENDED_BUFFER_SIZE / 2];
     int16_t main_frame_16[SWITCH_RECOMMENDED_BUFFER_SIZE / 2];
-
+    switch_time_t delta; //, delta2;
     /* in loop vars */
 
     now = switch_time_now();
@@ -3940,50 +3974,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
      * To keep memory for debug stats not persistent,
       * we manage it as necessary.
      */
-    if (switch_test_flag(conference, CFLAG_DEBUG_STATS_ACTIVE) &&
-            conference->debug_stats_pool == NULL) {
-        do {
-            const char *caller_id_number;
-            if (0 && switch_core_new_memory_pool(&conference->debug_stats_pool)
-                    != SWITCH_STATUS_SUCCESS) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error in Allocating debug_stats pool.\n");
-                clear_conference_state_unlocked(conference, CFLAG_DEBUG_STATS_ACTIVE);
-                break;
-            }
-
-            conference->debug_stats = switch_core_alloc (conference->debug_stats_pool,
-                                sizeof(*conference->debug_stats));
-            memset(conference->debug_stats, 0, sizeof(*conference->debug_stats));
-            
-            for (int i = 0; i < eMemberListTypes_Recorders; i++) {
-                for (imember = conference->member_lists[i]; imember; imember = imember->next) {
-                    if (!imember->session || switch_test_flag(imember, MFLAG_NOCHANNEL)) {
-                        continue;
-                    }
-
-                    if (imember->roll_no >= 32)
-                        continue;
-
-                    caller_id_number = switch_channel_get_caller_profile(
-                                switch_core_session_get_channel(imember->session))->caller_id_number;
-                    if(caller_id_number) {
-                        strncpy(conference->debug_stats->member_name[imember->roll_no],
-                                        caller_id_number, 31);
-                    }
-                }
-            }
-            conference->debug_stats->timer_ticks = 1000/20; /* luke timer.interval == 20? */
-            conference->debug_stats->cur_index = NUM_SECS_DBG_STATS - 1;
-
-        } while (0); //Just escape loop
-
-    } else if (!switch_test_flag(conference, CFLAG_DEBUG_STATS_ACTIVE) &&
-            conference->debug_stats_pool) {
-        switch_core_destroy_memory_pool(&conference->debug_stats_pool);
-        conference->debug_stats_pool = NULL;
-        conference->debug_stats = NULL;
-    }
-
+    delta = switch_time_now();
     for (imember = conference->member_lists[eMemberListTypes_Speakers]; imember; imember = imember->next) {
         uint32_t buf_read = 0;
         switch_bool_t has_audio;
@@ -4008,7 +3999,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         
         switch_clear_flag_locked(imember, MFLAG_HAS_AUDIO);
 
-        switch_mutex_lock(imember->audio_in_mutex);
+        audio_in_mutex_lock(imember);
 
         if (switch_test_flag(conference, CFLAG_DEBUG_STATS_ACTIVE) && conference->debug_stats && imember->roll_no < 32) {
             if (conference->debug_stats->highest_score_iir[imember->roll_no] < imember->score_iir)
@@ -4039,13 +4030,20 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             log_member_state(__LINE__, imember, MFLAG_HAS_AUDIO, switch_test_flag(imember, MFLAG_HAS_AUDIO));
         }
 
-        switch_mutex_unlock(imember->audio_in_mutex);
+        audio_in_mutex_unlock(imember);
     }
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
 
     cl->fuze_ticks += 1;
 
     /* Encoder Optimization: Start the next cycle of output */
     ceo_start_write(&conference->ceo);
+
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
 
     /* Fuze Step 1: init temp_active_talkers */
     for (i = 0; i < MAX_ACTIVE_TALKERS; ++i) {
@@ -4079,6 +4077,11 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                 temp_active_talkers[min_score_index] = imember;
         }
     }
+
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
+
     
     no_can_speak = 0;
     for (imember = conference->member_lists[eMemberListTypes_Speakers]; imember; imember = imember->next) {
@@ -4110,6 +4113,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             }
         }
     }
+
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
 
     if (cl->fuze_ticks % 3000 == 1) {
         /* Fuze Debug Info: print this 10s */
@@ -4159,6 +4166,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                           total_members, active_speakers, muted_members, low_energy_members, low_energy_signal_members,
                           mname[0], mname[1], mname[2]);
     }
+
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
         
     /*
      * Fuze Step 3: Find the new talkers
@@ -4199,6 +4210,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             }
         }
 
+        delta = switch_time_now() - delta;
+        if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+        delta = switch_time_now();
+
         /*
          * Fuze Step 4: Find the participants who just became non-active
          * This is just used to set up the MFLAG_NOTIFY_ACTIVITY flag
@@ -4217,6 +4232,11 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                 }
             }
         }
+
+        delta = switch_time_now() - delta;
+        if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+        delta = switch_time_now();
+
         for (i = 0; i < MAX_ACTIVE_TALKERS; ++i) {
             uint32_t codec;
             if (conference->last_active_talkers[i] == NULL)
@@ -4260,6 +4280,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             }
         }
 
+        delta = switch_time_now() - delta;
+        if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+        delta = switch_time_now();
+
         /*
          * Fuze Step 5: Update the active talker list
          * Used for notifications next time
@@ -4276,6 +4300,11 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
 
             conference->last_active_talkers[i] = temp_active_talkers[i];
         }
+
+        delta = switch_time_now() - delta;
+        if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+        delta = switch_time_now();
+
     } else {
         for (j = 0; j < MAX_ACTIVE_TALKERS; ) {
             if (conference->last_active_talkers[j]) {
@@ -4285,6 +4314,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             }
         }
     }
+
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
 
     /*
      * Fuze Step 6:
@@ -4329,45 +4362,21 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         }
     } /* fuze step 6 */
 
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
+
     /* Fuze Step 7: Send notifications */
     for (int i = 0; i < eMemberListTypes_Recorders; i++) {
         for (imember = conference->member_lists[i]; imember; imember = imember->next) {
             notify_activity(conference, imember, cl->history_slot_count, cl->reset_slot_count);
         }
     }
+
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
         
-    /* Debug Code Start */
-    /* Read one frame of audio from each member channel and save it for redistribution */
-    if (switch_test_flag(conference, CFLAG_DEBUG_STATS_ACTIVE) &&
-                    conference->debug_stats) {
-
-        conference->debug_stats->last_tick++;
-
-        if (conference->debug_stats->last_tick % conference->debug_stats->timer_ticks == 1) {
-            if (++conference->debug_stats->cur_index == NUM_SECS_DBG_STATS)
-                conference->debug_stats->cur_index = 0;
-
-            conference->debug_stats->active_talker_map[conference->debug_stats->cur_index] = 0;
-            conference->debug_stats->audio_mux_map[conference->debug_stats->cur_index] = 0;
-            conference->debug_stats->audio_receiver_map[conference->debug_stats->cur_index] = 0;
-            conference->debug_stats->audio_substract_map[conference->debug_stats->cur_index] = 0;
-
-            for (i = 0; i < MAX_ACTIVE_TALKERS; i++) {
-                if (conference->last_active_talkers[i] &&
-                        conference->last_active_talkers[i]->roll_no < 32) {
-                    conference->debug_stats->active_talker_map[conference->debug_stats->cur_index] |=
-                                    (1 << conference->last_active_talkers[i]->roll_no);
-                }
-            }
-        }
-    }
-    /* Debug code end */
-
-    /* video floor */
-    if (floor_holder != conference->floor_holder) {
-        conference_set_floor_holder(conference, floor_holder);
-    }
-
     /* ivr stuff? */
     if (conference->perpetual_sound && !conference->async_fnode) {
         conference_play_file(conference, conference->perpetual_sound, CONF_DEFAULT_LEADIN, NULL, 1, 0);
@@ -4378,6 +4387,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         }
         conference_play_file(conference, conference->moh_sound, CONF_DEFAULT_LEADIN, NULL, 1, 0);
     }
+
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
 
     /* stop conference if there are no speakers for a period of time.  not used by fuze */
     /* Find if no one talked for more than x number of second */
@@ -4396,6 +4409,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             set_conference_state_unlocked(conference, CFLAG_DESTRUCT);
         }
     }
+
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
 
     /* not used by fuze */
     /* Start auto recording if there's the minimum number of required participants. */
@@ -4428,6 +4445,9 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Auto Record Failed.  No members in conference.\n");
         }
     }
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
     
     /* If a file or speech event is being played */
     if (conference->fnode && !switch_test_flag(conference->fnode, NFLAG_PAUSE)) {
@@ -4461,6 +4481,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             }
         }
     }
+
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
 
     /* file play */
     if (conference->async_fnode) {
@@ -4496,6 +4520,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         }
     }
 
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
+
     if (conference->async_fnode && conference->async_fnode->done) {
         switch_memory_pool_t *pool;
         conference_file_close(conference, conference->async_fnode);
@@ -4506,6 +4534,9 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "async file close\n");
     }
 
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
 
     if ((ready != cl->prev_ready) || (has_file_data != cl->prev_has_file_data)) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
@@ -4514,6 +4545,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         cl->prev_ready = ready;
         cl->prev_has_file_data = has_file_data;
     }
+
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
 
     /* Fuze Step 8: output mix */
     /* Encoder optimization: added condition that we go in here if more than 1 participant and no active speakers */
@@ -4534,6 +4569,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
 
     conference->mux_loop_count = 0;
     conference->member_loop_count = 0;
+
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
 
     /* Copy audio from every member known to be producing audio into the main frame. */
     for (omember = conference->member_lists[eMemberListTypes_Speakers]; omember && !exclusive_play; omember = omember->next) {
@@ -4578,8 +4617,16 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         main_frame_16[x] = (int16_t) z;
     }
 
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
+
     /* Encoder Optimization: Write the conference mix to the Conference Encoder Optimization object */
     ceo_write_buffer(&conference->ceo, main_frame_16, bytes);
+
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
     
     /* Create write frame once per member who is not deaf for each sample in the main frame
        check if our audio is involved and if so, subtract it from the sample so we don't hear ourselves.
@@ -4606,13 +4653,17 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
 
             if (omember->rec) {
                 switch_size_t len = bytes / sizeof(int16_t);
-                
+                switch_time_t delta2 = switch_time_now();
+
                 if (bytes) {
                     if (switch_core_file_write(&omember->rec->fh, main_frame_16, &len) != SWITCH_STATUS_SUCCESS) {
                         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Recording: Write Failed\n");
                         clear_member_state_locked(omember, MFLAG_RUNNING);
                     }
                 }
+                delta2 = switch_time_now() - delta;
+                if (delta2 > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta2/1000);}
+
                 continue;
             }
 
@@ -4682,26 +4733,11 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                 }
             }
 
-            if (switch_test_flag(conference, CFLAG_DEBUG_STATS_ACTIVE) &&
-                        conference->debug_stats) {
-                if (conference->debug_stats->last_tick % conference->debug_stats->timer_ticks == 1) {
-                    if (omember->roll_no < 32) {
-                            if (switch_test_flag(omember, MFLAG_HAS_AUDIO) && omember->one_of_active == SWITCH_TRUE) {
-                                conference->debug_stats->audio_substract_map[conference->debug_stats->cur_index]  |=
-                                                                        (1 << omember->roll_no);
-                            }
-
-                            conference->debug_stats->audio_receiver_map[conference->debug_stats->cur_index] |=
-                                                                        (1 << omember->roll_no);
-                    }
-                }
-            }
-
-            switch_mutex_lock(omember->audio_out_mutex);
+            audio_out_mutex_lock(omember);
             
             ok = switch_buffer_write(omember->mux_buffer, write_frame_raw, bytes);
 
-            switch_mutex_unlock(omember->audio_out_mutex);
+            audio_out_mutex_unlock(omember);
 
             if (!ok) {
                 conference_mutex_unlock(conference);
@@ -4709,6 +4745,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             }
         }
     }
+
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
 
     if (conference->fnode && conference->fnode->done) {
         conference_file_node_t *fnode;
@@ -4728,12 +4768,20 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         switch_core_destroy_memory_pool(&pool);
     }
 
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
+
     if (!conference->end_count && conference->endconf_time &&
             switch_epoch_time_now(NULL) - conference->endconf_time > conference->endconf_grace_time) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Conference %s: endconf grace time exceeded (%u)\n",
                 conference->name, conference->endconf_grace_time);
         set_conference_state_unlocked(conference, CFLAG_DESTRUCT | CFLAG_ENDCONF_FORCED);
     }
+
+    delta = switch_time_now() - delta;
+    if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
+    delta = switch_time_now();
 
     conference_mutex_unlock(conference);
 
@@ -6442,13 +6490,14 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
             switch_size_t ok = 1;
             
             /* Write the audio into the input buffer */
-            switch_mutex_lock(member->audio_in_mutex);
+            audio_in_mutex_lock(member);
             if (switch_buffer_inuse(member->audio_buffer) > il->flush_len) {
                 switch_buffer_zero(member->audio_buffer);
                 switch_channel_audio_sync(channel);
             }
             ok = switch_buffer_write(member->audio_buffer, data, datalen);
-            switch_mutex_unlock(member->audio_in_mutex);
+            audio_in_mutex_unlock(member);
+
             if (!ok) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "CRITICAL: Cannot write the audio in the input buffer");
                 switch_mutex_unlock(member->read_mutex);
@@ -7756,7 +7805,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         path = PARTICIPANT_OUTPUT_PATH_ACTIVE;
         /* Flush the output buffer and write all the data (presumably muxed) back to the channel */
         /* locked above when copying in a new set of samples/buffer */
-        switch_mutex_lock(member->audio_out_mutex);
+        audio_out_mutex_lock(member);
         use_buffer = member->mux_buffer;
         ols->low_count = 0;
 
@@ -7800,7 +7849,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
                 if (switch_core_session_enc_frame(member->session, &ols->write_frame, SWITCH_IO_FLAG_NONE, 0,
                                                   &frame) != SWITCH_STATUS_SUCCESS) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "member %d failed to encode\n", member->id);
-                    switch_mutex_unlock(member->audio_out_mutex);
+                    audio_out_mutex_unlock(member);
                     switch_mutex_unlock(member->write_mutex);
                     return OUTPUT_LOOP_FAILED;
                 } else {
@@ -7810,7 +7859,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
 
             if (frame) {
                 if (accumulate_and_send(ols, frame, &ols->acc_frame, &before_send_time) != SWITCH_STATUS_SUCCESS) {
-                    switch_mutex_unlock(member->audio_out_mutex);
+                    audio_out_mutex_unlock(member);
                     switch_mutex_unlock(member->write_mutex);
                     return OUTPUT_LOOP_FAILED;
                 } else {
@@ -7826,7 +7875,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             }
             member->out_last_sent = sent_time;
             
-            switch_mutex_unlock(member->audio_out_mutex);
+            audio_out_mutex_unlock(member);
         }
     } else if (member->fnode) {
         switch_frame_t *frame = NULL;
@@ -7869,7 +7918,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
 
         path = PARTICIPANT_OUTPUT_PATH_MIX;
 
-        switch_mutex_lock(member->audio_out_mutex);
+        audio_out_mutex_lock(member);
 
         /* xxx */
         if (ols->individual == SWITCH_TRUE) {
@@ -7997,7 +8046,9 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             i += 1;
             switch_mutex_unlock(member->meo.cwc->codec_mutex);
         } /* else not an active speaker */
-        switch_mutex_unlock(member->audio_out_mutex);
+
+        audio_out_mutex_unlock(member);
+
         if (failed) {
             switch_mutex_unlock(member->write_mutex);
             return OUTPUT_LOOP_FAILED;
@@ -8023,9 +8074,9 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
     
     if (switch_test_flag(member, MFLAG_FLUSH_BUFFER)) {
         if (switch_buffer_inuse(member->mux_buffer)) {
-            switch_mutex_lock(member->audio_out_mutex);
+            audio_out_mutex_lock(member);
             switch_buffer_zero(member->mux_buffer);
-            switch_mutex_unlock(member->audio_out_mutex);
+            audio_out_mutex_unlock(member);
         }
         ols->low_count = 0;
         clear_member_state_locked(member, MFLAG_FLUSH_BUFFER);
@@ -8502,9 +8553,9 @@ static void *SWITCH_THREAD_FUNC conference_record_thread_run(switch_thread_t *th
 
         if (switch_test_flag(member, MFLAG_FLUSH_BUFFER)) {
             if (mux_used) {
-                switch_mutex_lock(member->audio_out_mutex);
+                audio_out_mutex_lock(member);
                 switch_buffer_zero(member->mux_buffer);
-                switch_mutex_unlock(member->audio_out_mutex);
+                audio_out_mutex_unlock(member);
                 mux_used = 0;
             }
             clear_member_state_locked(member, MFLAG_FLUSH_BUFFER);
@@ -8519,13 +8570,13 @@ static void *SWITCH_THREAD_FUNC conference_record_thread_run(switch_thread_t *th
 
         if (mux_used >= data_buf_len) {
             /* Flush the output buffer and write all the data (presumably muxed) to the file */
-            switch_mutex_lock(member->audio_out_mutex);
+            audio_out_mutex_lock(member);
 
             if ((rlen = (uint32_t) switch_buffer_read(member->mux_buffer, data_buf, data_buf_len))) {
                 len = (switch_size_t) rlen / sizeof(int16_t);
                 no_data = 0;
             }
-            switch_mutex_unlock(member->audio_out_mutex);
+            audio_out_mutex_unlock(member);
         }
 
         if (len == 0) {
@@ -8562,14 +8613,14 @@ static void *SWITCH_THREAD_FUNC conference_record_thread_run(switch_thread_t *th
                       switch_test_flag(member, MFLAG_RUNNING), switch_test_flag(conference, CFLAG_RUNNING), conference->count, rec->path);
 
     while(!no_data) {
-        switch_mutex_lock(member->audio_out_mutex);
+        audio_out_mutex_lock(member);
         if ((rlen = (uint32_t) switch_buffer_read(member->mux_buffer, data_buf, data_buf_len))) {
             len = (switch_size_t) rlen / sizeof(int16_t);
             switch_core_file_write(&fh, data_buf, &len);
         } else {
             no_data = 1;
         }
-        switch_mutex_unlock(member->audio_out_mutex);
+        audio_out_mutex_unlock(member);
     }
 
     conference->is_recording = 0;
