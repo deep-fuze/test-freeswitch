@@ -3212,15 +3212,20 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
 static void conference_reconcile_member_lists(conference_obj_t *conference) {
     conference_member_t *member = NULL, *last = NULL;
     uint32_t g722cnt = 0, g711ucnt = 0, g711acnt = 0, othercnt = 0;
+    int count;
 
     conference_mutex_lock(conference);
     switch_mutex_lock(conference->member_mutex);
-    
-    for (member = conference->member_lists[eMemberListTypes_Speakers]; member;) {
+
+    for (count = 0, member = conference->member_lists[eMemberListTypes_Speakers]; member; count += 1) {
         if (switch_test_flag(member, MFLAG_NOCHANNEL) || !switch_test_flag(member, MFLAG_RUNNING)) {
             last = member;
             member = member->next;
             continue;
+        }
+
+        if (count > conference->max_members) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Exceeded max number of participants\n");
         }
         
         if (!(switch_test_flag(member, MFLAG_CAN_SPEAK) || switch_test_flag(member, MFLAG_USE_FAKE_MUTE)) ||
@@ -3268,11 +3273,15 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
     
     last = NULL;
     
-    for (member = conference->member_lists[eMemberListTypes_Listeners]; member;) {
+    for (count = 0, member = conference->member_lists[eMemberListTypes_Listeners]; member; count++) {
         if (switch_test_flag(member, MFLAG_NOCHANNEL) || !switch_test_flag(member, MFLAG_RUNNING)) {
             last = member;
             member = member->next;
             continue;
+        }
+
+        if (count > conference->max_members) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Exceeded max number of participants\n");
         }
         
         if ((switch_test_flag(member, MFLAG_CAN_SPEAK) || switch_test_flag(member, MFLAG_USE_FAKE_MUTE)) &&
@@ -3308,9 +3317,14 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
         }
     }
 
-    for (member = conference->member_lists[eMemberListTypes_Recorders]; member; ) {
+    for (count = 0, member = conference->member_lists[eMemberListTypes_Recorders]; member; count++) {
         conference_member_t *this_member = member;
         member = member->next;
+
+        if (count > conference->max_members) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Exceeded max number of participants\n");
+        }
+
         if (!switch_test_flag(this_member, MFLAG_RUNNING) || 
             !switch_test_flag(conference, CFLAG_RUNNING) || 
             !(conference->count + conference->count_ghosts)) {
@@ -3318,8 +3332,11 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
         }
     }
 
-    for (int i = 0; i < eMemberListTypes_Recorders; i++) {
-        for (member = conference->member_lists[i]; member; member = member->next) {
+    for (int i = 0, count = 0; i < eMemberListTypes_Recorders; i++) {
+        for (member = conference->member_lists[i]; member; member = member->next, count++) {
+            if (count > conference->max_members) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Exceeded max number of participants\n");
+            }
             if (switch_test_flag(member, MFLAG_NOCHANNEL) || !switch_test_flag(member, MFLAG_RUNNING)) {
                 continue;
             }
@@ -8374,6 +8391,7 @@ static void recording_start(conference_obj_t *conference, char *path, switch_boo
             }
 
             member = conference->record_member;
+            conference->record_member->next = NULL;
 
             member->flags = MFLAG_CAN_HEAR | MFLAG_NOCHANNEL | MFLAG_RUNNING;
 
