@@ -4648,8 +4648,8 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         switch_snprintf(debug_str, CTR_DEBUG_STR_LEN,
                         "%s o.read=%d, ", debug_str, omember->read / 2);
     }
-    /* Fuze: at this point main_frame = sum(active speakers) + conference_ivr */
 
+    /* Fuze: at this point main_frame = sum(active speakers) + conference_ivr */
     for (x = 0; x < bytes / 2; x++) {
         int32_t z;
         z = main_frame[x];
@@ -4709,47 +4709,41 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             memset(write_frame_raw, 0, bytes);
 
             /* Fuze: Everybody is muted or not speaking */
-            if ((no_active_speakers == 0) && (omember->conference->count > 1)) {
-                /* already cleared above */
-            } else {
+			bptr = (int16_t *) omember->frame;
+			for (x = 0; x < bytes / 2; x++) {
+				int32_t z;
 
-                bptr = (int16_t *) omember->frame;
-                for (x = 0; x < bytes / 2; x++) {
-                    int32_t z;
+				z = (int32_t) main_frame[x];
 
-                    z = (int32_t) main_frame[x];
+                if (!exclusive_play) {
+                    /* bptr[x] represents my own contribution to this audio sample */
+                    if (switch_test_flag(omember, MFLAG_HAS_AUDIO) && x <= omember->read / 2 && one_of_active) {
+                        z -= (int32_t) (bptr[x]);
+                    }
 
-                    if (!exclusive_play) {
-                        /* bptr[x] represents my own contribution to this audio sample */
-                        if (switch_test_flag(omember, MFLAG_HAS_AUDIO) && x <= omember->read / 2 && one_of_active) {
-                            z -= (int32_t) (bptr[x]);
-                        }
-
-                        /* when there are relationships, we have to do more work by scouring all the members to see if there are any
-                         * reasons why we should not be hearing a paticular member, and if not, delete their samples as well.
-                         */
-                        if (conference->relationship_total) {
-                            for (imember = conference->member_lists[eMemberListTypes_Speakers]; imember; imember = imember->next) {
-                                if (imember != omember && switch_test_flag(imember, MFLAG_HAS_AUDIO)) {
-                                    conference_relationship_t *rel;
-                                    switch_size_t found = 0;
-                                    int16_t *rptr = (int16_t *) imember->frame;
-                                    for (rel = imember->relationships; rel; rel = rel->next) {
-                                        if ((rel->id == omember->id || rel->id == 0) && !switch_test_flag(rel, RFLAG_CAN_SPEAK)) {
+                    /* when there are relationships, we have to do more work by scouring all the members to see if there are any
+                     * reasons why we should not be hearing a paticular member, and if not, delete their samples as well.
+                     */
+                    if (conference->relationship_total) {
+                        for (imember = conference->member_lists[eMemberListTypes_Speakers]; imember; imember = imember->next) {
+                            if (imember != omember && switch_test_flag(imember, MFLAG_HAS_AUDIO)) {
+                                conference_relationship_t *rel;
+                                switch_size_t found = 0;
+                                int16_t *rptr = (int16_t *) imember->frame;
+                                for (rel = imember->relationships; rel; rel = rel->next) {
+                                    if ((rel->id == omember->id || rel->id == 0) && !switch_test_flag(rel, RFLAG_CAN_SPEAK)) {
+                                        z -= (int32_t) rptr[x];
+                                        found = 1;
+                                        break;
+                                    }
+                                }
+                                if (!found) {
+                                    for (rel = omember->relationships; rel; rel = rel->next) {
+                                        if ((rel->id == imember->id || rel->id == 0) && !switch_test_flag(rel, RFLAG_CAN_HEAR)) {
                                             z -= (int32_t) rptr[x];
-                                            found = 1;
                                             break;
                                         }
                                     }
-                                    if (!found) {
-                                        for (rel = omember->relationships; rel; rel = rel->next) {
-                                            if ((rel->id == imember->id || rel->id == 0) && !switch_test_flag(rel, RFLAG_CAN_HEAR)) {
-                                                z -= (int32_t) rptr[x];
-                                                break;
-                                            }
-                                        }
-                                    }
-
                                 }
                             }
                         }
