@@ -488,7 +488,6 @@ typedef struct conference_record {
     switch_memory_pool_t *pool;
     switch_bool_t autorec;
     struct conference_record *next;
-    switch_file_handle_t fh;
 } conference_record_t;
 
 
@@ -591,8 +590,7 @@ typedef struct conference_obj {
     
     /* */
     conference_member_t *member_lists[NUMBER_OF_MEMBER_LISTS];
-    conference_member_t *record_member;
-
+    
     /* */
     conference_member_t *floor_holder;
     conference_member_t *video_floor_holder;
@@ -885,8 +883,8 @@ static switch_status_t conf_api_unlock_and_unmute(conference_member_t *member, s
 static int conference_list_add(conference_obj_t *conference, participant_thread_data_t *ol);
 static int conference_list_remove(conference_obj_t *conference, participant_thread_data_t *ol);
 static void conference_list_add_to_idx(conference_obj_t *conference, participant_thread_data_t *ol, int idx);
-static void recording_stop(conference_obj_t *conference, conference_record_t *rec);
 static void notify_muted(conference_member_t *member);
+static void launch_conference_record_thread(conference_obj_t *conference, char *path, switch_bool_t autorec);
 
 SWITCH_STANDARD_API(conf_api_main);
 
@@ -914,8 +912,6 @@ static switch_status_t conference_member_say(conference_member_t *member, char *
 static uint32_t conference_member_stop_file(conference_member_t *member, file_stop_t stop);
 static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_core_session_t *session, switch_memory_pool_t *pool);
 static switch_status_t chat_send(switch_event_t *message_event);
-
-static void recording_start(conference_obj_t *conference, char *path, switch_bool_t autorec);
 
 typedef switch_status_t (*conf_api_args_cmd_t) (conference_obj_t *, switch_stream_handle_t *, int, char **);
 typedef switch_status_t (*conf_api_member_cmd_t) (conference_member_t *, switch_stream_handle_t *, void *);
@@ -2365,11 +2361,16 @@ static switch_status_t conference_record_stop(conference_obj_t *conference, swit
     for (member = conference->member_lists[eMemberListTypes_Recorders]; member; member = member->next) {
         if (switch_test_flag(member, MFLAG_NOCHANNEL) && (!path || !strcmp(path, member->rec_path))) {
             if (!switch_test_flag(conference, CFLAG_CONF_RESTART_AUTO_RECORD) && member->rec && member->rec->autorec) {
-                stream->write_function(stream, "Stopped AUTO recording file %s (Auto Recording Now Disabled)\n", member->rec_path);
+                if (stream) {
+                    stream->write_function(stream, "Stopped AUTO recording file %s (Auto Recording Now Disabled)\n", member->rec_path);
+                }
                 conference->auto_record = 0;
             } else {
-                stream->write_function(stream, "Stopped recording file %s\n", member->rec_path);
+                if (stream) {
+                    stream->write_function(stream, "Stopped recording file %s\n", member->rec_path);
+                }
             }
+
             clear_member_state_locked(member, MFLAG_RUNNING);
             count++;
 
@@ -3016,7 +3017,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
 
             switch_snprintf(recordings_path, 1024, "/recordings/r%s_%"PRId64".wav", member->conference->uuid_str, switch_time_now());
 
-            recording_start(member->conference, recordings_path, SWITCH_FALSE);
+            launch_conference_record_thread(member->conference, recordings_path, SWITCH_FALSE);
         }
 
         if (switch_channel_test_flag(channel, CF_VIDEO)) {
@@ -3317,26 +3318,8 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
         }
     }
 
-    for (count = 0, member = conference->member_lists[eMemberListTypes_Recorders]; member; count++) {
-        conference_member_t *this_member = member;
-        member = member->next;
-
-        if (count > conference->max_members) {
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Exceeded max number of participants\n");
-        }
-
-        if (!switch_test_flag(this_member, MFLAG_RUNNING) || 
-            !switch_test_flag(conference, CFLAG_RUNNING) || 
-            !(conference->count + conference->count_ghosts)) {
-            recording_stop(conference, this_member->rec);
-        }
-    }
-
-    for (int i = 0, count = 0; i < eMemberListTypes_Recorders; i++) {
-        for (member = conference->member_lists[i]; member; member = member->next, count++) {
-            if (count > conference->max_members) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Exceeded max number of participants\n");
-            }
+    for (int i = 0; i < eMemberListTypes_Recorders; i++) {
+        for (member = conference->member_lists[i]; member; member = member->next) {
             if (switch_test_flag(member, MFLAG_NOCHANNEL) || !switch_test_flag(member, MFLAG_RUNNING)) {
                 continue;
             }
@@ -4486,7 +4469,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             switch_channel_t *channel = switch_core_session_get_channel(imember->session);
             char *rfile = switch_channel_expand_variables(channel, conference->auto_record);
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Auto recording file: %s\n", rfile);
-            recording_start(conference, rfile, SWITCH_TRUE);
+            launch_conference_record_thread(conference, rfile, SWITCH_TRUE);
 
             if (rfile != conference->auto_record) {
                 conference->record_filename = switch_core_strdup(conference->pool, rfile);
@@ -4711,39 +4694,6 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                 continue;
             }
 
-            if (omember->rec) {
-                switch_size_t len = bytes / sizeof(int16_t);
-                switch_time_t delta2 = switch_time_now();
-
-                if (bytes) {
-                    switch_time_t write_time;
-                    ok = switch_buffer_write(omember->audio_buffer, main_frame_16, bytes);
-                    if (switch_buffer_inuse(omember->audio_buffer) >= (CONF_DBLOCK_SIZE-bytes)) {
-                        uint32_t bytes_used;
-                        const void *read_data;
-
-                        bytes_used = switch_buffer_peek_zerocopy(omember->audio_buffer, &read_data);
-                        len = bytes_used/2;
-
-                        write_time = switch_time_now();
-                        switch_core_file_write(&omember->rec->fh, (void *)read_data, &len);
-                        write_time = switch_time_now() - write_time;
-
-                        switch_buffer_zero(omember->audio_buffer);
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Recording: wrote %u bytes took %" PRId64 "ms\n", bytes_used, write_time/1000);
-                    }
-#if 0
-                    if (switch_core_file_write(&omember->rec->fh, main_frame_16, &len) != SWITCH_STATUS_SUCCESS) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Recording: Write Failed\n");
-                        clear_member_state_locked(omember, MFLAG_RUNNING);
-                    }
-#endif
-                }
-                delta2 = switch_time_now() - delta;
-                if (delta2 > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta2/1000);}
-
-                continue;
-            }
 
             one_of_active = omember->one_of_active && (switch_test_flag(omember, MFLAG_CAN_SPEAK) ||
                                                        (!switch_test_flag(omember, MFLAG_CAN_SPEAK) &&
@@ -4918,13 +4868,6 @@ static void conference_thread_stop(conference_obj_t *conference)
 
     conference_stop_file(conference, FILE_STOP_ASYNC);
     conference_stop_file(conference, FILE_STOP_ALL);
-
-
-    for (conference_member_t *member = conference->member_lists[eMemberListTypes_Recorders]; member; ) {
-        conference_member_t *this_member = member;
-        member = member->next;
-        recording_stop(conference, this_member->rec);
-    }
 
     for (conference_cdr_node_t *np = conference->cdr_nodes; np; np = np->next) {
         if (np->var_event) {
@@ -7015,7 +6958,7 @@ static void start_conference_loops(conference_member_t *member)
     conference_list_remove(member->conference, &ols);
 
     if (member->mname && strcmp(member->mname, "recorder@fuze.com") == 0) {
-        conference_thread_stop(member->conference);
+        conference_record_stop(member->conference, NULL, NULL);
     }
 
     while (1) {
@@ -8298,211 +8241,6 @@ OUTPUT_LOOP_RET process_participant_output_end_member(participant_thread_data_t 
     return OUTPUT_LOOP_OK;
 }
 
-static void recording_start(conference_obj_t *conference, char *path, switch_bool_t autorec)
-{
-    switch_memory_pool_t *pool;
-    conference_record_t *rec;
-    switch_file_handle_t *fh;
-    switch_event_t *event;
-
-    /* Setup a memory pool to use. */
-    if (switch_core_new_memory_pool(&pool) != SWITCH_STATUS_SUCCESS) {
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Pool Failure\n");
-    }
-
-    /* Create a node object */
-    if (!(rec = switch_core_alloc(pool, sizeof(*rec)))) {
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Alloc Failure\n");
-        switch_core_destroy_memory_pool(&pool);
-        return;
-    }
-
-    conference->is_recording = 1;
-
-    rec->conference = conference;
-    rec->path = switch_core_strdup(pool, path);
-    rec->pool = pool;
-    rec->autorec = autorec;
-
-    switch_mutex_lock(conference->flag_mutex);
-    rec->next = conference->rec_node_head;
-    conference->rec_node_head = rec;
-    switch_mutex_unlock(conference->flag_mutex);
-
-    fh = &rec->fh;
-
-    if (conference->moh_sound) {
-        conference_stop_file(conference, FILE_STOP_ASYNC);
-    }
-
-    switch_mutex_lock(conference->member_mutex);
-    if (conference->recording_started_sound) {
-        for (int i = 0; i < eMemberListTypes_Recorders; i++) {
-            for (conference_member_t *member = conference->member_lists[i]; member; member = member->next) {
-                if (member->session && !switch_test_flag(member, MFLAG_NOCHANNEL)) {
-                    if (!(member->mname && strcmp(member->mname, "recorder@fuze.com") == 0)) {
-                        conference_member_play_file(member, conference->recording_started_sound, CONF_DEFAULT_LEADIN, 1);
-                    }
-                }
-            }
-        }
-    }
-    switch_mutex_unlock(conference->member_mutex);
-
-
-    if (fh) {
-        memset(fh, 0, sizeof(switch_file_handle_t));
-
-        fh->channels = 1;
-        fh->samplerate = conference->rate;
-        fh->pre_buffer_datalen = SWITCH_DEFAULT_FILE_BUFFER_LEN;
-
-        if (switch_core_file_open(fh, path, (uint8_t) 1, conference->rate, SWITCH_FILE_FLAG_WRITE | SWITCH_FILE_DATA_SHORT, pool) != SWITCH_STATUS_SUCCESS) {
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error Opening File [%s]\n", path);
-
-            if (test_eflag(conference, EFLAG_RECORD) &&
-                switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, CONF_EVENT_MAINT) == SWITCH_STATUS_SUCCESS) {
-                conference_add_event_data(conference, event);
-                switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Action", "start-recording");
-                switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Path", path);
-                switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Error", "File could not be opened for recording");
-                switch_event_fire(&event);
-            }
-        } else {
-            char *vval;
-            conference_member_t *member;
-            uint32_t samples = switch_samples_per_packet(conference->rate, conference->interval);
-
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Opened Recording File [%s]\n", rec->path);
-
-            if ((vval = switch_mprintf("Conference %s", conference->name))) {
-                switch_core_file_set_string(fh, SWITCH_AUDIO_COL_STR_TITLE, vval);
-                switch_safe_free(vval);
-            }
-
-            switch_core_file_set_string(fh, SWITCH_AUDIO_COL_STR_ARTIST, "Fuze Conference Recording");
-
-            if (test_eflag(conference, EFLAG_RECORD) &&
-                switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, CONF_EVENT_MAINT) == SWITCH_STATUS_SUCCESS) {
-                conference_add_event_data(conference, event);
-                switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Action", "start-recording");
-                switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Path", path);
-                switch_event_fire(&event);
-            }
-
-            member = conference->record_member;
-            conference->record_member->next = NULL;
-
-            member->flags = MFLAG_CAN_HEAR | MFLAG_NOCHANNEL | MFLAG_RUNNING;
-
-            member->conference = conference;
-            member->native_rate = conference->rate;
-            member->rec_path = path;
-            member->rec_time = switch_epoch_time_now(NULL);
-            member->id = next_member_id();
-            member->pool = rec->pool;
-            member->rec = rec;
-            member->frame_size = SWITCH_RECOMMENDED_BUFFER_SIZE;
-            member->frame = switch_core_alloc(member->pool, member->frame_size);
-            member->mux_frame = switch_core_alloc(member->pool, member->frame_size);
-
-            switch_mutex_init(&member->write_mutex, SWITCH_MUTEX_NESTED, rec->pool);
-            switch_mutex_init(&member->flag_mutex, SWITCH_MUTEX_NESTED, rec->pool);
-            switch_mutex_init(&member->fnode_mutex, SWITCH_MUTEX_NESTED, rec->pool);
-            switch_mutex_init(&member->audio_in_mutex, SWITCH_MUTEX_NESTED, rec->pool);
-            switch_mutex_init(&member->audio_out_mutex, SWITCH_MUTEX_NESTED, rec->pool);
-            switch_mutex_init(&member->read_mutex, SWITCH_MUTEX_NESTED, rec->pool);
-            switch_thread_rwlock_create(&member->rwlock, rec->pool);
-
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Conference Recording Info: id:%d interval:%u samples: %u rate: %u [%s]\n",
-                              member->id, conference->interval, samples, member->native_rate, member->rec_path);
-
-            /* Setup an audio buffer for the incoming audio */
-            if (switch_buffer_create_dynamic(&member->audio_buffer, CONF_DBLOCK_SIZE, CONF_DBUFFER_SIZE, 0) != SWITCH_STATUS_SUCCESS) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Memory Error Creating Audio Buffer!\n");
-            }
-
-            member->mux_buffer = NULL;
-
-            if (conference_add_member(conference, member) != SWITCH_STATUS_SUCCESS) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error Joining Conference\n");
-            }
-        }
-    }
-}
-
-static void recording_stop(conference_obj_t *conference, conference_record_t *rec)
-{
-    switch_event_t *event;
-    conference_record_t *rp, *last = NULL;
-    conference_member_t *member = conference->record_member;
-    conference->is_recording = 0;
-
-    if (conference->recording_stopped_sound) {
-        conference_play_file(conference, conference->recording_stopped_sound, CONF_DEFAULT_LEADIN, NULL, 1, 1);
-    }
-
-    if (switch_buffer_inuse(member->audio_buffer)) {
-        uint32_t bytes_used;
-        const void *read_data;
-        switch_size_t len;
-
-        bytes_used = switch_buffer_peek_zerocopy(member->audio_buffer, &read_data);
-        len = bytes_used/2;
-
-        switch_core_file_write(&member->rec->fh, (void *)read_data, &len);
-        switch_buffer_zero(member->audio_buffer);
-    }
-
-    conference_del_member(conference, member);
-
-    switch_buffer_destroy(&member->audio_buffer);
-#if 0
-    switch_buffer_destroy(&member->mux_buffer);
-#endif
-
-    clear_member_state_locked(conference->record_member, MFLAG_RUNNING);
-
-    if (switch_test_flag((&rec->fh), SWITCH_FILE_OPEN)) {
-        switch_core_file_close(&rec->fh);
-    }
-
-    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Recording of %s Stopped\n", rec->path);
-    if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, CONF_EVENT_MAINT) == SWITCH_STATUS_SUCCESS) {
-        conference_add_event_data(conference, event);
-        switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Action", "stop-recording");
-        switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Path", rec->path);
-        switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Samples-Out", "%ld", (long) rec->fh.samples_out);
-        switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Samplerate", "%ld", (long) rec->fh.samplerate);
-        switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Milliseconds-Elapsed", "%ld", (long) rec->fh.samples_out / (rec->fh.samplerate / 1000));
-        switch_event_fire(&event);
-    }
-
-    if (rec->autorec && conference->auto_recording) {
-        conference->auto_recording--;
-    }
-
-    switch_mutex_lock(conference->flag_mutex);
-    for (rp = conference->rec_node_head; rp; rp = rp->next) {
-        if (rec == rp) {
-            if (last) {
-                last->next = rp->next;
-            } else {
-                conference->rec_node_head = rp->next;
-            }
-        }
-    }
-
-    if (rec->pool) {
-        switch_memory_pool_t *pool = rec->pool;
-        rec = NULL;
-        switch_core_destroy_memory_pool(&pool);
-    }
-
-    switch_mutex_unlock(conference->flag_mutex);
-}
-
-#if 0    
 /* aaa */
 /* Sub-Routine called by a record entity inside a conference */
 static void *SWITCH_THREAD_FUNC conference_record_thread_run(switch_thread_t *thread, void *obj)
@@ -8789,7 +8527,6 @@ static void *SWITCH_THREAD_FUNC conference_record_thread_run(switch_thread_t *th
     switch_thread_rwlock_unlock(conference->rwlock);
     return NULL;
 }
-#endif
 
 /* Make files stop playing in a conference either the current one or all of them */
 static uint32_t conference_stop_file(conference_obj_t *conference, file_stop_t stop)
@@ -11435,7 +11172,7 @@ static switch_status_t conf_api_sub_record(conference_obj_t *conference, switch_
     stream->write_function(stream, "Record file %s\n", argv[2]);
     conference->record_filename = switch_core_strdup(conference->pool, argv[2]);
     conference->record_count++;
-    recording_start(conference, argv[2], SWITCH_FALSE);
+    launch_conference_record_thread(conference, argv[2], SWITCH_FALSE);
     return SWITCH_STATUS_SUCCESS;
 }
 
@@ -13658,6 +13395,43 @@ SWITCH_STANDARD_APP(conference_function)
     //    switch_core_session_video_reset(session);
 }
 
+static void launch_conference_record_thread(conference_obj_t *conference, char *path, switch_bool_t autorec)
+{
+    switch_thread_t *thread;
+    switch_threadattr_t *thd_attr = NULL;
+    switch_memory_pool_t *pool;
+    conference_record_t *rec;
+
+    /* Setup a memory pool to use. */
+    if (switch_core_new_memory_pool(&pool) != SWITCH_STATUS_SUCCESS) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Pool Failure\n");
+    }
+
+    /* Create a node object */
+    if (!(rec = switch_core_alloc(pool, sizeof(*rec)))) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Alloc Failure\n");
+        switch_core_destroy_memory_pool(&pool);
+        return;
+    }
+
+    conference->is_recording = 1;
+
+    rec->conference = conference;
+    rec->path = switch_core_strdup(pool, path);
+    rec->pool = pool;
+    rec->autorec = autorec;
+
+    switch_mutex_lock(conference->flag_mutex);
+    rec->next = conference->rec_node_head;
+    conference->rec_node_head = rec;
+    switch_mutex_unlock(conference->flag_mutex);
+
+    switch_threadattr_create(&thd_attr, rec->pool);
+    switch_threadattr_detach_set(thd_attr, 1);
+    switch_threadattr_stacksize_set(thd_attr, SWITCH_THREAD_STACKSIZE);
+    switch_thread_create(&thread, thd_attr, conference_record_thread_run, rec, rec->pool);
+}
+
 static switch_status_t chat_send(switch_event_t *message_event)
 {
     char name[512] = "", *p, *lbuf = NULL;
@@ -14154,7 +13928,6 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
         if (tts_voice) {
             conference->tts_voice = switch_core_strdup(conference->pool, tts_voice);
         }
-        conference->record_member = switch_core_alloc(pool, sizeof(conference_member_t));
 
         conference->comfort_noise_level = comfort_noise_level;
         conference->pin_retries = pin_retries;
