@@ -9344,7 +9344,7 @@ static void notify_muted(conference_member_t *member)
     if (member == NULL)
         return;
 
-    if (switch_test_flag(member, MFLAG_CLIENT_SIDE_TONES)) {
+    if (!switch_test_flag(member, MFLAG_CLIENT_SIDE_TONES)) {
         return;
     }
 
