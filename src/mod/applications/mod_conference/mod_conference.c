@@ -4748,11 +4748,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                             }
                         }
                     }
-
-                    /* Now we can convert to 16 bit. */
-                    switch_normalize_to_16bit(z);
-                    write_frame_raw[x] = (int16_t) z;
                 }
+                /* Now we can convert to 16 bit. */
+                switch_normalize_to_16bit(z);
+                write_frame_raw[x] = (int16_t) z;
             }
 
             audio_out_mutex_lock(omember);
