@@ -13291,8 +13291,14 @@ SWITCH_STANDARD_APP(conference_function)
         switch_channel_hangup(channel, SWITCH_CAUSE_CONFERENCE_INACTIVE);
     }
 
+#if 0
     wait = (member.id % 50) * 1000000;
     switch_yield(wait);
+#else
+    wait = 100000;
+    switch_yield(wait);
+#endif
+
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Wait for member cleanup mid:%d wait %d for real\n",
                       member.id, wait);
 
