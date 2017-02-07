@@ -8,7 +8,7 @@ AM_CFLAGS    = -std=c++0x $(new_AM_CFLAGS) -Wno-deprecated -I./src -I./src/core 
 AM_CPPFLAGS  = $(AM_CFLAGS)
 AM_LDFLAGS   = $(new_AM_LDFLAGS) -L.
 
-DEFS = @DEFS@ -DSTD_SHARED_PTR -DNO_FUZECORE -DNEW_SRTP
+DEFS = @DEFS@ -DSTD_SHARED_PTR -DNO_FUZECORE -DFREE_SWITCH
 
 lib_LTLIBRARIES = libfuzetransport.la 
 libfuzetransport_la_SOURCES = src/core/Log.cpp \

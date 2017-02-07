@@ -77,6 +77,9 @@
 #define RRFIXEDSZ        NS_RRFIXEDSZ
 
 namespace fuze {
+    
+extern vector<string> GetAddrInfo(const string& rAddress);
+
 namespace dns {
 
 namespace {
@@ -95,7 +98,7 @@ const char* rcodes[] =
     "(unknown)", "(unknown)", "(unknown)", "(unknown)", "(unknown)",
     "(unknown)", "(unknown)", "(unknown)", "(unknown)", "NOCHANGE"
 };
-    
+
 const char* classString(int type)
 {
     if (type == 1) {
@@ -109,9 +112,111 @@ const char* typeString(int type)
     switch (type)
     {
     case 1:  return "A";
+    case 2:  return "NS";
+    case 3:  return "MD";
+    case 5:  return "CNAME";
+    case 7:  return "MB";
+    case 12: return "PTR";
     case 33: return "SRV";
     case 35: return "NAPTR";
     default: return "UNEXPECTED";
+    }
+}
+
+// keep track 10 of them
+static char s_name_server[10][INET6_ADDRSTRLEN];
+    
+void NameServerList(ares_channel& channel)
+{
+    ares_addr_node* p_ns = 0;
+
+    int res = ares_get_servers(channel, &p_ns);
+    if (res == ARES_SUCCESS) {
+        int num_ns = 0;
+        for (ares_addr_node* p = p_ns; p; p = p->next) {
+            char buf[INET6_ADDRSTRLEN];
+            ares_inet_ntop(p->family, &p->addr, buf, sizeof(buf));
+            
+            if (strncmp(s_name_server[num_ns], buf, sizeof(buf)) != 0) {
+                _MLOG_("name server [" << num_ns << "] " <<
+                       s_name_server[num_ns] << " -> " << buf);
+                strncpy(s_name_server[num_ns], buf, sizeof(buf));
+            }
+            
+            num_ns++;
+        }
+        
+        if (num_ns == 0) {
+            _WLOG_("No nameserver found in c-ares!");
+        }
+        
+        ares_free_data(p_ns);
+    }
+    else {
+        _WLOG_("ares_get_servers faild: " << ares_strerror(res));
+    }
+}
+    
+void SetAresOptions(ares_channel& channel)
+{
+    ares_options options;
+    options.flags    = ARES_OPT_TIMEOUTMS;
+    options.timeout  = 2000;
+    options.servers  = 0;
+    options.nservers = 0;
+    int status = ares_init_options(&channel, &options, ARES_OPT_FLAGS);
+    if (status != ARES_SUCCESS) {
+        _ELOG_("ares_init_options: " << ares_strerror(status));
+    }
+    
+    ares_addr_node* p_ns;
+    int res = ares_get_servers(channel, &p_ns);
+    if (res == ARES_SUCCESS) {
+        ares_addr_node* p_new_list =
+            (ares_addr_node*)malloc(sizeof(ares_addr_node));
+        ares_addr_node* p_node = p_new_list;
+        
+        bool ipv6_dns = false;
+        
+        for (ares_addr_node* p = p_ns; p; p = p->next) {
+            if (p->family == AF_INET6) {
+                ipv6_dns = true;
+            }
+            p_node->family = p->family;
+            p_node->addr   = p->addr;
+            p_node->next   = (ares_addr_node*)malloc(sizeof(ares_addr_node));
+            p_node = p_node->next;
+        }
+        
+        // last add google dns
+        p_node->next = 0;
+        if (ipv6_dns) {
+            p_node->family = AF_INET6;
+            ares_inet_pton(AF_INET6, IPv4toIPv6("8.8.8.8").c_str(), &p_node->addr.addr6);
+        }
+        else {
+            p_node->family = AF_INET;
+            ares_inet_pton(AF_INET, "8.8.8.8", &p_node->addr.addr4);
+        }
+        
+        res = ares_set_servers(channel, p_new_list);
+        if (res != ARES_SUCCESS) {
+            _WLOG_("ares_set_servers failed: " << ares_strerror(res));
+        }
+        
+        // now free the memory
+        while (p_new_list) {
+            ares_addr_node* p_next = p_new_list->next;
+            free(p_new_list);
+            p_new_list = p_next;
+        }
+        
+        ares_free_data(p_ns);
+        
+        NameServerList(channel);
+    }
+    else {
+        _WLOG_("ares_get_servers failed: " << ares_strerror(res));
     }
 }
     
@@ -153,7 +258,10 @@ const uint8_t* QueryInfo(const uint8_t* pData, const uint8_t* pBuf, int bufLen)
     return pData;
 }
 
-const uint8_t* HandleDnsReply(void* pArg, const uint8_t* pData, const uint8_t* pBuf, int bufLen)
+const uint8_t* HandleDnsReply(void*          pArg,
+                              const uint8_t* pData,
+                              const uint8_t* pBuf,
+                              int            bufLen)
 {
     long len = 0;
     char addr[46] = {0};
@@ -212,6 +320,7 @@ const uint8_t* HandleDnsReply(void* pArg, const uint8_t* pData, const uint8_t* p
             sp->class_    = dnsclass;
             sp->ttl_      = ttl;
             sp->hostName_ = ares_inet_ntop(AF_INET, pData, addr, sizeof(addr));
+            sp->bad_      = false;
             
             p_list->push_back(sp);
             
@@ -306,11 +415,47 @@ const uint8_t* HandleDnsReply(void* pArg, const uint8_t* pData, const uint8_t* p
                    ", pref: " << sp->pref_ << " " << sp->regexp_);
         }
         break;
+    case 2:
+    case 3:
+    case 5:
+    case 7:
+    case 12:
+        status = ares_expand_name(pData, pBuf, bufLen, &name.as_char, &len);
+        if (status != ARES_SUCCESS) {
+            _WLOG_(ares_strerror(status));
+            return 0;
+        }
+        _MLOG_("[" << typeString(type) << "] " << name.as_char);
+        ares_free_string(name.as_char);
+        break;
     default:
-        _DLOG_(type);
+        _MLOG_(type);
     }
     
     return pData + dlen;
+}
+
+void DnsReplyHeader(uint8_t* pBuf, int len, int timeouts)
+{
+    /* Parse the answer header. */
+    int id      = DNS_HEADER_QID(pBuf);
+    int qr      = DNS_HEADER_QR(pBuf);
+    int opcode  = DNS_HEADER_OPCODE(pBuf);
+    int aa      = DNS_HEADER_AA(pBuf);
+    int tc      = DNS_HEADER_TC(pBuf);
+    int rd      = DNS_HEADER_RD(pBuf);
+    int ra      = DNS_HEADER_RA(pBuf);
+    int rcode   = DNS_HEADER_RCODE(pBuf);
+    int ancount = DNS_HEADER_ANCOUNT(pBuf);
+    int nscount = DNS_HEADER_NSCOUNT(pBuf);
+    int arcount = DNS_HEADER_ARCOUNT(pBuf);
+    
+    /* Display the answer header. */
+    _MLOG_("ID: " << id << " (" << len << "B) timeout: " << timeouts <<
+           " flags: " << (qr ? "qr " : "") << (aa ? "aa " : "") <<
+           (tc ? "tc " : "") << (rd ? "rd " : "") << (ra ? "ra " : "") <<
+           "opcode: " << opcodes[opcode] << " rcode: " << rcodes[rcode] <<
+           " Answers: " << ancount << " NS: " << nscount << " AR: " << arcount);
 }
     
 int GetDnsType(Record::Type type)
@@ -362,6 +507,74 @@ bool NaptrCompare(Record::Ptr spA, Record::Ptr spB)
 
 } // unnamed namespace
 
+enum QueryReturnType
+{
+    NO_MORE_QUERY,
+    APP_TIMEOUT_REACHED,
+    SELECT_FAILED
+};
+    
+QueryReturnType ProcessQuery(ares_channel channel, int timeout)
+{
+    /* Wait for all queries to complete. */
+    timeval tv;
+    fd_set read_fds, write_fds;
+    
+    // set the absolute limit to the DNS look up
+    int64_t app_timeout = GetTimeMs() + (timeout * 1000);
+    
+    for (;;) {
+        FD_ZERO(&read_fds);
+        FD_ZERO(&write_fds);
+        int nfds = ares_fds(channel, &read_fds, &write_fds);
+        if (nfds == 0) {
+            return NO_MORE_QUERY;
+        }
+        
+        timeval* p_tv = ares_timeout(channel, 0, &tv);
+        
+        if (p_tv && p_tv->tv_sec && p_tv->tv_usec) {
+
+            if (timeout > 1) {
+                _MLOG_("Waiting for DNS reply (timeout: " << p_tv->tv_sec <<
+                       "." << p_tv->tv_usec/1000 << " seconds)");
+            }
+
+            if (timeout != 0) {
+                // calculate the app timeout
+                int64_t curr_time = GetTimeMs();
+                if (curr_time >= app_timeout) {
+                    return APP_TIMEOUT_REACHED;
+                }
+                
+                int app_time = int(app_timeout - curr_time);
+                app_time /= 1000;
+                if (app_time == 0) app_time = 1;
+                
+                if (tv.tv_sec >= app_time) {
+                    tv.tv_sec  = app_time;
+                    tv.tv_usec = 0;
+                }
+            }
+            
+            int ret = select(nfds, &read_fds, &write_fds, 0, p_tv);
+            if (ret < 0) {
+                _WLOG_("select fail");
+                return SELECT_FAILED;
+            }
+            else if (ret == 0) {
+                _DLOG_("Timed out after " << tv.tv_sec <<
+                       "." << tv.tv_usec/1000 << " seconds");
+            }
+            else {
+                _MLOG_("Received DNS reply");
+            }
+        }
+        
+        ares_process(channel, &read_fds, &write_fds);
+    }
+}
+    
 void ResolverImpl::OnReply(void* pArg, int status, int timeouts, uint8_t* pBuf, int len)
 {
     if (status != ARES_SUCCESS) {
@@ -373,29 +586,13 @@ void ResolverImpl::OnReply(void* pArg, int status, int timeouts, uint8_t* pBuf, 
         _WLOG_("Length too short " << len << "B < " << HFIXEDSZ << "B");
         return;
     }
-
-    ResolverImpl* p_resolver = reinterpret_cast<ResolverImpl*>(pArg);
     
-    /* Parse the answer header. */
-    int id      = DNS_HEADER_QID(pBuf);
-    int qr      = DNS_HEADER_QR(pBuf);
-    int opcode  = DNS_HEADER_OPCODE(pBuf);
-    int aa      = DNS_HEADER_AA(pBuf);
-    int tc      = DNS_HEADER_TC(pBuf);
-    int rd      = DNS_HEADER_RD(pBuf);
-    int ra      = DNS_HEADER_RA(pBuf);
-    int rcode   = DNS_HEADER_RCODE(pBuf);
+    DnsReplyHeader(pBuf, len, timeouts);
+    
     int qdcount = DNS_HEADER_QDCOUNT(pBuf);
     int ancount = DNS_HEADER_ANCOUNT(pBuf);
     int nscount = DNS_HEADER_NSCOUNT(pBuf);
     int arcount = DNS_HEADER_ARCOUNT(pBuf);
-    
-    /* Display the answer header. */
-    _MLOG_("ID: " << id << " (" << len << "B) timeout: " << timeouts <<
-           " flags: " << (qr ? "qr " : "") << (aa ? "aa " : "") <<
-           (tc ? "tc " : "") << (rd ? "rd " : "") << (ra ? "ra " : "") <<
-           "opcode: " << opcodes[opcode] << " rcode: " << rcodes[rcode] <<
-           " Answers: " << ancount << " NS: " << nscount << " AR: " << arcount);
     
     /* Display the questions. */
     const uint8_t* pData = pBuf + HFIXEDSZ;
@@ -404,6 +601,8 @@ void ResolverImpl::OnReply(void* pArg, int status, int timeouts, uint8_t* pBuf, 
         if (!pData) return;
     }
     
+    QueryData* p_query = reinterpret_cast<QueryData*>(pArg);
+
     // answers
     if (ancount > 0) {
         Record::List replies;
@@ -411,12 +610,23 @@ void ResolverImpl::OnReply(void* pArg, int status, int timeouts, uint8_t* pBuf, 
             pData = HandleDnsReply(&replies, pData, pBuf, len);
             if (!pData) return;
         }
+        
+        // it's possible that recursive lookup results in different
+        // domain name than what's expected
+        for (auto& it : replies) {
+            if (it->domain_ != p_query->domain_) {
+                _MLOG_("adjusting alias " << it->domain_ <<
+                       " into " << p_query->domain_);
+                it->domain_ = p_query->domain_;
+            }
+        }
+        
         SetDnsCache(replies);
-        p_resolver->SetReplies(replies);
+        p_query->pResolver_->SetReplies(replies);
     }
     
     // NS records
-    if (nscount) {
+    if (nscount > 0) {
         for (int i = 0; i < nscount; i++) {
             pData = HandleDnsReply(0, pData, pBuf, len);
             if (!pData) return;
@@ -431,7 +641,7 @@ void ResolverImpl::OnReply(void* pArg, int status, int timeouts, uint8_t* pBuf, 
             if (!pData) return;
         }
         SetDnsCache(replies);
-        p_resolver->SetReplies(replies);
+        p_query->pResolver_->SetReplies(replies);
     }
 }
 
@@ -478,6 +688,10 @@ void Resolver::Init()
     if (status != ARES_SUCCESS) {
         _ELOG_("ares_library_init: " << ares_strerror(status));
     }
+    
+    for (int i = 0; i < 10; ++i) {
+        memset(s_name_server[i], 0, INET6_ADDRSTRLEN);
+    }
 }
     
 void Resolver::Terminate()
@@ -492,44 +706,32 @@ Resolver::Ptr Resolver::Create()
 }
     
 ResolverImpl::ResolverImpl()
+    : channel_(0) // delay the ares_channel init for cache
 {
-    ares_init(&channel_);
-    
-    ares_options options;
-    options.flags    = ARES_OPT_TIMEOUTMS;
-    options.timeout  = 2000;
-    options.servers  = 0;
-    options.nservers = 0;
-    int status = ares_init_options(&channel_, &options, ARES_OPT_FLAGS);
-    if (status != ARES_SUCCESS) {
-        _ELOG_("ares_init_options: " << ares_strerror(status));
-    }
 }
 
 ResolverImpl::~ResolverImpl()
 {
-    ares_destroy(channel_);
+    if (channel_) {
+        ares_destroy(channel_);
+    }
 }
-
 
 void ResolverImpl::SetQuery(const string& rDomain, Record::Type type)
 {
-    _DLOG_(rDomain << " (" << toStr(type) << ")");
+    _DLOG_("[" << toStr(type) << "] " << rDomain);
     
-    QueryReq query;
+    QueryData query;
     
-    query.domain_ = rDomain;
-    query.type_   = type;
+    query.domain_    = rDomain;
+    query.type_      = type;
+    query.pResolver_ = this;
     
     queries_.push_back(query);
 }
     
 Record::List ResolverImpl::Query(int timeout)
 {
-    if (queries_.size() > 1) {
-        _MLOG_(queries_.size() << " queries (timeout: " << timeout << " sec)");
-    }
-    
     // clear replies if application is using same instance
     replies_.clear();
 
@@ -537,25 +739,59 @@ Record::List ResolverImpl::Query(int timeout)
     
     for (auto& query : queries_) {
         
+        // if cache is found then return cache - done
+        // if there is no cache then check if stale cache is there
+        // if stale cache is found then trigger cache update
+        // but report the app with stale cache result to
+        // reduce query time
+        // if none found then do standard blocking query
+        
         // check cache first
         Record::List cache =
             TransportImpl::GetInstance()->GetDnsCache(query.domain_, query.type_);
                                                       
         if (!cache.empty()) {
+            _MLOG_("cache found [" << toStr(query.type_) << "] " << query.domain_);
             for (auto& it : cache) {
                 replies_.push_back(it);
             }
         }
         else {
-            do_query = true;
-            ares_query(channel_, query.domain_.c_str(), 1,
-                       GetDnsType(query.type_), OnReply, this);
+            // check stale cache and use it
+            cache = TransportImpl::GetInstance()->GetStaleDnsCache(query.domain_,
+                                                                   query.type_);
+            if (!cache.empty()) {
+                _MLOG_("stale cache found [" << toStr(query.type_) <<
+                       "] " << query.domain_);
+                for (auto& it : cache) {
+                    replies_.push_back(it);
+                }
+                
+                // trigger cache refresh
+                TransportImpl::GetInstance()->QueryDnsAsync(query.domain_,
+                                                            query.type_, 0, 0);
+            }
+            else {
+                // lazy initialization to use cache first
+                if (!channel_) {
+                    ares_init(&channel_);
+                    SetAresOptions(channel_);
+                }
+                
+                _MLOG_("[" << toStr(query.type_) << "] " << query.domain_ <<
+                       " (timeout: " << timeout << " sec)");
+                do_query = true;
+                ares_query(channel_, query.domain_.c_str(), 1,
+                           GetDnsType(query.type_), OnReply, &query);
+            }
         }
     }
     
     // if there is no cache available then do query
     if (do_query) {
-        ProcessQuery(timeout);
+        if (ProcessQuery(channel_, timeout) == APP_TIMEOUT_REACHED) {
+            _MLOG_("App timeout " << timeout << " sec reached");
+        }
     }
     
     // clear queries
@@ -564,71 +800,269 @@ Record::List ResolverImpl::Query(int timeout)
     return replies_;
 }
     
-void ResolverImpl::ProcessQuery(int timeout)
+AsyncResolver::AsyncResolver()
+    : thread_(this, "AsyncResolver")
+    , running_(false)
 {
-    /* Wait for all queries to complete. */
-    timeval tv;
-    fd_set read_fds, write_fds;
+    ares_init(&channel_);
+    SetAresOptions(channel_);
+
+    localIP_  = GetLocalIPAddress();
+    lastTime_ = GetTimeMs();
     
-    // set the absolute limit to the DNS look up
-    int64_t app_timeout = GetTimeMs() + (timeout * 1000);
+    thread_.Start();
+}
+
+AsyncResolver::~AsyncResolver()
+{
+    running_ = false;
     
-    for (;;) {
-        FD_ZERO(&read_fds);
-        FD_ZERO(&write_fds);
-        int nfds = ares_fds(channel_, &read_fds, &write_fds);
-        if (nfds == 0) {
-            break;
-        }
-        
-        timeval* p_tv = ares_timeout(channel_, 0, &tv);
-        
-        _MLOG_("Waiting for DNS reply (timeout: " << tv.tv_sec <<
-               "." << tv.tv_usec/1000 << " seconds)");
-        
-        // if c-ares returned 0 for wait time then set 1 second as mininum
-        if (tv.tv_sec == 0) {
-            tv.tv_sec  = 1;
-            tv.tv_usec = 0;
-        }
-        
-        if (timeout != 0) {
-            
-            // calculate the app timeout
-            int64_t curr_time = GetTimeMs();
-            if (curr_time >= app_timeout) {
-                _MLOG_("App timeout reached");
-                break;
-            }
-            
-            int app_time = int(app_timeout - curr_time);
-            app_time /= 1000;
-            if (app_time == 0) app_time = 1;
-            
-            if (tv.tv_sec >= app_time) {
-                tv.tv_sec  = app_time;
-                tv.tv_usec = 0;
-                _MLOG_("Query timeout reset to " << timeout << " seconds");
-            }
-        }
-        
-        int ret = select(nfds, &read_fds, &write_fds, 0, p_tv);
-        if (ret < 0) {
-            _WLOG_("select fail");
-            break;
-        }
-        else if (ret == 0) {
-            _DLOG_("Timed out after " << tv.tv_sec <<
-                   "." << tv.tv_usec/1000 << " seconds");
-            if (GetTimeMs() >= app_timeout) {
-                _MLOG_("App timeout reached");
-                break;
-            }
-        }
-        
-        _DLOG_("Received an event");
-        ares_process(channel_, &read_fds, &write_fds);
+    if (thread_.IsRunning()) {
+        semaphore_.Post();
+        thread_.Join();
+        _MLOG_("DnsResolver thread joined");
     }
+    
+    ares_destroy(channel_);
+}
+    
+void AsyncResolver::ResetChannel()
+{
+    _MLOG_("");
+    
+    ares_destroy(channel_);
+    ares_init(&channel_);
+    SetAresOptions(channel_);
+}
+    
+void AsyncResolver::SetQuery(const string& rDomain,
+                             Record::Type  type,
+                             DnsObserver*  pObserver,
+                             void*         pArg)
+{
+    //
+    // No DnsObserver means that we want to refresh the cache only
+    //
+    bool do_query = (pObserver ? false : true);
+    
+    if (!do_query) {
+        // check the dns cache first
+        Record::List cache =
+            TransportImpl::GetInstance()->GetDnsCache(rDomain, type);
+                                                      
+        if (cache.empty()) {
+            // do query to refresh the retrieve the reply
+            do_query = true;
+            
+            cache = TransportImpl::GetInstance()->GetStaleDnsCache(rDomain,
+                                                                   type);
+            if (!cache.empty()) {
+                _MLOG_("stale cache found [" << toStr(type) << "] " << rDomain);
+                       
+            }
+        }
+        else {
+            _MLOG_("cache found [" << toStr(type) << "] " << rDomain);
+        }
+        
+        if (!cache.empty()) {            
+            pObserver->OnDnsReply(cache, pArg);
+            
+            // if stale cache was found then set pObserver & pArg null
+            // to do cache refresh query
+            if (do_query) {
+                pObserver = 0;
+                pArg      = 0;
+            }
+        }
+    }
+    
+    if (do_query) {
+        // if we have duplicate query on cache refresh, let's ignore
+        MutexLock scoped(&qLock_);
+
+        for (auto& it : queryData_) {
+            if (it->domain_ == rDomain && it->type_ == type &&
+                !pObserver && !pArg) {
+                _MLOG_("Found duplicate query - ignored");
+                return;
+            }
+        }
+        
+        QueryData* p_info = new QueryData;
+        
+        p_info->domain_    = rDomain;
+        p_info->type_      = type;
+        p_info->pObserver_ = pObserver;
+        p_info->pArg_      = pArg;
+     
+        {
+            queryData_.push_back(p_info);
+        }
+        
+        semaphore_.Post();
+    }
+}
+    
+void AsyncResolver::Run()
+{
+    running_ = true;
+    
+    while (running_) {
+        if (ProcessQuery(channel_, 1) == NO_MORE_QUERY) {
+            semaphore_.Wait();
+        }
+        
+        int64_t curr_time = GetTimeMs();
+        if (curr_time - lastTime_ > 5000) {
+            string local_ip = GetLocalIPAddress();
+            if (!local_ip.empty() && local_ip != localIP_) {
+                _MLOG_("Local IP Change detected " <<
+                       localIP_ << " -> " << local_ip);
+                localIP_ = local_ip;
+                ResetChannel();
+            }
+            lastTime_ = curr_time;
+        }
+        
+        while (QueryData* p_query = GetQueryData()) {
+            _MLOG_("Querying [" << toStr(p_query->type_) <<
+                   "] " << p_query->domain_);
+            ares_query(channel_, p_query->domain_.c_str(), 1,
+                       GetDnsType(p_query->type_), OnReply, p_query);
+        }
+    }
+}
+
+AsyncResolver::QueryData* AsyncResolver::GetQueryData()
+{
+    QueryData* p_data = 0;
+
+    MutexLock scoped(&qLock_);
+
+    if (!queryData_.empty()) {
+        p_data = queryData_.front();
+        queryData_.pop_front();
+    }
+    
+    return p_data;
+}
+    
+void AsyncResolver::DnsFallback(AsyncResolver::QueryData* pData)
+{
+    if (pData->pObserver_ == 0) return;
+
+    Record::List replies;
+
+    // try GetAddrInfo if A record
+    if (pData->type_ == Record::A) {
+        _MLOG_("Trying GetAddrInfo on " << pData->domain_);
+        
+        vector<string> result = GetAddrInfo(pData->domain_);
+        
+        if (result.empty()) {
+            _WLOG_("DNS query failed on " << pData->domain_);
+        }
+        else {
+            for (auto& it : result) {
+                A::Ptr sp(new A);
+                sp->domain_   = pData->domain_;
+                sp->hostName_ = it;
+                replies.push_back(sp);
+            }
+        }
+    }
+    
+    pData->pObserver_->OnDnsReply(replies, pData->pArg_);
+}
+    
+void AsyncResolver::OnReply(void* pArg, int status, int timeouts, uint8_t* pBuf, int len)
+{
+    // make sure that we release the allocated memory
+    std::unique_ptr<QueryData> p_query((QueryData*)pArg);
+
+    if (status != ARES_SUCCESS) {
+        _WLOG_(ares_strerror(status));
+        if (!pBuf) {
+            DnsFallback((QueryData*)pArg);
+            return;
+        }
+    }
+    
+    if (len < HFIXEDSZ) {
+        _WLOG_("Length too short " << len << "B < " << HFIXEDSZ << "B");
+        DnsFallback((QueryData*)pArg);
+        return;
+    }
+    
+    int qdcount = DNS_HEADER_QDCOUNT(pBuf);
+    int ancount = DNS_HEADER_ANCOUNT(pBuf);
+    int nscount = DNS_HEADER_NSCOUNT(pBuf);
+    int arcount = DNS_HEADER_ARCOUNT(pBuf);
+    
+    const uint8_t* pData = pBuf + HFIXEDSZ;
+    
+    Record::List replies;
+
+    DnsReplyHeader(pBuf, len, timeouts);
+
+    if (ancount == 0) {
+        _MLOG_("No answer returned - fallback");
+        goto do_fallback;
+    }
+    
+    /* Display the questions. */
+    for (int i = 0; i < qdcount; i++) {
+        pData = QueryInfo(pData, pBuf, len);
+        if (!pData) goto do_fallback;
+    }
+    
+    // answers
+    if (ancount > 0) {
+        for (int i = 0; i < ancount; i++) {
+            pData = HandleDnsReply(&replies, pData, pBuf, len);
+            if (!pData) goto do_fallback;
+        }
+        
+        // it's possible that recursive lookup results in different
+        // domain name than what's expected
+        for (auto& it : replies) {
+            if (it->domain_ != p_query->domain_) {
+                _MLOG_("adjusting alias " << it->domain_ <<
+                       " to " << p_query->domain_);
+                it->domain_ = p_query->domain_;
+            }
+        }
+        
+        SetDnsCache(replies);
+    }
+    
+    // NS records
+    if (nscount > 0) {
+        for (int i = 0; i < nscount; i++) {
+            pData = HandleDnsReply(0, pData, pBuf, len);
+            if (!pData) goto do_fallback;
+        }
+    }
+    
+    // additional records
+    if (arcount > 0) {
+        Record::List extras;
+        for (int i = 0; i < arcount; i++) {
+            pData = HandleDnsReply(&extras, pData, pBuf, len);
+            if (!pData) goto do_fallback;
+        }
+        SetDnsCache(extras);
+    }
+    
+    if (p_query->pObserver_) {
+        p_query->pObserver_->OnDnsReply(replies, p_query->pArg_);
+    }
+    
+    return;
+    
+do_fallback:
+    DnsFallback((QueryData*)pArg);
 }
     
 } // namespace dns

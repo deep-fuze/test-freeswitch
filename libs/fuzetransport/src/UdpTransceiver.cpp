@@ -96,13 +96,14 @@ void UdpTransceiver::Reset()
                 evutil_closesocket(socket_);
             }
             else {
-                sockaddr_in  local;
-                ev_socklen_t len = sizeof(local);
+                sockaddr_storage local;
+                ev_socklen_t     len = sizeof(sockaddr_storage);
 
                 if (getsockname(socket_, (sockaddr*)&local, &len) == 0) {
-                    const string& local_ip = toStr(local.sin_addr);
-                    uint16_t local_port = ntohs(local.sin_port);
-                    MLOG("socket interrogation results: " << local_ip << ":" << local_port);
+                    Address addr(local);
+                    uint16_t local_port = addr.Port();
+                    MLOG("socket interrogation result: " << addr.IPString() <<
+                         ":" << local_port);
                     
                     if (evutil_closesocket(socket_) == 0) {
                         MLOG("socket is closed - reserving the port again"
@@ -205,7 +206,7 @@ bool UdpTransceiver::Start()
     }
     
     if (socket_ == INVALID_SOCKET) {
-        socket_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        socket_ = socket(addr.IPType(), SOCK_DGRAM, IPPROTO_UDP);
         if (socket_ == INVALID_SOCKET) {
             ELOG("Failed to create socket")
             return false;
@@ -215,34 +216,24 @@ bool UdpTransceiver::Start()
     if (!connectedUdp_) {
         // if port was not reserved then we would not have port bound
         if (bResult == false) {
-            sockaddr_in saddr;
-            memset(&saddr, 0, sizeof(saddr));
-            
-            saddr.sin_family      = AF_INET;
-            saddr.sin_port        = htons(addr.Port());
-            saddr.sin_addr.s_addr = addr.IPNum().s_addr;
-            
-            if (::bind(socket_, (sockaddr*)&saddr, sizeof(saddr)) == 0) {
+            if (::bind(socket_, addr.SockAddr(), addr.SockAddrLen()) == 0) {
                 bResult = true;
             }
         }
     }
     else {
-        sockaddr_in remote = addr.SocketAddress();
-        if (::connect(socket_, (sockaddr*)&remote, sizeof(sockaddr)) == 0) {
+        if (::connect(socket_, addr.SockAddr(), addr.SockAddrLen()) == 0) {
             
             // if connected UDP is used then get local address
             // that is set by operating system
-            sockaddr_in  local;
-            ev_socklen_t len = sizeof(local);
+            sockaddr_storage local;
+            ev_socklen_t     len = sizeof(sockaddr_storage);
             
             if (getsockname(socket_, (sockaddr*)&local, &len) == 0) {
-                if (pConn_) {
-                    string   ip   = toStr(local.sin_addr);
-                    uint16_t port = ntohs(local.sin_port);
-                    MLOG("Looking up what local address is - " << ip << ":" << port);
-                    pConn_->SetLocalAddress(ip, port);
-                }
+                Address local_addr(local);
+                MLOG("local address: " << local_addr);
+                pConn_->SetLocalAddress(local_addr.IPString(),
+                                        local_addr.Port());
             }
             else {
                 ELOG("Error at getsockname()");
@@ -265,7 +256,7 @@ bool UdpTransceiver::Start()
         int tos = 0xe0;
         if (setsockopt(socket_, IPPROTO_IP, IP_TOS,
                        (char*)&tos, sizeof(tos)) < 0) {
-            ELOG("Failed to set ToS");
+            MLOG("Unable to set ToS");
         }
 
 #ifdef SO_NET_SERVICE_TYPE
@@ -335,8 +326,7 @@ bool UdpTransceiver::Start()
                 }
 			}
             
-            sockaddr_in remote  = pConn_->GetRemoteAddress().SocketAddress();
-            sockaddr*   p_saddr = (sockaddr*)(!connectedUdp_ ? &remote : 0);
+            sockaddr* p_saddr = (sockaddr*)pConn_->GetRemoteAddress().SockAddr();
             
 			if (!pfnQosAddSocketToFlow_) {
 				WLOG("qWAVE not available.");
@@ -445,7 +435,7 @@ void UdpTransceiver::OnLibEvent(evutil_socket_t sock, short what, void* pArg)
                 p->OnTimeOutEvent();
             }
         }
-        catch (std::exception& ex) {
+        catch (const std::exception& ex) {
             _ELOG_("exception - " << ex.what());
         }
         catch (...) {
@@ -500,9 +490,7 @@ bool UdpTransceiver::Send(const uint8_t* buf, size_t size)
         return false;
     }
 
-    sockaddr_in remote = pConn_->GetRemoteAddress().SocketAddress();
-
-    SendPayload((char*)buf, size, remote);
+    SendPayload((char*)buf, size, pConn_->GetRemoteAddress());
     
     return true;
 }
@@ -528,19 +516,19 @@ void UdpTransceiver::OnWriteEvent()
             }
         }
         
-        sockaddr_in remote;
+        Address remote;
         
         if (!connectedUdp_) {
             // first set connection remote as default remote address
-            remote = pConn_->GetRemoteAddress().SocketAddress();
             if (pConn_->IsRemotePerBuffer()) {
-                Address addr;
                 if (NetworkBuffer::Ptr sp_net =
                         fuze_dynamic_pointer_cast<NetworkBuffer>(sp_buf)) {
-                    addr.SetIP(sp_net->remoteIP_.c_str());
-                    addr.SetPort(sp_net->remotePort_);
-                    remote = addr.SocketAddress();
+                    remote.SetIP(sp_net->remoteIP_.c_str());
+                    remote.SetPort(sp_net->remotePort_);
                 }
+            }
+            else {
+                remote = pConn_->GetRemoteAddress();
             }
         }
         
@@ -548,7 +536,7 @@ void UdpTransceiver::OnWriteEvent()
     }
 }
 
-void UdpTransceiver::SendPayload(char* pData, long dataLen, sockaddr_in& rRemote)
+void UdpTransceiver::SendPayload(char* pData, long dataLen, const Address& rRemote)
 {
     if (!pData || !dataLen) {
         WLOG("0 bytes was requested to send - ignored");
@@ -571,7 +559,7 @@ void UdpTransceiver::SendPayload(char* pData, long dataLen, sockaddr_in& rRemote
     }
     else {
         sent = sendto(socket_, pData, dataLen, 0,
-                      (sockaddr*)&rRemote, sizeof(sockaddr));
+                      rRemote.SockAddr(), rRemote.SockAddrLen());
     }
 
     if (sent == dataLen) {
@@ -623,7 +611,7 @@ void UdpTransceiver::OnReadEvent()
     long udp_bytes = -1;
     
     do {
-        sockaddr_in saddr = {};
+        sockaddr_storage saddr;
         
         NetworkBuffer::Ptr sp_packet = pConn_->GetBuffer(recvBufSize_);
         
@@ -634,8 +622,7 @@ void UdpTransceiver::OnReadEvent()
             udp_bytes = recv(socket_, p_buf, size, 0);
         }
         else {
-            ev_socklen_t slen = sizeof(sockaddr_in);
-            
+            ev_socklen_t slen = sizeof(sockaddr_storage);            
             udp_bytes = recvfrom(socket_, p_buf, size, 0,
                                  (sockaddr*)&saddr, &slen);
         }

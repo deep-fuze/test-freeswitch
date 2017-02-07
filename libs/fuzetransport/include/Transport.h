@@ -440,34 +440,49 @@ namespace proxy {
 // available yet due to network change
 //
 // by default use google's public 8.8.8.8 as remote address to connect
-string GetLocalIPAddress(const char* pRemoteAddr = "8.8.8.8");
+string    GetLocalIPAddress(const char* pRemoteAddr = 0);
 
 // Check whether this is IP address or domain
-bool     IsThisIP(const char* pAddress);
-uint32_t GetIPNumber(const char* pIP);
+bool      IsThisIP(const char* pAddress);
+bool      IsIPv6OnlyNetwork();
+bool      IsIPv4(const char* pIP);
+bool      IsIPv6(const char* pIP);
+int       GetIPType(const char* pIP); // AF_INET/AF_INET6
+uint32_t  GetIPNumber(const char* pIP);
+    
+// Apple specific interface for converting IPv4 literal to IPv6 address
+string IPv4toIPv6(const string& rIPv4);
     
 //
 // checking the port can be binded or not
 // if pIP is 0, then INADDR_ANY is used to test
 //
-bool IsUdpPortAvailable(uint16_t port, const char* pIP = 0);
-bool IsTcpPortAvailable(uint16_t port, const char* pIP = 0);
+bool      IsUdpPortAvailable(uint16_t port, const char* pIP = 0);
+bool      IsTcpPortAvailable(uint16_t port, const char* pIP = 0);
     
 //
 // Reserve a UDP port for later use upto given holdTime in milliseconds
 // if application doesn't use the port, it will be released after that time
 //
-bool ReserveUdpPort(uint32_t holdTimeMs, uint16_t port, const char* pIP = 0);
-void ReleaseUdpPort(uint16_t port);
+bool      ReserveUdpPort(uint32_t holdTimeMs, uint16_t port, const char* pIP = 0);
+void      ReleaseUdpPort(uint16_t port);
     
 //
 // Get current time in milliseconds using platform API for performance
 //
-int64_t GetTimeMs();
+int64_t   GetTimeMs();
 
+//
 // Hash by MD5
-void HashByMD5(uint8_t* pBuf, uint32_t bufLen, uint8_t* digest);
-string MD5Hex(uint8_t* digest);
+//
+void      HashByMD5(uint8_t* pBuf, uint32_t bufLen, uint8_t* digest);
+string    MD5Hex(uint8_t* digest);
+  
+//
+// SRTP key encode/decode
+//
+int       EncodeSrtpKeyBase64(const char* pData, uint32_t len, char* pBuf);
+int       DecodeSrtpKeyBase64(const char* pData, uint32_t len, char* pBuf);
     
 //
 // Timer interface
@@ -494,7 +509,7 @@ public:
 int64_t StartTimerEx(Timer::Ptr pTimer, int32_t ms, int32_t appData,
                      const char* pFile, int line);
 int64_t StartTimerEx(Timer::Ptr pTimer, int32_t ms, void* appData,
-                         const char* pFile, int line);
+                     const char* pFile, int line);
 int64_t StartTimerEx(Timer* pTimer, int32_t ms, int32_t appData,
                      const char* pFile, int line);
   
@@ -540,9 +555,10 @@ public:
 
     virtual ~TimerService() {}
 };
-
-//
+    
 // Perform DNS lookup on domain address
+//
+//  Synchronous API
 //
 string         TranslateToIP(const string& rAddress);
 vector<string> TranslateToIPs(const string& rAddress);
@@ -572,6 +588,7 @@ namespace dns {
         typedef fuze_shared_ptr<A> Ptr;
         
         string  hostName_;
+        bool    bad_; // internal usage
     };
     
     struct SRV : public Record
@@ -620,9 +637,25 @@ namespace dns {
     void PrintRecord(const dns::Record::Ptr& rspRec);
     
     const char* toStr(Record::Type type);
-    
+
 } // namespace dns
 
+//
+//  Asynchronous API
+//
+class DnsObserver
+{
+public:
+    virtual void OnDnsReply(dns::Record::List& rReplies, void* pArg) = 0;
+    
+    virtual ~DnsObserver() {}
+};
+
+void QueryDnsServer(const string&      rAddress,
+                    dns::Record::Type  type,
+                    DnsObserver*       pObserver,
+                    void*              pArg);
+    
 class DebugOut;
 
 DebugOut& operator<<(DebugOut& rOut, dns::Record::Ptr spRecord);

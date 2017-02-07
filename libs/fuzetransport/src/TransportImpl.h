@@ -15,6 +15,8 @@
 #include <Stun.h>
 #include <Address.h>
 #include <TimerService.h>
+#include <DnsResolver.h>
+
 #include <set>
 #include <queue>
 
@@ -178,10 +180,16 @@ public:
     // DNS Cache interface
     void SetDnsCache(Record::List& rList);
     Record::List GetDnsCache(const string& rDomain, Record::Type type);
+    Record::List GetStaleDnsCache(const string& rDomain, Record::Type type);
     void MarkDnsCacheBad(const string& rIPString); // A record only
     void ClearDnsCache();
     
     WorkerThread::Ptr GetWorker(ConnectionImpl* pConn);
+    
+    void QueryDnsAsync(const string& rAddress,
+                       Record::Type  type,
+                       DnsObserver*  pObserver,
+                       void*         pArg);
     
 private:
     TransportImpl();
@@ -249,6 +257,8 @@ private:
     map<string, string>    akamaiMap_;
     MutexLock              mapLock_;
     
+    AsyncResolver::Ptr     spResolver_;
+    
 private: // port reservation
     typedef map<uint16_t, PortReserve::Ptr> PortMap;
     
@@ -259,6 +269,7 @@ private: // DNS Cache
     typedef map<string, Record::List> DnsRecordMap;
     
     DnsRecordMap           dnsCache_[Record::MAX_NUM];
+    DnsRecordMap           staleCache_[Record::MAX_NUM];
     MutexLock              dnsLock_;
     
 private: // Thread workers

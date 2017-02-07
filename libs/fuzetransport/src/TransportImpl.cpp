@@ -235,6 +235,9 @@ TransportImpl::~TransportImpl()
         spProxy_.reset();
     }
 
+    if (spResolver_) {
+        spResolver_.reset();
+    }
     dns::Resolver::Terminate();
     
 #if defined(WIN32)
@@ -984,7 +987,8 @@ Record::List TransportImpl::GetDnsCache(const string& rDomain, Record::Type type
             Record::Ptr sp = *(it->second.begin());
             // check if this is expired
             if (GetTimeMs() > sp->expire_) {
-                MLOG(rDomain << " (" << toStr(type) << ") expired");
+                MLOG(" [" << toStr(type) << "] " << rDomain <<  " expired");
+                staleCache_[type][rDomain] = it->second;
                 dnsCache_[type].erase(it);
             }
             else {
@@ -997,6 +1001,33 @@ Record::List TransportImpl::GetDnsCache(const string& rDomain, Record::Type type
     return rec_list;
 }
 
+Record::List TransportImpl::GetStaleDnsCache(const string& rDomain, Record::Type type)
+{
+    Record::List rec_list;
+    
+    MutexLock scoped(&dnsLock_);
+    
+    DnsRecordMap::iterator it = staleCache_[type].find(rDomain);
+    if (it != staleCache_[type].end()) {
+        if (!it->second.empty()) {
+            // if this is bad A record then fix as we are treating as dns replies
+            if (type == Record::A) {
+                for (auto& sp_a : it->second) {
+                    if (A::Ptr sp = fuze_dynamic_pointer_cast<A>(sp_a)) {
+                        if (sp->bad_ == true) {
+                            sp->bad_ = false;
+                        }
+                    }
+                }
+            }
+
+            rec_list = it->second;
+        }
+    }
+    
+    return rec_list;
+}
+    
 void TransportImpl::MarkDnsCacheBad(const string& rIPString)
 {
     MutexLock scoped(&dnsLock_);
@@ -1016,7 +1047,7 @@ void TransportImpl::MarkDnsCacheBad(const string& rIPString)
                          sp_a->hostName_ << " as bad A Record (ttl: " <<
                          ttl/1000 << " left)");
                     
-                    sp_a->hostName_.clear();
+                    sp_a->bad_ = true;
                 }
             }
         }
@@ -1029,11 +1060,26 @@ void TransportImpl::ClearDnsCache()
     
     MutexLock scoped(&dnsLock_);
 
-    dnsCache_[Record::A].clear();
-    dnsCache_[Record::SRV].clear();
-    dnsCache_[Record::NAPTR].clear();
+    for (int i = Record::A; i < Record::MAX_NUM; ++i) {
+        for (auto& kv : dnsCache_[i]) {
+            staleCache_[i][kv.first] = kv.second;
+        }
+        dnsCache_[i].clear();
+    }
 }
 
+void TransportImpl::QueryDnsAsync(const string& rAddress,
+                                  Record::Type  type,
+                                  DnsObserver*  pObserver,
+                                  void*         pArg)
+{
+    if (!spResolver_) {
+        spResolver_.reset(new AsyncResolver);
+    }
+    
+    spResolver_->SetQuery(rAddress, type, pObserver, pArg);
+}
+    
 WorkerThread::Ptr TransportImpl::GetWorker(fuze::ConnectionImpl* pConn)
 {
     WorkerThread::Ptr sp;

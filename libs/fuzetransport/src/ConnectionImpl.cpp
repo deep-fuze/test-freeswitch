@@ -582,13 +582,23 @@ bool ConnectionImpl::SetLocalAddress(const string& IP, uint16_t port)
     
     bool result = false;
     
-    MLOG(local_ << " -> " << IP << ":" << port);
+    string local_addr = IP;
     
-    if (local_.SetIP(IP.c_str()) && local_.SetPort(port)) {
+    // check local ip type and correct if needed
+    const string& local_ip = GetLocalIPAddress();
+    if (!local_ip.empty() &&
+        GetIPType(local_addr.c_str()) != GetIPType(local_ip.c_str())) {
+        MLOG("adjusting IP " << local_addr << " -> " << local_ip);
+        local_addr = local_ip;
+    }
+    
+    MLOG(local_ << " -> " << local_addr << " (" << port << ")");
+    
+    if (local_.SetIP(local_addr.c_str()) && local_.SetPort(port)) {
         result = true;
     }
     else {
-        ELOG("Invalid IP address: " << IP);
+        ELOG("Invalid IP address: " << local_addr);
     }
     
     return result;
@@ -601,10 +611,10 @@ bool ConnectionImpl::SetRemoteAddress(const string& IP, uint16_t port)
         return false;
     }
     
+    MLOG(remote_ << " -> " << IP << " (" << port << ")");
+
     // application may have used domain name instead
     string remote_addr = IP;
-    
-    MLOG(remote_ << " -> " << remote_addr << ":" << port);
     
     remote_.SetPort(port);
     
@@ -623,6 +633,16 @@ bool ConnectionImpl::SetRemoteAddress(const string& IP, uint16_t port)
             MLOG("Remote " << IP << " translated to " << mapped_ip);
             remote_.SetIP(mapped_ip.c_str());
             remote_addr = mapped_ip;
+        }
+    }
+    else {
+        // check local ip type and correct if needed
+        const string& local_ip = GetLocalIPAddress();
+        if (!local_ip.empty() &&
+            GetIPType(remote_addr.c_str()) != GetIPType(local_ip.c_str())) {
+            remote_addr = IPv4toIPv6(remote_addr);
+            MLOG("Remote " << IP << " changed to " << remote_addr);
+            remote_.SetIP(remote_addr.c_str());
         }
     }
     
@@ -1010,7 +1030,7 @@ void ConnectionImpl::DeliverData(Buffer::Ptr spBuffer)
             }
         }
     }
-    catch (std::exception& ex) {
+    catch (const std::exception& ex) {
         ELOG("exception - " << ex.what());
     }
     catch (...) {
@@ -1171,7 +1191,7 @@ void ConnectionImpl::DeliverEventData(EventData &rEvent)
             }
         }
     }
-    catch (std::exception& ex) {
+    catch (const std::exception& ex) {
         ELOG("exception - " << ex.what());
     }
     catch (...) {
@@ -1224,7 +1244,7 @@ void ConnectionImpl::DeliverRateData(fuze::ConnectionImpl::RateData &rRate)
             }
         }
     }
-    catch (std::exception& ex) {
+    catch (const std::exception& ex) {
         ELOG("exception - " << ex.what());
     }
     catch (...) {
@@ -1741,10 +1761,12 @@ NetworkBuffer::Ptr ConnectionImpl::GetBufferShell()
     }
     
     if (!p_buf) {
-        MLOG("Requested shallow copy - creating shallow num: " << ++bufNum_);
         p_buf = new NetworkBuffer; // create empty buffer shell
         p_buf->appID_ = ID(); // mark the connection ID for release
         bufAlloc[BUFFER_SHELL]++;
+        if (++bufNum_ <= 100 || (bufAlloc[BUFFER_SHELL] % 10 == 0)) {
+            MLOG("Requested shallow copy - creating shallow num: " << bufNum_);
+        }
     }
     
     sp_buf.reset(p_buf, HandleReleasedBuffer);
@@ -1768,13 +1790,15 @@ NetworkBuffer::Ptr ConnectionImpl::GetBuffer(uint32_t bufSize)
     }
     
     if (!p_mem) {
-        MLOG("Requested " << bufSize << "B - creating buffer (" <<
-             SizeArray[size_type] << "B) num: " << ++bufNum_);
         uint32_t real_size =
             (size_type != MAX_QUEUE_SIZE ? SizeArray[size_type] : bufSize);
         p_mem = new RawMemory(bufSize, real_size);
         p_mem->setAppID(ID()); // mark the connection ID for release
         bufAlloc[size_type]++;
+        if (++bufNum_ <= 100 || (bufAlloc[size_type] % 10 == 0)) {
+            MLOG("Requested " << bufSize << "B - creating buffer (" <<
+                 SizeArray[size_type] << "B) num: " << bufNum_);
+        }
     }
     else {
         p_mem->setSize(bufSize);
@@ -1828,7 +1852,7 @@ void ConnectionImpl::HandleReleasedBuffer(NetworkBuffer* pBuf)
         p->AddBuffer(pBuf);
     }
     else {
-        _MLOG_("deleting buffer shell on inactive c" << pBuf->appID_);
+        _DLOG_("deleting buffer shell on inactive c" << pBuf->appID_);
         delete pBuf;
     }
 }
@@ -1849,7 +1873,7 @@ void ConnectionImpl::HandleReleasedMemory(RawMemory* pMem)
         p->AddMemory(pMem);
     }
     else {
-        _MLOG_("deleting raw memory " << pMem->getRealSize() <<
+        _DLOG_("deleting raw memory " << pMem->getRealSize() <<
                "B on inactive c" << app_id);
         delete pMem;
     }

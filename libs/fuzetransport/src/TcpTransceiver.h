@@ -182,6 +182,7 @@ private: // state pattern to separate the behavior on different state
     
 private: // helper
     static const size_t Q_LIMIT = 3000000; // 3MB
+    static const size_t Q_SIZE  = 300;
     
     int64_t      lastSendError_; // to limit send error log
     int64_t      lastDropTime_;  // impose queue size limit

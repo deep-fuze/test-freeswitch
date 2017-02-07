@@ -12,14 +12,25 @@
 #include <Transceiver.h>
 #include <TlsCore.h>
 
-#ifdef DTLS_SRTP
-struct srtp_ctx_t;
-struct srtp_policy_t;
+#if defined(__ANDROID_API__) || defined(WIN32) || defined(__APPLE__)
+// The clients use libsrtp2.
+#include <srtp2/srtp.h>
+#else
+// The hubs still use libsrtp 1.x because opal still depends on it.
+#ifndef FREE_SWITCH
+#include <srtp/srtp.h>
+#else // freeswitch's srtp path
+#include <srtp.h>
+#endif
+#define srtp_crypto_policy_set_aes_cm_128_hmac_sha1_80 crypto_policy_set_aes_cm_128_hmac_sha1_80
+#define srtp_crypto_policy_set_aes_cm_128_hmac_sha1_32 crypto_policy_set_aes_cm_128_hmac_sha1_32
+#define srtp_crypto_policy_set_aes_cm_128_null_auth crypto_policy_set_aes_cm_128_null_auth
+#define srtp_crypto_policy_set_rtcp_default crypto_policy_set_rtcp_default
+#define srtp_err_status_ok err_status_ok
 #endif
 
 namespace fuze {
 
-#ifdef DTLS_SRTP
 class SRTP
 {
 public:
@@ -50,14 +61,11 @@ public:
     void EncryptRTCP(uint8_t* data, int* bytes_out);
     void DecryptRTCP(uint8_t* data, int* bytes_out);
     
-    static const int SRTP_KEY_SIZE = 30;
-    static const int SRTP_MAX_TRAILER_LEN = 12;
-    
 private:
 
     struct Ctx
     {
-        uint8_t  key_[SRTP_KEY_SIZE];
+        uint8_t  key_[SRTP_MASTER_KEY_LEN];
         uint32_t key_len_;
         KeyType  key_type_;
         
@@ -67,7 +75,7 @@ private:
     
     int ApplySRTPKey(Direction dir);
     
-    uint8_t local_srtp_key_[SRTP_KEY_SIZE];
+    uint8_t local_srtp_key_[SRTP_MASTER_KEY_LEN];
     
     srtp_ctx_t*     send_ctx_;
     srtp_ctx_t*     recv_ctx_;
@@ -86,7 +94,6 @@ private:
 
 SRTP::KeyType toSRTPKeyType(const char* type);
 const char*   toStr(SRTP::KeyType key_type);
-#endif
     
 class DtlsTransceiver : public Transceiver
                       , public TlsCoreUser
@@ -160,9 +167,7 @@ private: // DTLS specific members
     
     DtlsState           dtlsState_;
     DtlsCore*           pDtlsCore_;
-#ifdef DTLS_SRTP
     SRTP                srtp_;
-#endif
     
 private: // debugging
     

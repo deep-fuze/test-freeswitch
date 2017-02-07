@@ -111,14 +111,12 @@ public:
     // Needed for ClientHello Verification case using cookie
     bool ClientHelloVerified();
 
-#ifdef DTLS_SRTP
     const char* GetSelectSrtpProfile();
     bool GetSrtpKeyMaterial(uint8_t* material);
     
     static const int SRTP_M_KEY_LEN  = 16;
     static const int SRTP_M_SALT_LEN = 14;
     static const int SRTP_M_LEN = SRTP_M_KEY_LEN + SRTP_M_SALT_LEN;
-#endif
     
 protected:
     virtual void InitSSL();

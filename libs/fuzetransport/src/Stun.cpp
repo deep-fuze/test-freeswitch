@@ -102,40 +102,40 @@ void PrintAttribute(uint16_t attrId, const char* pAttr, uint32_t len)
     
     switch (attrId)
     {
-        case XOR_MAPPED_ADDRESS:
-            // if this is IPv4 then print it
-            if (len == 8 && pAttr[1] == 0x01) {
-                uint16_t xor_port;
-                memcpy(&xor_port , pAttr+2, sizeof(uint16_t));
-                xor_port = ntohs(xor_port) ^ uint16_t(MAGIC_COOKIE>>16);
-                uint32_t xor_ip;
-                memcpy(&xor_ip, pAttr+4, sizeof(uint32_t));
-                xor_ip = ntohl(xor_ip) ^ MAGIC_COOKIE;
-                sockaddr_in addr;
-                addr.sin_addr.s_addr = htonl(xor_ip);
-                char ip_buf[INET_ADDRSTRLEN] = { "0.0.0.0" };
-                if (evutil_inet_ntop(AF_INET, &addr.sin_addr,
-                                     ip_buf, INET_ADDRSTRLEN)) {
-                    _MLOG_(toStr((Attribute)attrId) << " (" <<
-                           len << "B): " << ip_buf << ":" << xor_port);
-                    break;
-                }
+    case XOR_MAPPED_ADDRESS:
+        // if this is IPv4 then print it
+        if (len == 8 && pAttr[1] == 0x01) {
+            uint16_t xor_port;
+            memcpy(&xor_port , pAttr+2, sizeof(uint16_t));
+            xor_port = ntohs(xor_port) ^ uint16_t(MAGIC_COOKIE>>16);
+            uint32_t xor_ip;
+            memcpy(&xor_ip, pAttr+4, sizeof(uint32_t));
+            xor_ip = ntohl(xor_ip) ^ MAGIC_COOKIE;
+            sockaddr_in addr;
+            addr.sin_addr.s_addr = htonl(xor_ip);
+            char ip_buf[INET_ADDRSTRLEN] = { "0.0.0.0" };
+            if (evutil_inet_ntop(AF_INET, &addr.sin_addr,
+                                 ip_buf, INET_ADDRSTRLEN)) {
+                _MLOG_(toStr((Attribute)attrId) << " (" <<
+                       len << "B): " << ip_buf << ":" << xor_port);
+                break;
             }
-        case MESSAGE_INTEGRITY:
-        case FINGERPRINT:
-        case USERNAME:
-        case PRIORITY:
-        case USE_CANDIDATE:
-        case ICE_CONTROLLED:
-        case ICE_CONTROLLING:
-            _MLOG_(toStr((Attribute)attrId) << " (" << len <<
-                   "B): " << (is_val_str ? pAttr : "") << " [" <<
-                   (is_val_str ? Hex(0, 0) : Hex((uint8_t*)pAttr, len)) << "]");
-            break;
-        default:
-            _WLOG_("Unknown ID: " << Hex((uint8_t*)&attrId, MSG_TYPE) <<
-                   " (" << len << "B): " << (is_val_str ? pAttr : "") << " [" <<
-                   Hex((uint8_t*)pAttr, len) << "]");
+        }
+    case MESSAGE_INTEGRITY:
+    case FINGERPRINT:
+    case USERNAME:
+    case PRIORITY:
+    case USE_CANDIDATE:
+    case ICE_CONTROLLED:
+    case ICE_CONTROLLING:
+        _MLOG_(toStr((Attribute)attrId) << " (" << len <<
+               "B): " << (is_val_str ? pAttr : "") << " [" <<
+               (is_val_str ? Hex(0, 0) : Hex((uint8_t*)pAttr, len)) << "]");
+        break;
+    default:
+        _WLOG_("Unknown ID: " << Hex((uint8_t*)&attrId, MSG_TYPE) <<
+               " (" << len << "B): " << (is_val_str ? pAttr : "") << " [" <<
+               Hex((uint8_t*)pAttr, len) << "]");
     }
 }
 

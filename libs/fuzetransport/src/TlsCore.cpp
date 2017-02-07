@@ -15,10 +15,6 @@
 #include <openssl/rand.h>
 #include <sstream>
 
-#ifndef DTLSv1_get_timeout    
-#define NO_DTLS_SUPPORT
-#endif
-
 namespace {
     const uint8_t cert_data_1[] =
     "-----BEGIN CERTIFICATE-----\n"
@@ -693,12 +689,10 @@ void DtlsCore::InitDtlsCertificate(SSL_CTX*& rpCtx, bool bServer)
         
         SSL_CTX_set_read_ahead(p_ctx, 1);
         
-#ifdef DTLS_SRTP
         const char* p_pf = "SRTP_AES128_CM_SHA1_80:SRTP_AES128_CM_SHA1_32";
         if (SSL_CTX_set_tlsext_use_srtp(p_ctx, p_pf) != 0) {
             _ELOG_("SSL_set_tlsext_use_srtp failed");
         }
-#endif
         
 #ifdef COOKIE_ENABLED
         if (bServer) {
@@ -743,7 +737,6 @@ bool DtlsCore::GetTimeout(int32_t& rTimeout)
 {
     bool bResult = false;
 
-#ifndef NO_DTLS_SUPPORT   
     if (pSSL_) {
         timeval tm;
         // 0 : no time out is set
@@ -754,7 +747,7 @@ bool DtlsCore::GetTimeout(int32_t& rTimeout)
             bResult = true;
         }
     }
-#endif    
+    
     return bResult;
 }
 
@@ -762,7 +755,6 @@ bool DtlsCore::HandleTimeout()
 {
     bool result = false;
     
-#ifndef NO_DTLS_SUPPORT
     int ret = DTLSv1_handle_timeout(pSSL_);
     if (ret == -1) {
         ELOG("DTLSv1_handle_timeout error");
@@ -775,14 +767,12 @@ bool DtlsCore::HandleTimeout()
         TriggerHandshake();
         result = true;
     }
-#endif
     
     return result;
 }
     
 bool DtlsCore::ClientHelloVerified()
 {
-#ifndef NO_DTLS_SUPPORT
 #if OPENSSL_VERSION_NUMBER >= 0x1010000fL
     if (SSL_get_state(pSSL_) == TLS_ST_SW_SRVR_HELLO) {
         return true;
@@ -793,11 +783,9 @@ bool DtlsCore::ClientHelloVerified()
         return true;
     }
 #endif
-#endif    
     return false;
 }
  
-#ifdef DTLS_SRTP
 const char* DtlsCore::GetSelectSrtpProfile()
 {
     const char* p_name = "";
@@ -818,6 +806,5 @@ bool DtlsCore::GetSrtpKeyMaterial(uint8_t* material)
     }
     return result;
 }
-#endif
     
 } // namespace fuze

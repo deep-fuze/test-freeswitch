@@ -48,7 +48,7 @@ static void listener_callback(evutil_socket_t socket, short what, void *pArg)
             p->HandleAccept(socket, what);
         }
     }
-    catch (std::exception& ex) {
+    catch (const std::exception& ex) {
         DEBUG_OUT(LEVEL_ERROR, AREA_COM, "TcpListener: exception - " <<
                   ex.what());
     }
@@ -109,21 +109,10 @@ bool TcpListener::Start()
         return false;
     }
     
-    string   IP;
-    uint16_t port;
+    // we bind the address and listen at this address
+    Address local = pConn_->GetLocalAddress();
     
-    if (pConn_->GetLocalAddress(IP, port) == false) {
-        ELOG("Failed to get local address");
-        return false;
-    }
-
-    in_addr address;
-    if (evutil_inet_pton(AF_INET, IP.c_str(), &address) == -1) {
-        ELOG("Invalid IP address: " << IP);
-        return false;
-    }
-    
-    socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    socket_ = socket(local.IPType(), SOCK_STREAM, IPPROTO_TCP);
     if (socket_ == INVALID_SOCKET) {
         ELOG("Failed to create socket")
         return false;
@@ -134,16 +123,8 @@ bool TcpListener::Start()
     evutil_make_socket_nonblocking(socket_);
     evutil_make_listen_socket_reuseable(socket_);
     
-    // we bind the address and listen at this address
-    sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    
-    addr.sin_family      = AF_INET;
-    addr.sin_port        = htons(port);
-    addr.sin_addr.s_addr = address.s_addr;
-    
-    if (::bind(socket_, (sockaddr*)&addr, sizeof(addr)) != -1) {
-        MLOG("bind() on socket " << socket_ << " - " << IP << ":" << port);
+    if (::bind(socket_, local.SockAddr(), local.SockAddrLen()) != -1) {
+        MLOG("bind() on socket " << socket_ << " - " << local);
         if (listen(socket_, SOMAXCONN) != -1) {
             TransportImpl* p = TransportImpl::GetInstance();
             bResult = p->CreateEvent(pReadEvent_,
@@ -162,7 +143,7 @@ bool TcpListener::Start()
         }
     }
     else {
-        ELOG("Failed to bind on " << IP << ":" << port);
+        ELOG("Failed to bind on " << local);
     }
     
     if (bResult == false) {

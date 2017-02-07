@@ -170,7 +170,7 @@ ThreadRet WINAPI dispatch_thread(void* pArg)
     try {
         p_thread->pRunnable_->Run();
     }
-    catch (std::exception& e) {
+    catch (const std::exception& e) {
         ELOG("exception: " << e.what());
     }
     catch (...) {

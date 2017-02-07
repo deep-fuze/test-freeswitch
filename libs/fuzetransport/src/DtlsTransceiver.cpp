@@ -39,8 +39,6 @@
 ((e) == WSAECONNREFUSED)
 #endif
 
-#include <srtp.h>
-
 namespace fuze {
     
 DtlsTransceiver::DtlsTransceiver(int transID)
@@ -89,9 +87,9 @@ void DtlsTransceiver::Reset()
         }
         
         if (pDtlsCore_) delete pDtlsCore_;
-#ifdef DTLS_SRTP
+        
         srtp_.Reset();
-#endif
+        
         Init();
     }
 }
@@ -161,9 +159,8 @@ void DtlsTransceiver::SendData(Buffer::Ptr spData, const Address& rRemote)
         sent = send(socket_, p_buf, size, 0);
     }
     else {
-        sockaddr_in remote = rRemote.SocketAddress();
         sent = sendto(socket_, p_buf, size, 0,
-                      (sockaddr*)&remote, sizeof(sockaddr));
+                      rRemote.SockAddr(), rRemote.SockAddrLen());
     }
     
     if (sent == size) {
@@ -264,7 +261,7 @@ bool DtlsTransceiver::Start()
     
     // if we don't have reserved socket then create one
     if (!bResult) {
-        socket_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        socket_ = socket(addr.IPType(), SOCK_DGRAM, IPPROTO_UDP);
         if (socket_ == INVALID_SOCKET) {
             ELOG("Failed to create socket")
             return false;
@@ -273,33 +270,25 @@ bool DtlsTransceiver::Start()
     
     if (connType_ == CT_DTLS_SERVER) {
         if (!bResult) {
-            sockaddr_in saddr;
-            memset(&saddr, 0, sizeof(saddr));
-            
-            saddr.sin_family      = AF_INET;
-            saddr.sin_port        = htons(addr.Port());
-            saddr.sin_addr.s_addr = addr.IPNum().s_addr;
-            
-            if (::bind(socket_, (sockaddr*)&saddr, sizeof(saddr)) == 0) {
+            if (::bind(socket_, addr.SockAddr(), addr.SockAddrLen()) == 0) {
                 bResult = true;
             }
         }
     }
     else { // DTLS client don't bind socket
-        sockaddr_in remote = addr.SocketAddress();
-        if (::connect(socket_, (sockaddr*)&remote, sizeof(sockaddr)) == 0) {
+        if (::connect(socket_, addr.SockAddr(), addr.SockAddrLen()) == 0) {
             
             // if connected UDP is used then get local address
             // that is set by operating system
-            sockaddr_in  local;
-            ev_socklen_t len = sizeof(local);
+            sockaddr_storage local;
+            ev_socklen_t     len = sizeof(sockaddr_storage);
             
             if (getsockname(socket_, (sockaddr*)&local, &len) == 0) {
                 if (pConn_) {
-                    string   ip   = toStr(local.sin_addr);
-                    uint16_t port = ntohs(local.sin_port);
-                    MLOG("Looking up what local address is - " << ip << ":" << port);
-                    pConn_->SetLocalAddress(ip, port);
+                    Address local_addr(local);
+                    MLOG("local address:" << local_addr);
+                    pConn_->SetLocalAddress(local_addr.IPString(),
+                                            local_addr.Port());
                 }
             }
             else {
@@ -325,7 +314,7 @@ bool DtlsTransceiver::Start()
         int tos = 0xe0;
         if (setsockopt(socket_, IPPROTO_IP, IP_TOS,
                        (char*)&tos, sizeof(tos)) < 0) {
-            ELOG("Failed to set ToS");
+            MLOG("Unable to set ToS");
         }
 #endif
         
@@ -435,7 +424,7 @@ void DtlsTransceiver::OnLibEvent(evutil_socket_t sock, short what, void* pArg)
             if (what & EV_WRITE)   p->OnWriteEvent();
             if (what & EV_TIMEOUT) p->OnTimeOutEvent();
         }
-        catch (std::exception& ex) {
+        catch (const std::exception& ex) {
             DEBUG_OUT(LEVEL_ERROR, AREA_COM, "exception: " << ex.what());
         }
         catch (...) {
@@ -497,13 +486,13 @@ void DtlsTransceiver::OnReadEvent()
     long recv_bytes = 0;
     
     do {
-        sockaddr_in saddr = {};
+        sockaddr_storage saddr;
         
         if (connType_ == CT_DTLS_CLIENT) {
             recv_bytes = recv(socket_, buffer_, MAX_UDP_SIZE, 0);
         }
         else {
-            ev_socklen_t slen = sizeof(sockaddr_in);
+            ev_socklen_t slen = sizeof(sockaddr_storage);
             
             recv_bytes = recvfrom(socket_, buffer_, MAX_UDP_SIZE, 0,
                                  (sockaddr*)&saddr, &slen);
@@ -621,7 +610,6 @@ void DtlsTransceiver::OnReadEvent()
             bool is_tls = (20 <= buffer_[0] && buffer_[0] <= 24);
             
             if (!is_tls && (buffer_[0] & 0x80)) { // RTP packet
-#ifdef DTLS_SRTP
                 // encrypt sending buffer using srtp
                 int byte_out = recv_bytes;
                 
@@ -646,9 +634,6 @@ void DtlsTransceiver::OnReadEvent()
                 else {
                     WLOG("failed to decrypt");
                 }
-#else
-                ELOG("DTLS-SRTP not enabled");
-#endif
             }
             else { // TLS packet
                 pDtlsCore_->ProcessData((uint8_t*)buffer_, recv_bytes, TlsCore::PT_DECRYPT);
@@ -765,7 +750,6 @@ void DtlsTransceiver::OnWriteEvent()
 
 void DtlsTransceiver::EncryptAndSend(uint8_t* p_buf, uint32_t buf_len)
 {
-#ifdef DTLS_SRTP
     // encrypt sending buffer using srtp
     uint32_t new_buf_len   = buf_len + SRTP_MAX_TRAILER_LEN + 4;
     Buffer::Ptr sp_new_buf = GetTlsBuffer(new_buf_len);
@@ -794,9 +778,6 @@ void DtlsTransceiver::EncryptAndSend(uint8_t* p_buf, uint32_t buf_len)
         sp_new_buf->setSize(byte_out);
         SendData(sp_new_buf, pConn_->GetRemoteAddress());
     }
-#else
-    pDtlsCore_->ProcessData(p_buf, buf_len, TlsCore::PT_ENCRYPT);
-#endif
 }
     
 void DtlsTransceiver::OnTimeOutEvent()
@@ -846,7 +827,6 @@ void DtlsTransceiver::DoDtlsHandshake()
     RemoveWriteEvent();
     
     if (pDtlsCore_->IsInHandshake() == false) {
-#ifdef DTLS_SRTP
         string profile = pDtlsCore_->GetSelectSrtpProfile();
         MLOG("Selected SRTP profile: " << profile);
 
@@ -878,7 +858,7 @@ void DtlsTransceiver::DoDtlsHandshake()
             srtp_.SetSRTPKey(SRTP::RECV, key_type, server_write_key, DtlsCore::SRTP_M_LEN);
             srtp_.SetSRTPKey(SRTP::SEND, key_type, client_write_key, DtlsCore::SRTP_M_LEN);
         }
-#endif
+        
         dtlsState_ = ESTABLISHED;
         pConn_->OnEvent(ET_CONNECTED, "DTLS handshake finished");
     }
@@ -907,31 +887,12 @@ const char* DtlsTransceiver::StateStr(DtlsState eState)
     }
 }
 
-void srtp_logging(int16_t level, const char* fmt, char* value)
-{
-    if (level < err_level_info) {
-        if (level <= err_level_error) {
-            _ELOG_(value);
-        }
-        else {
-            _MLOG_(value);
-        }
-    }
-}
-    
 void fuze_srtp_init()
 {
-    _MLOG_("");
-    
-#ifndef NEW_SRTP
-    srtp_init(srtp_logging);
-#else
+    _MLOG_("version: " << srtp_get_version_string());    
     srtp_init();
-#endif
 }
     
-#ifdef DTLS_SRTP
-
 SRTP::KeyType toSRTPKeyType(const char* type)
 {
     if (!type) {
@@ -994,6 +955,8 @@ SRTP::SRTP()
     , has_new_send_key_(false)
     , has_new_recv_key_(false)
 {
+    memset(send_policy_, 0, sizeof(srtp_policy_t));
+    memset(recv_policy_, 0, sizeof(srtp_policy_t));
 }
 
 SRTP::~SRTP()
@@ -1097,7 +1060,7 @@ int SRTP::ApplySRTPKey(SRTP::Direction dir)
     
     _DLOG_("Setting keys for " << p << ": type=" <<
            toStr(p_local_ctx->key_type_) <<
-           " key=" << Hex(p_local_ctx->key_, SRTP_KEY_SIZE));
+           " key=" << Hex(p_local_ctx->key_, SRTP_MASTER_KEY_LEN));
     
     if (*pp_ctx) {
         srtp_dealloc(*pp_ctx);
@@ -1107,24 +1070,25 @@ int SRTP::ApplySRTPKey(SRTP::Direction dir)
     switch (p_local_ctx->key_type_)
     {
     case AES_CM_128_HMAC_SHA1_80:
-        crypto_policy_set_aes_cm_128_hmac_sha1_80(&p_policy->rtp);
+        srtp_crypto_policy_set_aes_cm_128_hmac_sha1_80(&p_policy->rtp);
         break;
     case AES_CM_128_HMAC_SHA1_32:
-        crypto_policy_set_aes_cm_128_hmac_sha1_32(&p_policy->rtp);
+        srtp_crypto_policy_set_aes_cm_128_hmac_sha1_32(&p_policy->rtp);
         break;
     case AES_CM_128_NULL_AUTH:
-        crypto_policy_set_aes_cm_128_null_auth(&p_policy->rtp);
+        srtp_crypto_policy_set_aes_cm_128_null_auth(&p_policy->rtp);
         break;
     default:
         assert(0);
         return -1;
     }
     
-    p_policy->next = NULL;
-    p_policy->key  = p_local_ctx->key_;
-    p_policy->rtp.sec_serv = sec_serv_conf_and_auth;
+    p_policy->key             = p_local_ctx->key_;
+    p_policy->rtp.sec_serv    = sec_serv_conf_and_auth;
+    p_policy->window_size     = 128;
+    p_policy->allow_repeat_tx = 1;
     
-    crypto_policy_set_rtcp_default(&p_policy->rtcp);
+    srtp_crypto_policy_set_rtcp_default(&p_policy->rtcp);
     
     int ret = srtp_create(pp_ctx, p_policy);
     if (ret) {
@@ -1155,7 +1119,7 @@ void SRTP::Encrypt(uint8_t* data, int* bytes_out)
         return;
     }
     int ret = srtp_protect(send_ctx_, data, bytes_out);
-    if (ret != err_status_ok) {
+    if (ret != srtp_err_status_ok) {
         _ELOG_("Error in srtp_protect() : " << ret);
         *bytes_out = 0;
     }
@@ -1180,7 +1144,7 @@ void SRTP::Decrypt(uint8_t* data, int* bytes_out)
         return;
     }
     int ret = srtp_unprotect(recv_ctx_, data, bytes_out);
-    if (ret != err_status_ok) {
+    if (ret != srtp_err_status_ok) {
         _ELOG_("Error in srtp_unprotect() : " << ret);
         *bytes_out = 0;
     }
@@ -1206,8 +1170,8 @@ void SRTP::EncryptRTCP(uint8_t* data, int* bytes_out)
     }
     
     int orig_len = *bytes_out;
-    int ret = srtp_protect_rtcp(send_ctx_, data, bytes_out, 1);
-    if (ret != err_status_ok) {
+    int ret = srtp_protect_rtcp(send_ctx_, data, bytes_out);
+    if (ret != srtp_err_status_ok) {
         _ELOG_("Error in srtp_protect_rtcp() : " << ret);
         *bytes_out = 0;
     }
@@ -1235,14 +1199,13 @@ void SRTP::DecryptRTCP(uint8_t* data, int *bytes_out)
     }
     
     int orig_len = *bytes_out;
-    int ret = srtp_unprotect_rtcp(recv_ctx_, data, bytes_out, 1);
-    if (ret != err_status_ok) {
+    int ret = srtp_unprotect_rtcp(recv_ctx_, data, bytes_out);
+    if (ret != srtp_err_status_ok) {
         _WLOG_("SRTCP: Error in srtcp_unprotect() : " << ret);
         *bytes_out = 0;
     }
     
     _DLOG_("SRTCP: decrypt: In=" << orig_len << " Out="  << *bytes_out);
 }
-#endif
     
 } //namespace fuze

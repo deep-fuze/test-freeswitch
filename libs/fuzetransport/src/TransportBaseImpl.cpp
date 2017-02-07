@@ -173,7 +173,7 @@ void TransportBaseImpl::AddNewConnection(int newSock, bool overTLS)
                         }
                     }
                 }
-                catch (std::exception& ex) {
+                catch (const std::exception& ex) {
                     ELOG("exception - " << ex.what());
                 }
                 catch (...) {

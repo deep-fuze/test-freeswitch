@@ -10,14 +10,20 @@
 #define DnsResolver_h
 
 #include <Transport.h>
+#include <Thread.h>
+#include <Semaphore.h>
 #include <ares.h>
+#include <list>
 
 namespace fuze {
 namespace dns {
 
 using std::string;
 using std::vector;
-    
+using std::list;
+
+void SetDnsCache(Record::List& rList);
+
 class ResolverImpl : public Resolver
 {
 public:
@@ -38,22 +44,72 @@ private:
                         uint8_t* pBuf,
                         int      len);
     
-    void ProcessQuery(int timeout);
     void SetReplies(Record::List newReplies);
     
     // for parallel queries
-    struct QueryReq
+    struct QueryData
     {
-        string       domain_;
-        Record::Type type_;
+        string         domain_;
+        Record::Type   type_;
+        ResolverImpl*  pResolver_;
     };
     
-    ares_channel      channel_;
-    Record::List      replies_;
-    vector<QueryReq>  queries_;
+    ares_channel       channel_;
+    Record::List       replies_;
+    vector<QueryData>  queries_;
 };
 
-void SetDnsCache(Record::List& rList);
+class AsyncResolver : public Runnable
+{
+public:
+    typedef fuze_shared_ptr<AsyncResolver> Ptr;
+    
+    AsyncResolver();
+    virtual ~AsyncResolver();
+    
+    void SetQuery(const string& rDomain,
+                  Record::Type  type_,
+                  DnsObserver*  pObserver,
+                  void*         pArg);
+    
+private:
+    
+    virtual void Run();
+    
+    static void OnReply(void*    pArg,
+                        int      status,
+                        int      timeouts,
+                        uint8_t* pBuf,
+                        int      len);
+    
+    struct QueryData // assume only A record only
+    {
+        string        domain_;
+        Record::Type  type_;
+        DnsObserver*  pObserver_;
+        void*         pArg_;
+    };
+    
+    static void DnsFallback(QueryData* pData);
+    
+private:
+    
+    QueryData* GetQueryData();
+    void       ResetChannel();
+    
+    ares_channel       channel_;
+    
+    bool               running_;
+    
+    Thread             thread_;
+    Semaphore          semaphore_;
+
+    list<QueryData*>   queryData_;
+    MutexLock          qLock_;
+    
+    string             localIP_;
+    int64_t            lastTime_;
+};
     
 } // namespace dns
 } // namespace fuze

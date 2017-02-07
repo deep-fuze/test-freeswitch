@@ -342,7 +342,7 @@ uint32_t ServerCore::OnHttpMessage(uint8_t* pBuf, uint32_t bufLen)
                 ELOG("Failed to binding info [" <<
                      toStr(p_map->ConnType()) <<
                      "] " << p_map->IP() << ":" <<
-                     p_map->Port() << "] in server");
+                     p_map->Port() << " in server");
                 
                 SendHttpResponse(406, "Not Acceptable");
                 SetState(CoreState::FAILED);

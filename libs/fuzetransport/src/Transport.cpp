@@ -153,82 +153,114 @@ void GetInfo(string& rProxy,
 string GetLocalIPAddress(const char* pRemoteAddr)
 {
     string ip_addr;
+    
+    // static storage for google 8.8.8.8 IP for detecting
+    // consistent local IP change - we want to filter out
+    // any network noise wrt local ip change
+    static char s_google_dns_ipv6[INET6_ADDRSTRLEN] = {0};
 
+    // by default, lookup using ipv4 socket
+    bool ipv4 = (pRemoteAddr ? IsIPv4(pRemoteAddr) : true);
+    
     // by using UDP connect, we can find out the best outgoing
     // network interface without actually connecting far end
     // use Remote IP address to know what network
     // interface is used by local routing table
-    evutil_socket_t sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock != INVALID_SOCKET) {
-        // we connect the address specified
-        Address remote;
-        remote.SetIP(pRemoteAddr);
-        remote.SetPort(53); // DNS port but can be anything
-        sockaddr_in addr = remote.SocketAddress();        
+    evutil_socket_t sock = socket((ipv4 ? AF_INET : AF_INET6),
+                                  SOCK_DGRAM, IPPROTO_UDP);
+    if (sock == INVALID_SOCKET) {
+        ELOG("Failed to create socket")
+        return ip_addr;
+    }
+    
+    // we connect the address specified
+    Address remote;
+    remote.SetIP(pRemoteAddr ? pRemoteAddr : "8.8.8.8");
+    remote.SetPort(53); // DNS port but can be anything
 
-        if (connect(sock, (sockaddr*)&addr, sizeof(sockaddr_in)) == 0) {
-            sockaddr_in  local;
-            ev_socklen_t len = sizeof(local);
-            if (getsockname(sock, (sockaddr*)&local, &len) == 0) {
-                static in_addr s_last_val = {0};
-                if (memcmp(&s_last_val, &local.sin_addr, sizeof(in_addr))) {
-                    if (strcmp(pRemoteAddr, "8.8.8.8") == 0) {
-                        MLOG(toStr(s_last_val) << " -> " << toStr(local.sin_addr));
-                        s_last_val = local.sin_addr;
-                    }
-                    else {
-                        MLOG("Found IP " << toStr(local.sin_addr) <<
-                             " with respect to remote IP " << pRemoteAddr <<
-                             " (current local IP: " << toStr(s_last_val) << ")");
-                    }
+    if (connect(sock, remote.SockAddr(), remote.SockAddrLen()) == 0) {
+        sockaddr_storage local;
+        ev_socklen_t     len = sizeof(sockaddr_storage);
+        if (getsockname(sock, (sockaddr*)&local, &len) == 0) {
+            Address addr(local);
+            // logging change of local IP address
+            static Address s_last_val;
+            addr.SetPort(1024); // port doesn't matter so set it to be same
+            if (s_last_val != addr) {
+                if (!pRemoteAddr ||
+                    strncmp(pRemoteAddr, s_google_dns_ipv6, INET6_ADDRSTRLEN) == 0) {
+                    MLOG(s_last_val.IPString() << " -> " << addr.IPString());
+                    s_last_val = addr;
                 }
-                ip_addr = toStr(local.sin_addr);
+                else {
+                    MLOG("Found IP " << addr.IPString() <<
+                         " with respect to remote IP " << pRemoteAddr <<
+                         " (current local IP: " << s_last_val.IPString() << ")");
+                }
             }
-            else {
-                ELOG("getsockname failed");
-            }
+            ip_addr = addr.IPString();
         }
-        else { // should we use real TCP connect.. if it fails agian?
-#ifdef WIN32 // MQT-2516
-			const IPAddr dest_ip = inet_addr(pRemoteAddr);
-			if (INADDR_NONE != dest_ip) {
-				DWORD if_index = 0;
-				if (GetBestInterface(dest_ip, &if_index) == NO_ERROR) {
-					std::vector<char> ip_table(sizeof(MIB_IPADDRTABLE));
-					ULONG ip_table_len = ip_table.size();
-					MIB_IPADDRTABLE* p_mib = reinterpret_cast<MIB_IPADDRTABLE*>(&ip_table[0]);
-					if (GetIpAddrTable(p_mib, &ip_table_len, false) 
-							== ERROR_INSUFFICIENT_BUFFER) {
-						ip_table.resize(ip_table_len);
-					}
-
-					if (GetIpAddrTable(p_mib, &ip_table_len, false) == NO_ERROR) {									   						
-						for (DWORD i = 0; i < p_mib->dwNumEntries; ++i) {
-							if (p_mib->table[i].dwIndex == if_index) {
-								in_addr* p_addr = (in_addr *)&(p_mib->table[i].dwAddr);
-								if (const char* p_ip = inet_ntoa(*p_addr)) {
-									MLOG(p_ip << " using best interface #" << if_index);
-									ip_addr = p_ip;
-									break;
-								}
-							}
-						}
-					}
-				}
-			}
-#endif
-			if (ip_addr.empty()) {
-				int e = evutil_socket_geterror(sock);
-				ELOG("Failed connect() to " << remote << " (" <<
-					evutil_socket_error_to_string(e) << ')');
-			}
+        else {
+            ELOG("getsockname failed");
         }
-        
-        evutil_closesocket(sock);
     }
     else {
-        ELOG("Failed to create socket")
+        // store the error here first
+        int e = evutil_socket_geterror(sock);
+
+        // IPv6-only? (iPhone + T-Mobile LTE)
+        if (ipv4) {
+            string ipv6_str = IPv4toIPv6(pRemoteAddr ? pRemoteAddr : "8.8.8.8");
+            if (!ipv6_str.empty()) {
+                // if ipv6 is detected and 8.8.8.8 is used then set it in static
+                if (!pRemoteAddr && !s_google_dns_ipv6[0]) {
+                    strncpy(s_google_dns_ipv6, ipv6_str.c_str(), INET6_ADDRSTRLEN);
+                }
+
+                ip_addr = GetLocalIPAddress(ipv6_str.c_str());
+                if (!ip_addr.empty()) {
+                    evutil_closesocket(sock);
+                    return ip_addr;
+                }
+            }
+        }
+        
+#ifdef WIN32 // MQT-2516
+        const IPAddr dest_ip = inet_addr(pRemoteAddr ? pRemoteAddr : "8.8.8.8");
+        if (INADDR_NONE != dest_ip) {
+            DWORD if_index = 0;
+            if (GetBestInterface(dest_ip, &if_index) == NO_ERROR) {
+                std::vector<char> ip_table(sizeof(MIB_IPADDRTABLE));
+                ULONG ip_table_len = ip_table.size();
+                MIB_IPADDRTABLE* p_mib = reinterpret_cast<MIB_IPADDRTABLE*>(&ip_table[0]);
+                if (GetIpAddrTable(p_mib, &ip_table_len, false) 
+                        == ERROR_INSUFFICIENT_BUFFER) {
+                    ip_table.resize(ip_table_len);
+                }
+
+                if (GetIpAddrTable(p_mib, &ip_table_len, false) == NO_ERROR) {									   						
+                    for (DWORD i = 0; i < p_mib->dwNumEntries; ++i) {
+                        if (p_mib->table[i].dwIndex == if_index) {
+                            in_addr* p_addr = (in_addr *)&(p_mib->table[i].dwAddr);
+                            if (const char* p_ip = inet_ntoa(*p_addr)) {
+                                MLOG(p_ip << " using best interface #" << if_index);
+                                ip_addr = p_ip;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+#endif
+        // use ipv4 boolean to reduce error log
+        if (ipv4 && ip_addr.empty()) {
+            ELOG("Failed: " << evutil_socket_error_to_string(e) <<
+                 " " << (pRemoteAddr ? pRemoteAddr : ""));
+        }
     }
+
+    evutil_closesocket(sock);
     
     return ip_addr;
 }
@@ -237,6 +269,35 @@ bool IsThisIP(const char* pAddress)
 {
     Address addr;
     return addr.SetIP(pAddress);
+}
+
+bool IsIPv4(const char* pIP)
+{
+    return (GetIPType(pIP) == AF_INET);
+}
+
+bool IsIPv6(const char* pIP)
+{
+    return (GetIPType(pIP) == AF_INET6);
+}
+    
+int GetIPType(const char* pIP)
+{
+    if (!pIP) return AF_INET; // return default
+    
+    addrinfo hint;
+    memset(&hint, 0, sizeof(addrinfo));
+    hint.ai_family = PF_UNSPEC;
+    hint.ai_flags  = AI_NUMERICHOST;
+
+    addrinfo* p_res = 0;
+
+    int ret = getaddrinfo(pIP, 0, &hint, &p_res);
+    if (ret) {
+        return AF_INET;
+    }
+    
+    return p_res->ai_family;
 }
 
 uint32_t GetIPNumber(const char* pIP)
@@ -248,6 +309,16 @@ uint32_t GetIPNumber(const char* pIP)
     
     return 0;
 }
+    
+bool IsIPv6OnlyNetwork()
+{
+    bool result = false;
+    const string& local_ip = GetLocalIPAddress();
+    if (!local_ip.empty()) {
+        result = (GetIPType(local_ip.c_str()) == AF_INET6);
+    }
+    return result;
+}    
     
 vector<string> GetAddrInfo(const string& rAddress)
 {
@@ -283,7 +354,7 @@ vector<string> GetAddrInfo(const string& rAddress)
             }
         }
         else {
-            // not sure bu gai_strerror wasn't work some times.
+            // not sure but gai_strerror wasn't working sometimes.
             const char* p = "unknown";
             switch (res)
             {
@@ -345,7 +416,7 @@ vector<string> TranslateToIPs(const string& rAddress)
     sp_res->SetQuery(rAddress, Record::A);
     for (auto& rec : sp_res->Query()) {
         if (A::Ptr sp_a = fuze_dynamic_pointer_cast<A>(rec)) {
-            if (sp_a->hostName_.empty() == false) {
+            if (sp_a->bad_ == false) {
                 MLOG("Address " << rAddress << " resolved to " << sp_a->hostName_);
                 result.push_back(sp_a->hostName_);
             }
@@ -377,6 +448,54 @@ string TranslateToIP(const string& rAddress)
     return "";
 }
 
+void QueryDnsServer(const string&     rAddress,
+                    dns::Record::Type type,
+                    DnsObserver*      pObserver,
+                    void*             pArg)
+{
+    TransportImpl::GetInstance()->QueryDnsAsync(rAddress, type, pObserver, pArg);
+}
+    
+string IPv4toIPv6(const string& rIPv4)
+{
+    string ipv6;
+    
+#ifdef __APPLE__
+    addrinfo hints;
+    
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family   = PF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags    = AI_DEFAULT;
+    
+    addrinfo* p_res = 0;
+
+    int err = getaddrinfo(rIPv4.c_str(), "http", &hints, &p_res);
+    if (err == 0) {
+        for (addrinfo* p = p_res; p != 0; p = p->ai_next) {
+            char buf[INET6_ADDRSTRLEN];
+            int err = getnameinfo(p->ai_addr, p->ai_addrlen,
+                                  buf, sizeof(buf), 0, 0, NI_NUMERICHOST);
+            if (err == 0) {
+                if (p->ai_family == PF_INET6) {
+                    DLOG(rIPv4 << " -> " << buf);
+                    ipv6 = buf;
+                    break;
+                }
+            }
+            else {
+                ELOG("getnameinfo failed: " << gai_strerror(err));
+            }
+        }
+    }
+    else {
+        _ELOG_("failed " << gai_strerror(err));
+    }
+#endif
+    
+    return ipv6;
+}
+    
 void dns::MarkAsBadCache(const string& rAddress)
 {
     TransportImpl::GetInstance()->MarkDnsCacheBad(rAddress);
@@ -391,32 +510,24 @@ bool ReservePort(bool bUDP, uint16_t port, const char* pIP, uint32_t holdTime, b
 {
     bool bResult = false;
     
-    evutil_socket_t sock = INVALID_SOCKET;
-
-    if (bUDP) {
-        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    Address addr;
+    addr.SetPort(port);
+    
+    if (pIP) {
+        addr.SetIP(pIP);
+    }
+    else if (IsIPv6OnlyNetwork()) {
+        addr.SetIPv6AnyAddress();
     }
     else {
-        sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        addr.SetIPv4AnyAddress();
     }
-    
+
+    evutil_socket_t sock = socket(addr.IPType(), SOCK_DGRAM,
+                                  (bUDP ? IPPROTO_UDP : IPPROTO_TCP));
     if (sock != INVALID_SOCKET) {
         
-        in_addr ip_addr;
-        ip_addr.s_addr = INADDR_ANY;
-        
-        if (pIP) {
-            evutil_inet_pton(AF_INET, pIP, &ip_addr);
-        }
-        
-        sockaddr_in saddr;
-        memset(&saddr, 0, sizeof(saddr));
-        
-        saddr.sin_family = AF_INET;
-        saddr.sin_port   = htons(port);
-        saddr.sin_addr   = ip_addr;
-        
-        if (::bind(sock, (sockaddr*)&saddr, sizeof(saddr)) == 0) {
+        if (::bind(sock, addr.SockAddr(), addr.SockAddrLen()) == 0) {
             bResult = true;
         }
         else {
@@ -484,6 +595,157 @@ string MD5Hex(uint8_t* digest)
     }
     
     return md5_str;
+}
+
+char base64_encode_value(char value_in)
+{
+    static const char* encoding = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    if (value_in > 63) return '=';
+    return encoding[(int)value_in];
+}
+    
+int EncodeSrtpKeyBase64(const char* pData, uint32_t len, char* pBuf)
+{
+    enum base64_encodestep { step_A, step_B, step_C };
+
+    struct base64_encodestate
+    {
+        base64_encodestep step;
+        char              result;
+        int               stepcount;
+    } state = { step_A, 0, 0 };
+    
+    const char* plainchar = pData;
+    const char* const plaintextend = pData + len;
+    char* codechar = pBuf;
+    
+    char result = state.result;
+    char fragment;
+    
+    switch (state.step)
+    {
+        while (1)
+        {
+        case step_A:
+            if (plainchar == plaintextend) {
+                state.result = result;
+                state.step = step_A;
+                return (int)(codechar - pBuf);
+            }
+            fragment = *plainchar++;
+            result = (fragment & 0x0fc) >> 2;
+            *codechar++ = base64_encode_value(result);
+            result = (fragment & 0x003) << 4;
+        case step_B:
+            if (plainchar == plaintextend) {
+                state.result = result;
+                state.step = step_B;
+                return (int)(codechar - pBuf);
+            }
+            fragment = *plainchar++;
+            result |= (fragment & 0x0f0) >> 4;
+            *codechar++ = base64_encode_value(result);
+            result = (fragment & 0x00f) << 2;
+        case step_C:
+            if (plainchar == plaintextend) {
+                state.result = result;
+                state.step = step_C;
+                return (int)(codechar - pBuf);
+            }
+            fragment = *plainchar++;
+            result |= (fragment & 0x0c0) >> 6;
+            *codechar++ = base64_encode_value(result);
+            result  = (fragment & 0x03f) >> 0;
+            *codechar++ = base64_encode_value(result);
+            
+            ++(state.stepcount);
+            if (state.stepcount == 18) {
+                *codechar++ = '\n';
+                state.stepcount = 0;
+            }
+        }
+    }
+    
+    /* control should not reach here */
+    return codechar - pBuf;
+}
+    
+int base64_decode_value(char value_in)
+{
+    static const int decoding[] = {62,-1,-1,-1,63,52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-2,-1,-1,-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,-1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51};
+    static const int decoding_size = sizeof(decoding);
+    value_in -= 43;
+    if (value_in < 0 || (int)value_in > decoding_size) return -1;
+    return decoding[(int)value_in];
+}
+
+int DecodeSrtpKeyBase64(const char* pData, uint32_t len, char* pBuf)
+{
+    enum base64_decodestep { step_a, step_b, step_c, step_d };
+    
+    struct base64_decodestate
+    {
+        base64_decodestep step;
+        char              plainchar;
+    } state = { step_a, 0 };
+
+    const char* codechar = pData;
+    char* plainchar = pBuf;
+    char fragment;
+    
+    *plainchar = state.plainchar;
+    
+    switch (state.step)
+    {
+        while (1)
+        {
+        case step_a:
+            do {
+                if (codechar == pData+len) {
+                    state.step = step_a;
+                    state.plainchar = *plainchar;
+                    return (int)(plainchar - pBuf);
+                }
+                fragment = (char)base64_decode_value(*codechar++);
+            } while (fragment < 0);
+            *plainchar    = (fragment & 0x03f) << 2;
+        case step_b:
+            do {
+                if (codechar == pData+len) {
+                    state.step = step_b;
+                    state.plainchar = *plainchar;
+                    return (int)(plainchar - pBuf);
+                }
+                fragment = (char)base64_decode_value(*codechar++);
+            } while (fragment < 0);
+            *plainchar++ |= (fragment & 0x030) >> 4;
+            *plainchar    = (fragment & 0x00f) << 4;
+        case step_c:
+            do {
+                if (codechar == pData+len) {
+                    state.step = step_c;
+                    state.plainchar = *plainchar;
+                    return (int)(plainchar - pBuf);
+                }
+                fragment = (char)base64_decode_value(*codechar++);
+            } while (fragment < 0);
+            *plainchar++ |= (fragment & 0x03c) >> 2;
+            *plainchar    = (fragment & 0x003) << 6;
+        case step_d:
+            do {
+                if (codechar == pData+len) {
+                    state.step = step_d;
+                    state.plainchar = *plainchar;
+                    return (int)(plainchar - pBuf);
+                }
+                fragment = (char)base64_decode_value(*codechar++);
+            } while (fragment < 0);
+            *plainchar++   |= (fragment & 0x03f);
+        }
+    }
+    
+    /* control should not reach here */
+    return plainchar - pBuf;
 }
     
 const char* toStr(TransportUser::Type type)

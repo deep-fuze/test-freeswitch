@@ -32,7 +32,7 @@ private:
     
     bool CreateLibEvent(uint16_t timeout);
     bool HandleRemoteChange(const Address& rRecvAddr);
-    void SendPayload(char* pData, long dataLen, sockaddr_in& rRemote);
+    void SendPayload(char* pData, long dataLen, const Address& rRemote);
     
     // Interface for libevent callback
     static void OnLibEvent(evutil_socket_t sock, short what, void* pArg);

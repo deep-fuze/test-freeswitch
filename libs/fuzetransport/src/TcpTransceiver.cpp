@@ -380,7 +380,7 @@ bool TcpTransceiver::Start()
         return false;
     }
     
-    socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    socket_ = socket(remote.IPType(), SOCK_STREAM, IPPROTO_TCP);
     if (socket_ == INVALID_SOCKET) {
         ELOG("Failed to create socket")
         return false;
@@ -395,20 +395,18 @@ bool TcpTransceiver::Start()
     bool bResult = false;
     
     // we connect the address
-    sockaddr_in addr = remote.SocketAddress();
-    
-    if (connect(socket_, (sockaddr*)&addr, sizeof(sockaddr_in)) < 0) {
+    if (connect(socket_, remote.SockAddr(), remote.SockAddrLen()) < 0) {
         
         bool failed = false;
         
 		int e = evutil_socket_geterror(socket_);
 		if (EVUTIL_ERR_CONNECT_RETRIABLE(e)) {
             MLOG("connect() is in progress on socket " << socket_ <<
-                 " to " << remote.IPString() << ":" << remote.Port());
+                 " to " << remote);
         }
         else {
-            ELOG("Failed connect() to " << remote.IPString() << ":" <<
-                 remote.Port() << " (" << evutil_socket_error_to_string(e) << ')');
+            ELOG("Failed connect() to " << remote <<
+                 " (" << evutil_socket_error_to_string(e) << ')');
             failed = true;
         }
         
@@ -479,16 +477,14 @@ bool TcpTransceiver::Start(evutil_socket_t sock)
     // other stuff to set such as ToS and TCP_NODELAY
     SetSocketOption();
 
-    sockaddr_in  peer;
-    ev_socklen_t len = sizeof(peer);
+    sockaddr_storage peer;
+    ev_socklen_t     len = sizeof(sockaddr_storage);
     
     if (getpeername(sock, (sockaddr*)&peer, &len) == 0) {
-        string src_ip = toStr(peer.sin_addr);
-        uint16_t src_port = ntohs(peer.sin_port);
-        
-        MLOG("new TCP client connection from " <<
-             src_ip << ":" << src_port);
-        pConn_->SetRemoteAddress(src_ip, src_port);
+        Address peer_addr(peer);
+        MLOG("new TCP client connection from " << peer_addr);
+        pConn_->SetRemoteAddress(peer_addr.IPString(),
+                                 peer_addr.Port());
     }
     else {
         ELOG("Error at getpeername()");
@@ -559,10 +555,12 @@ void TcpTransceiver::StartAfterProxyConnect()
     
     pState_->OnConnected(this);
     
-    sockaddr_in  local;
-    ev_socklen_t len = sizeof(local);
+    sockaddr_storage local;
+    ev_socklen_t     len = sizeof(sockaddr_storage);
     if (getsockname(socket_, (sockaddr*)&local, &len) == 0) {
-        pConn_->SetLocalAddress(toStr(local.sin_addr), ntohs(local.sin_port));
+        Address local_addr(local);
+        pConn_->SetLocalAddress(local_addr.IPString(),
+                                local_addr.Port());
     }
     else {
         ELOG("Error at getsockname()");
@@ -628,7 +626,7 @@ void TcpTransceiver::SetSocketOption()
         int tos = 0xe0;
         if (setsockopt(socket_, IPPROTO_IP, IP_TOS,
                        (char*)&tos, sizeof(tos)) < 0) {
-            ELOG("Failed to set ToS");
+            MLOG("Unable to set ToS");
         }
         
 #ifdef SO_NET_SERVICE_TYPE
@@ -698,8 +696,7 @@ void TcpTransceiver::SetSocketOption()
                 }
             }
             
-            sockaddr_in remote  = pConn_->GetRemoteAddress().SocketAddress();
-            sockaddr*   p_saddr = (sockaddr*)&remote;
+            sockaddr* p_saddr = (sockaddr*)pConn_->GetRemoteAddress().SockAddr();
 
             if (!pfnQosAddSocketToFlow_) {
 				WLOG("qWAVE not available.");
@@ -781,7 +778,7 @@ void TcpTransceiver::OnLibEvent(evutil_socket_t sock, short what, void* pArg)
                 }
             }
         }
-        catch (std::exception& ex) {
+        catch (const std::exception& ex) {
             DEBUG_OUT(LEVEL_ERROR, AREA_COM, "TCP::OnLibEvent: exception - " <<
                       ex.what());
         }
@@ -813,11 +810,20 @@ bool TcpTransceiver::Send(Buffer::Ptr spBuffer)
     uint32_t q_buf_size;
     tcpCore_.GetSendQInfo(q_size, q_buf_size);
     
-    if (q_buf_size > Q_LIMIT) {
+    // if this is real time traffic then we need to flush the queue quickly
+    if (pConn_->IsPayloadType(Connection::AUDIO) ||
+        pConn_->IsPayloadType(Connection::VIDEO)) {
+        if (q_size > Q_SIZE) {
+            WLOG("sendQ_ reached the real time limit (" <<
+                 q_buf_size << " bytes, " << q_size << " > " << Q_SIZE << ")");
+            tcpCore_.FlushSendQ();
+        }
+    }
+    else if (q_buf_size > Q_LIMIT) {
         dropCnt_++;
         int64_t curr = GetTimeMs();
         if (curr - lastDropTime_ > 1000) {
-            ELOG("sendQ_ reached the limit (" << q_buf_size << " bytes or " <<
+            WLOG("sendQ_ reached the size limit (" << q_buf_size << " bytes, " <<
                  q_size << ") - " << dropCnt_ << " dropped in " <<
                  (lastDropTime_ ? (curr - lastDropTime_) : 0) << " ms");
             dropCnt_ = 0;
@@ -908,13 +914,14 @@ void TcpTransceiver::OnConnectedEvent()
             DLOG("TCP connection established");
             event = ET_CONNECTED;
             
-            sockaddr_in  local;
-            len = sizeof(local);
+            sockaddr_storage local;
+            len = sizeof(sockaddr_storage);
             
             if (getsockname(socket_, (sockaddr*)&local, &len) == 0) {
                 if (pConn_) {
-                    pConn_->SetLocalAddress(toStr(local.sin_addr),
-                                            ntohs(local.sin_port));
+                    Address local_addr(local);
+                    pConn_->SetLocalAddress(local_addr.IPString(),
+                                            local_addr.Port());
                 }
             }
             else {

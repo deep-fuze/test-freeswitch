@@ -115,6 +115,8 @@ public:
     void     GetSendQInfo(size_t& rNum, uint32_t& rBufSize);
     uint32_t GetSendRetryCount();
     
+    void FlushSendQ();
+    
 public: // members to be exposed to make life easier
     char    log_[64]; // debug purpose
     event*  pReadEvent_;

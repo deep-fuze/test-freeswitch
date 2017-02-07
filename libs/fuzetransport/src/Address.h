@@ -27,36 +27,41 @@ namespace fuze {
 class Address
 {
 public:
-    Address() { Clear(); }
-    Address(const sockaddr_in& rAddr) { addr_ = rAddr; }
+    Address();
+    Address(const sockaddr_storage& rAddr);
     
-    bool     operator==(const Address& rAddress) const
-    {
-        return (addr_.sin_addr.s_addr == rAddress.addr_.sin_addr.s_addr) &&
-               (addr_.sin_port == rAddress.addr_.sin_port);
-    }
-    bool     operator!=(const Address& rAddress) const {return !(*this == rAddress);}
-    Address& operator=(const Address& rAddress)
-    {
-        addr_ = rAddress.addr_;
-        return *this;
-    }
+    bool     operator==(const Address& rAddress) const;
+    bool     operator!=(const Address& rAddress) const;
+    Address& operator=(const Address& rAddress);
     
-    string       IPString() const;
-    in_addr      IPNum() const { return addr_.sin_addr; } // network byte ordered
-    uint16_t     Port() const { return ntohs(addr_.sin_port); }  // host byte ordered
-    sockaddr_in  SocketAddress() const { return addr_; }
+    string    IPString() const;
+    in_addr   IPNum() const { return addr_.sa4.sin_addr; } // network byte ordered
+    uint16_t  Port() const  { return ntohs(addr_.sa4.sin_port); } // host byte ordered
     
-    bool Valid() const {return (addr_.sin_addr.s_addr != INADDR_NONE && addr_.sin_port != 0);}
+    const sockaddr* SockAddr() const { return &(addr_.sa); }
+    int             SockAddrLen() const;
+    
+    bool Valid() const;
     void Clear();
     
     // return false if pIP is not valid
     bool SetIP(const char* pIP);
     bool SetPort(uint16_t port);
-    void SetSockAddr(const sockaddr_in& rSockAddr) {addr_ = rSockAddr;}
+    
+    void SetIPv4AnyAddress();
+    void SetIPv6AnyAddress();
+    
+    bool IsIPv4() const;
+    bool IsIPv6() const;
+    int  IPType() const;
     
 private:
-    sockaddr_in  addr_;
+    
+    union {
+        sockaddr     sa;
+        sockaddr_in  sa4;
+        sockaddr_in6 sa6;
+    } addr_;
 };
 
 class DebugOut;

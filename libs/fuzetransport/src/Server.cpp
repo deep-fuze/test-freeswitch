@@ -80,8 +80,13 @@ bool Server::Initialize()
         ELOG("Socket is already initialized");
         return false;
     }
+
+    // we bind the address and listen at this address
+    Address local;
+    local.SetIPv4AnyAddress();
+    local.SetPort(PORT);
     
-    socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    socket_ = socket(local.IPType(), SOCK_STREAM, IPPROTO_TCP);
     if (socket_ == INVALID_SOCKET) {
         ELOG("Failed to create socket")
         return false;
@@ -89,16 +94,8 @@ bool Server::Initialize()
     
     evutil_make_socket_nonblocking(socket_);
     evutil_make_listen_socket_reuseable(socket_);
-        
-    // we bind the address and listen at this address
-    sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
     
-    addr.sin_family      = AF_INET;
-    addr.sin_port        = htons(PORT);
-    addr.sin_addr.s_addr = INADDR_ANY;
-    
-    if (::bind(socket_, (sockaddr*)&addr, sizeof(addr)) != -1) {
+    if (::bind(socket_, local.SockAddr(), local.SockAddrLen()) != -1) {
         MLOG("bind() on socket " << socket_ << " - port " << PORT);
         if (listen(socket_, SOMAXCONN) != -1) {
             TransportImpl* p = TransportImpl::GetInstance();
@@ -149,7 +146,8 @@ void Server::OnListenEvent(evutil_socket_t sock, short what)
         evutil_socket_t  new_fd = accept(socket_, (sockaddr*)&ss, &len);
         
         if (new_fd != INVALID_SOCKET) {
-            MLOG("new incoming client - s" << new_fd);
+            Address recv_addr(ss);
+            MLOG("new incoming client - s" << new_fd << " " << recv_addr);
             evutil_make_socket_nonblocking(new_fd);
 #ifdef SO_NOSIGPIPE
             int on = 1;

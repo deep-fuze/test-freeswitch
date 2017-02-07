@@ -133,7 +133,7 @@ void RateLimiter::OnRateEvent(evutil_socket_t socket, short what, void *pArg)
                 p->OnWriteEvent();
             }
         }
-        catch (std::exception& ex) {
+        catch (const std::exception& ex) {
             _ELOG_("exception - " << ex.what());
         }
         catch (...) {
@@ -255,7 +255,7 @@ void TcpCore::OnLibEvent(evutil_socket_t socket, short what, void *pArg)
                 p->OnTimeoutEvent();
             }
         }
-        catch (std::exception& ex) {
+        catch (const std::exception& ex) {
             _ELOG_("exception - " << ex.what());
         }
         catch (...) {
@@ -587,6 +587,18 @@ uint32_t TcpCore::GetSendRetryCount()
     // modify and access this
     sendRetryCnt_ = 0;
     return retry;
+}
+
+void TcpCore::FlushSendQ()
+{
+    queue<Buffer::Ptr> empty_q;
+    
+    {
+        MutexLock scoped(&qlock_);
+        swap(empty_q, sendQ_);
+    }
+    
+    MLOG(empty_q.size());
 }
     
 } // namespace fuze
