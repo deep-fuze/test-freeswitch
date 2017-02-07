@@ -46,7 +46,7 @@ public:
 
     void Lock();
     void Unlock();
-    void TryLock();
+    bool TryLock();
     
 private:
 #if defined(WIN32)
