@@ -558,6 +558,10 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_process_t38_passthru(switch_co
         switch_snprintf(tmp, sizeof(tmp), "%d", a_engine->cur_payload_map->remote_sdp_port);
         switch_channel_set_variable(session->channel, SWITCH_REMOTE_MEDIA_IP_VARIABLE, a_engine->cur_payload_map->remote_sdp_ip);
         switch_channel_set_variable(session->channel, SWITCH_REMOTE_MEDIA_PORT_VARIABLE, tmp);
+
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(a_engine->rtp_session), SWITCH_LOG_INFO, "calling switch_rtp_set_remote_address h=%s p=%u",
+                          a_engine->cur_payload_map->remote_sdp_ip, a_engine->cur_payload_map->remote_sdp_port);
+
         if (switch_rtp_set_remote_address(a_engine->rtp_session, a_engine->cur_payload_map->remote_sdp_ip,
                                           a_engine->cur_payload_map->remote_sdp_port, 0, SWITCH_TRUE, &err) != SWITCH_STATUS_SUCCESS) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "AUDIO RTP REPORTS ERROR: [%s]\n", err);
@@ -3796,6 +3800,9 @@ SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *s
                         switch_channel_set_variable(session->channel, SWITCH_REMOTE_MEDIA_IP_VARIABLE, a_engine->cur_payload_map->remote_sdp_ip);
                         switch_channel_set_variable(session->channel, SWITCH_REMOTE_MEDIA_PORT_VARIABLE, tmp);
 
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(a_engine->rtp_session), SWITCH_LOG_INFO, "calling switch_rtp_set_remote_address h=%s p=%u",
+                                          a_engine->cur_payload_map->remote_sdp_ip, a_engine->cur_payload_map->remote_sdp_port);
+
                         if (switch_rtp_set_remote_address(a_engine->rtp_session, a_engine->cur_payload_map->remote_sdp_ip,
                                                           a_engine->cur_payload_map->remote_sdp_port, 0, SWITCH_TRUE, &err) != SWITCH_STATUS_SUCCESS) {
                             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "AUDIO RTP REPORTS ERROR: [%s]\n", err);
@@ -4932,6 +4939,8 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_proxy_remote_addr(switch_core_
             remote_rtcp_port = (switch_port_t)atoi(rport);
         }
 
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(a_engine->rtp_session), SWITCH_LOG_INFO, "calling switch_rtp_set_remote_address h=%s p=%u",
+                          a_engine->cur_payload_map->remote_sdp_ip, a_engine->cur_payload_map->remote_sdp_port);
 
         if (switch_rtp_set_remote_address(a_engine->rtp_session, a_engine->cur_payload_map->remote_sdp_ip,
                                           a_engine->cur_payload_map->remote_sdp_port, remote_rtcp_port, SWITCH_TRUE, &err) != SWITCH_STATUS_SUCCESS) {
@@ -5510,6 +5519,9 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_activate_rtp(switch_core_sessi
                 remote_rtcp_port = (switch_port_t)atoi(rport);
             }
         }
+
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(a_engine->rtp_session), SWITCH_LOG_INFO, "calling switch_rtp_set_remote_address h=%s p=%u",
+                          a_engine->cur_payload_map->remote_sdp_ip, a_engine->cur_payload_map->remote_sdp_port);
 
         if (switch_rtp_set_remote_address(a_engine->rtp_session, a_engine->cur_payload_map->remote_sdp_ip, a_engine->cur_payload_map->remote_sdp_port,
                                           remote_rtcp_port, SWITCH_TRUE, &err) != SWITCH_STATUS_SUCCESS) {

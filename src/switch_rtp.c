@@ -330,6 +330,9 @@ struct switch_rtp {
     rtcp_msg_t rtcp_recv_msg;
     rtcp_msg_t *rtcp_recv_msg_p;
 
+    switch_bool_t remote_rtp_address_set;
+    switch_bool_t remote_rtcp_address_set;
+
     uint32_t autoadj_window;
     uint32_t autoadj_threshold;
     uint32_t autoadj_tally;
@@ -1904,6 +1907,8 @@ static void handle_ice(switch_rtp_t *rtp_session, switch_rtp_ice_t *ice, void *d
                             rtp_session->auto_adj_used = 1;
 
 
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "calling switch_rtp_set_remote_address h=%s p=%u",
+                                              host, port);
                             switch_rtp_set_remote_address(rtp_session, host, port, 0, SWITCH_FALSE, &err);
                             if (switch_sockaddr_info_get(&ice->addr, host, SWITCH_UNSPEC, port, 0, rtp_session->pool) != SWITCH_STATUS_SUCCESS ||
                                 !ice->addr) {
@@ -1983,6 +1988,8 @@ static void handle_ice(switch_rtp_t *rtp_session, switch_rtp_ice_t *ice, void *d
                                       host, port);
 
                     if (!is_rtcp || rtp_session->flags[SWITCH_RTP_FLAG_RTCP_MUX]) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "calling switch_rtp_set_remote_address h=%s p=%u",
+                                          host, port);
                         switch_rtp_set_remote_address(rtp_session, host, port, 0, SWITCH_FALSE, &err);
                     }
 
@@ -2045,6 +2052,8 @@ static void handle_ice(switch_rtp_t *rtp_session, switch_rtp_ice_t *ice, void *d
                 switch_sockaddr_info_get(&ice->addr, host, SWITCH_UNSPEC, port, 0, rtp_session->pool);
 
                 if (!is_rtcp || rtp_session->flags[SWITCH_RTP_FLAG_RTCP_MUX]) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "calling switch_rtp_set_remote_address h=%s p=%u",
+                                      host, port);
                     switch_rtp_set_remote_address(rtp_session, host, port, 0, SWITCH_FALSE, &err);
                 }
 
@@ -3207,6 +3216,12 @@ static switch_status_t enable_remote_rtcp_socket(switch_rtp_t *rtp_session, cons
 
     switch_status_t status = SWITCH_STATUS_SUCCESS;
 
+    if (rtp_session->remote_rtcp_address_set) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "enable_remote_rtcp_socket called but address already set in fuze transport\n");
+        *err = "Warning address already set.";
+        return SWITCH_STATUS_SUCCESS;
+    }
+
     if (rtp_session->flags[SWITCH_RTP_FLAG_ENABLE_RTCP]) {
 
         if (switch_sockaddr_info_get(&rtp_session->rtcp_remote_addr, rtp_session->eff_remote_host_str, SWITCH_UNSPEC,
@@ -3222,6 +3237,8 @@ static switch_status_t enable_remote_rtcp_socket(switch_rtp_t *rtp_session, cons
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "Setting remote RTCP %s:%d\n", host, rtp_session->remote_rtcp_port);
                 if (fuze_transport_connection_set_remote_address(rtp_session->rtcp_conn, host, rtp_session->remote_rtcp_port) < 0) {
                     *err = "Error on setting Remote RTCP.";
+                } else {
+                    rtp_session->remote_rtcp_address_set = SWITCH_TRUE;
                 }
             }
         }
@@ -3659,6 +3676,12 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_set_remote_address(switch_rtp_t *rtp_
     switch_status_t status = SWITCH_STATUS_SUCCESS;
     *err = "Success";
 
+    if (rtp_session->remote_rtp_address_set) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "switch_rtp_set_remote_address called but address already set in fuze transport\n");
+        *err = "Warning remote RTP address already set!";
+        return SWITCH_STATUS_SUCCESS;
+    }
+
     if (switch_sockaddr_info_get(&remote_addr, host, SWITCH_UNSPEC, port, 0, rtp_session->pool) != SWITCH_STATUS_SUCCESS || !remote_addr) {
         *err = "Remote Address Error!";
         return SWITCH_STATUS_FALSE;
@@ -3671,6 +3694,8 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_set_remote_address(switch_rtp_t *rtp_
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "Setting remote %s:%d\n", host, port);
         if (fuze_transport_connection_set_remote_address(rtp_session->rtp_conn, host, port) < 0) {
             *err = "Error on setting Remote RTP.";
+        } else {
+            rtp_session->remote_rtp_address_set = SWITCH_TRUE;
         }
     }
 
@@ -4601,6 +4626,9 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->is_ivr = SWITCH_FALSE;
     rtp_session->is_conf = SWITCH_FALSE;
 
+    rtp_session->remote_rtp_address_set = SWITCH_FALSE;
+    rtp_session->remote_rtcp_address_set = SWITCH_FALSE;
+
     rtp_session->high_drift_packets = 0;
     rtp_session->high_drift_log_suppress = 0;
     rtp_session->total_sent = 0;
@@ -4723,6 +4751,8 @@ SWITCH_DECLARE(switch_rtp_t *) switch_rtp_new(void *tbase,
         goto end;
     }
 
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "calling switch_rtp_set_remote_address h=%s p=%u",
+                      tx_host, tx_port);
     if (switch_rtp_set_remote_address(rtp_session, tx_host, tx_port, 0, SWITCH_TRUE, err) != SWITCH_STATUS_SUCCESS) {
         switch_mutex_unlock(rtp_session->flag_mutex);
         rtp_session = NULL;
@@ -7120,6 +7150,8 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                     const char *tx_host = switch_get_addr(bufa, sizeof(bufa), rtp_session->from_addr);
 
                     rtp_session->auto_adj_used = 1;
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "calling switch_rtp_set_remote_address h=%s p=%u",
+                                      tx_host, switch_sockaddr_get_port(rtp_session->from_addr));
                     switch_rtp_set_remote_address(rtp_session, tx_host, switch_sockaddr_get_port(rtp_session->from_addr), 0, SWITCH_FALSE, &err);
                 }
             } else if (switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_AUTOADJ)) {
@@ -7151,6 +7183,8 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                         }
 
                         rtp_session->auto_adj_used = 1;
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "calling switch_rtp_set_remote_address h=%s p=%u",
+                                          tx_host, switch_sockaddr_get_port(rtp_session->from_addr));
                         switch_rtp_set_remote_address(rtp_session, tx_host, switch_sockaddr_get_port(rtp_session->from_addr), 0, SWITCH_FALSE, &err);
                         switch_rtp_clear_flag(rtp_session, SWITCH_RTP_FLAG_AUTOADJ);
                     }
