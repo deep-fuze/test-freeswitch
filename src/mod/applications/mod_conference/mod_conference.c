@@ -13380,6 +13380,7 @@ SWITCH_STANDARD_APP(conference_function)
             || (switch_test_flag(conference, CFLAG_DYNAMIC) && (conference->count + conference->count_ghosts == 0))
             || switch_test_flag(conference, CFLAG_DESTRUCT)) {
 			int i = 0;
+            set_conference_state_unlocked(conference, CFLAG_DESTRUCT);
             while (conference->count > 0 && conference->count_ghosts > 0 && i++ < 60) {
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "W̊aiting for %d member before stopping conference %s/%s\n", 
                                   conference->count, conference->meeting_id, conference->instance_id);
