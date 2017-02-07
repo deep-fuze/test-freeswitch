@@ -889,7 +889,9 @@ const char* DtlsTransceiver::StateStr(DtlsState eState)
 
 void fuze_srtp_init()
 {
-    _MLOG_("version: " << srtp_get_version_string());    
+#ifndef FREE_SWITCH 
+    _MLOG_("version: " << srtp_get_version_string());
+#endif
     srtp_init();
 }
     
