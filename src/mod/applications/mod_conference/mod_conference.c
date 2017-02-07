@@ -10978,10 +10978,6 @@ static switch_status_t conf_api_sub_enter_sound(conference_obj_t *conference, sw
         return SWITCH_STATUS_GENERR;
     }
 
-    if (conference->stop_entry_tone_participants > 0 && conference->count < conference->stop_entry_tone_participants) {
-        return SWITCH_STATUS_SUCCESS;
-    }
-
     if ( !strcasecmp(argv[2], "on") ) {
         set_conference_state_locked(conference, CFLAG_ENTER_SOUND);
         stream->write_function(stream, "OK %s enter sounds on (%s)\n", argv[0], conference->enter_sound);
