@@ -4866,7 +4866,11 @@ static void conference_thread_stop(conference_obj_t *conference)
 
     for (conference_cdr_node_t *np = conference->cdr_nodes; np; np = np->next) {
         if (np->var_event) {
-            switch_event_destroy(&np->var_event);
+			if (np->member) {
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Leaking CDR Event: member is not null\n");
+			} else {
+				switch_event_destroy(&np->var_event);
+			}
         }
     }
 
@@ -13379,7 +13383,8 @@ SWITCH_STANDARD_APP(conference_function)
         if ((conference->min && switch_test_flag(conference, CFLAG_ENFORCE_MIN) && (conference->count + conference->count_ghosts) < conference->min)
             || (switch_test_flag(conference, CFLAG_DYNAMIC) && (conference->count + conference->count_ghosts == 0))
             || switch_test_flag(conference, CFLAG_DESTRUCT)) {
-            while (conference->count > 0 && conference->count_ghosts > 0) {
+			int i = 0;
+            while (conference->count > 0 && conference->count_ghosts > 0 && i++ < 60) {
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "W̊aiting for %d member before stopping conference %s/%s\n", 
                                   conference->count, conference->meeting_id, conference->instance_id);
                 /* sleep 1s */
