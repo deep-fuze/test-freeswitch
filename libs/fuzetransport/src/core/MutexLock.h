@@ -46,7 +46,8 @@ public:
 
     void Lock();
     void Unlock();
-
+    void TryLock();
+    
 private:
 #if defined(WIN32)
     CRITICAL_SECTION*   cs_;
