@@ -1271,15 +1271,43 @@ static void CLEAR_CONFERENCE_STATE_LOCKED(int32_t line, conference_obj_t *confer
 //#define lock_member(_member) switch_mutex_lock(_member->write_mutex)
 //#define unlock_member(_member) switch_mutex_unlock(_member->write_mutex)
 
+#define conference_mutex_lock(conference) conference_mutex_lock_line(conference, __LINE__)
+
+void conference_mutex_lock_line(conference_obj_t *conference, int line) {
+    switch_time_t now = switch_time_now();
+    switch_mutex_lock(conference->mutex);
+    now = switch_time_now() - now;
+    if ((now) > 10000) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                          "TIMELOCK: Conference locked for a long time to acquire %" PRId64 "ms\n", now);
+    }
+    conference->mutex_time = switch_time_now();
+    conference->lineno = line;
+}
+
+void conference_mutex_unlock(conference_obj_t *conference) {
+    switch_time_t now = switch_time_now();
+    if ((now - conference->mutex_time) > 10000) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                          "TIMELOCK: Conference locked (mod_conference.c:%d) for a long time %" PRId64 "ms\n",
+                          conference->lineno, (now - conference->mutex_time)/1000);
+    }
+    conference->lineno = 0;
+    switch_mutex_unlock(conference->mutex);
+}
 
 static void conference_cdr_del(conference_member_t *member)
 {
-    if (member->channel) {
+    conference_mutex_lock(member->conference);
+    if (member && member->channel) {
         switch_channel_get_variables(member->channel, &member->cdr_node->var_event);
     }
-    member->cdr_node->leave_time = switch_epoch_time_now(NULL);
-    member->cdr_node->flags = member->flags;
-    member->cdr_node->member = NULL;
+    if (member && member->cdr_node) {
+        member->cdr_node->leave_time = switch_epoch_time_now(NULL);
+        member->cdr_node->flags = member->flags;
+        member->cdr_node->member = NULL;
+    }
+    conference_mutex_unlock(member->conference);
 }
 
 static void conference_cdr_add(conference_member_t *member)
@@ -1374,31 +1402,6 @@ void member_mutex_unlock(conference_member_t *member, switch_mutex_t *mutex, cha
     }
     *line = 0;
     switch_mutex_unlock(mutex);
-}
-
-#define conference_mutex_lock(conference) conference_mutex_lock_line(conference, __LINE__)
-
-void conference_mutex_lock_line(conference_obj_t *conference, int line) {
-    switch_time_t now = switch_time_now();
-    switch_mutex_lock(conference->mutex);
-    now = switch_time_now() - now;
-    if ((now) > 10000) {
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
-                          "TIMELOCK: Conference locked for a long time to acquire %" PRId64 "ms\n", now);
-    }
-    conference->mutex_time = switch_time_now();
-    conference->lineno = line;
-}
-
-void conference_mutex_unlock(conference_obj_t *conference) {
-    switch_time_t now = switch_time_now();
-    if ((now - conference->mutex_time) > 10000) {
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
-                          "TIMELOCK: Conference locked (mod_conference.c:%d) for a long time %" PRId64 "ms\n",
-                          conference->lineno, (now - conference->mutex_time)/1000);
-    }
-    conference->lineno = 0;
-    switch_mutex_unlock(conference->mutex);
 }
 
 
@@ -3594,7 +3597,6 @@ static switch_status_t conference_del_member(conference_obj_t *conference, confe
 
     conference_cdr_del(member);
 
-
     member_fnode = member->fnode;
     member_sh = member->sh;
     member->fnode = NULL;
@@ -4709,11 +4711,11 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             memset(write_frame_raw, 0, bytes);
 
             /* Fuze: Everybody is muted or not speaking */
-			bptr = (int16_t *) omember->frame;
-			for (x = 0; x < bytes / 2; x++) {
-				int32_t z;
+            bptr = (int16_t *) omember->frame;
+            for (x = 0; x < bytes / 2; x++) {
+                int32_t z;
 
-				z = (int32_t) main_frame[x];
+                z = (int32_t) main_frame[x];
 
                 if (!exclusive_play) {
                     /* bptr[x] represents my own contribution to this audio sample */
@@ -11998,7 +12000,6 @@ static switch_status_t conference_outcall(conference_obj_t *conference,
         send_conference_notify(conference, "SIP/2.0 100 Trying\r\n", call_id, SWITCH_FALSE);
     }
 
-
     status = switch_ivr_originate(session, &peer_session, cause, bridgeto, timeout, NULL, cid_name, cid_num, NULL, var_event, SOF_NO_LIMITS, cancel_cause);
     conference_mutex_lock(conference);
     conference->originating--;
@@ -13295,8 +13296,6 @@ SWITCH_STANDARD_APP(conference_function)
     wait = (member.id % 50) * 1000000;
     switch_yield(wait);
 #else
-    wait = 100000;
-    switch_yield(wait);
 #endif
 
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Wait for member cleanup mid:%d wait %d for real\n",
@@ -13380,6 +13379,12 @@ SWITCH_STANDARD_APP(conference_function)
         if ((conference->min && switch_test_flag(conference, CFLAG_ENFORCE_MIN) && (conference->count + conference->count_ghosts) < conference->min)
             || (switch_test_flag(conference, CFLAG_DYNAMIC) && (conference->count + conference->count_ghosts == 0))
             || switch_test_flag(conference, CFLAG_DESTRUCT)) {
+            while (conference->count > 0 && conference->count_ghosts > 0) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "W̊aiting for %d member before stopping conference %s/%s\n", 
+                                  conference->count, conference->meeting_id, conference->instance_id);
+                /* sleep 1s */
+                switch_sleep(1000*1000);
+            }
             conference_thread_stop(conference);
         }
     }

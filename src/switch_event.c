@@ -963,6 +963,7 @@ static switch_status_t switch_event_base_add_header(switch_event_t *event, switc
 	int index = 0;
 	char *real_header_name = NULL;
 
+	if (!event) { return SWITCH_STATUS_GENERR; }
 
 	if (!strcmp(header_name, "_body")) {
 		switch_event_set_body(event, data);
