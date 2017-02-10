@@ -8799,6 +8799,10 @@ static switch_status_t conference_member_play_file(conference_member_t *member, 
         return status;
     }
 
+	if (member->mname && strcmp(member->mname, "recorder@fuze.com") == 0) {
+		return status;
+	}
+
     if ((expanded = switch_channel_expand_variables(switch_core_session_get_channel(member->session), file)) != file) {
         file = expanded;
     } else {
