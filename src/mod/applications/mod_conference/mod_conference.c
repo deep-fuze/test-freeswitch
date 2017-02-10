@@ -8842,7 +8842,6 @@ static switch_status_t conference_member_play_file(conference_member_t *member, 
     /* Let's see if we have this file in our encoded collection already */
     fc_init(&fnode->cursor);
     if (fnode->exclusive_play) {
-        switch_mutex_lock(member->meo.filelist->filesmutex);
         if (fc_start_replay(&fnode->cursor, member->meo.filelist, file)) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "found file %s complete=%d\n",
                               file, fnode->cursor.file->done);
@@ -8853,7 +8852,6 @@ static switch_status_t conference_member_play_file(conference_member_t *member, 
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "creating file %s\n", file);
             fc_create_file(&fnode->cursor, member->meo.filelist, file);
         }
-        switch_mutex_unlock(member->meo.filelist->filesmutex);
     }
     
     /* Open the file */
