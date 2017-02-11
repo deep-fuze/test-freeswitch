@@ -7394,7 +7394,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
 
                 if (stop) {
                     /* we need to stop all channels in this loop? */
-                    for (participant_thread_data_t *ptd = list->loop; ols; ols = ols->next) {
+                    for (participant_thread_data_t *ptd = ols; ptd; ptd = ptd->next) {
                         if (ptd->member->conference == ols->member->conference) {
                             cleanup_member(ptd);
                         }
