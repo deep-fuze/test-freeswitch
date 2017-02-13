@@ -3677,7 +3677,9 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_set_remote_address(switch_rtp_t *rtp_
     *err = "Success";
 
     if (rtp_session->remote_rtp_address_set) {
+#if 0
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "switch_rtp_set_remote_address called but address already set in fuze transport\n");
+#endif
         *err = "Warning remote RTP address already set!";
         return SWITCH_STATUS_SUCCESS;
     }
@@ -7150,8 +7152,10 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                     const char *tx_host = switch_get_addr(bufa, sizeof(bufa), rtp_session->from_addr);
 
                     rtp_session->auto_adj_used = 1;
+#if 0
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "calling switch_rtp_set_remote_address h=%s p=%u",
                                       tx_host, switch_sockaddr_get_port(rtp_session->from_addr));
+#endif
                     switch_rtp_set_remote_address(rtp_session, tx_host, switch_sockaddr_get_port(rtp_session->from_addr), 0, SWITCH_FALSE, &err);
                 }
             } else if (switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_AUTOADJ)) {
