@@ -613,6 +613,13 @@ switch_bool_t fc_create_file(file_cursor_t *cursor, filelist_t *filelist, char *
 switch_bool_t fc_add_frame(file_cursor_t *cursor, switch_frame_t *pFrame) {
     play_frame_t *frame;
 
+    if (!pFrame || !cursor) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "fc_add_frame: cursor %s and pFrame %s\n",
+                          (cursor == NULL ? "null" : "not null"),
+                          (pFrame == NULL ? "null" : "not null"));
+        return SWITCH_FALSE;
+    }
+
     if (!cursor->active) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "fc_add_frame: cursor not active\n");
         return SWITCH_FALSE;
