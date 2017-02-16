@@ -1764,9 +1764,6 @@ NetworkBuffer::Ptr ConnectionImpl::GetBufferShell()
         p_buf = new NetworkBuffer; // create empty buffer shell
         p_buf->appID_ = ID(); // mark the connection ID for release
         bufAlloc[BUFFER_SHELL]++;
-        if (++bufNum_ <= 100 || (bufAlloc[BUFFER_SHELL] % 10 == 0)) {
-            MLOG("Requested shallow copy - creating shallow num: " << bufNum_);
-        }
     }
     
     sp_buf.reset(p_buf, HandleReleasedBuffer);
@@ -1796,8 +1793,8 @@ NetworkBuffer::Ptr ConnectionImpl::GetBuffer(uint32_t bufSize)
         p_mem->setAppID(ID()); // mark the connection ID for release
         bufAlloc[size_type]++;
         if (++bufNum_ <= 100 || (bufAlloc[size_type] % 10 == 0)) {
-            MLOG("Requested " << bufSize << "B - creating buffer (" <<
-                 SizeArray[size_type] << "B) num: " << bufNum_);
+            MLOG(bufSize << "B (" << SizeArray[size_type] <<
+                 "B created) num: " << bufNum_);
         }
     }
     else {
