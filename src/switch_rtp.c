@@ -4078,13 +4078,24 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_dtls(switch_rtp_t *rtp_session, d
 
     SSL_CTX_set_mode(dtls->ssl_ctx, SSL_MODE_AUTO_RETRY);
 
-    //SSL_CTX_set_verify(dtls->ssl_ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
     SSL_CTX_set_verify(dtls->ssl_ctx, SSL_VERIFY_NONE, NULL);
-
-    SSL_CTX_set_cipher_list(dtls->ssl_ctx, "ALL");
+    {
+        EC_KEY *p_ecdh = EC_KEY_new_by_curve_name(NID_secp384r1);
+        if (p_ecdh) {
+            if (SSL_CTX_set_tmp_ecdh(dtls->ssl_ctx, p_ecdh) != 1) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "%s DTLS SSL_CTX_set_tmp_ecdh error\n",
+                                  rtp_type(rtp_session));
+            }
+            EC_KEY_free(p_ecdh);
+        } else {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "%s DTLS EC_KEY_new_by_curve_name error\n",
+                              rtp_type(rtp_session));
+        }
+    }
+    SSL_CTX_set_cipher_list(dtls->ssl_ctx, "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH");
+    SSL_CTX_set_session_cache_mode(dtls->ssl_ctx, SSL_SESS_CACHE_OFF);
 
 #ifdef HAVE_OPENSSL_DTLS_SRTP
-    //SSL_CTX_set_tlsext_use_srtp(dtls->ssl_ctx, "SRTP_AES128_CM_SHA1_80:SRTP_AES128_CM_SHA1_32");
     SSL_CTX_set_tlsext_use_srtp(dtls->ssl_ctx, "SRTP_AES128_CM_SHA1_80");
 #endif
 

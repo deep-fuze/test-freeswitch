@@ -3368,50 +3368,12 @@ static void clear_pmaps(switch_rtp_engine_t *engine)
 
 #define FUZE_APP_CN 1
 
-switch_bool_t is_fuze_app(sdp_session_t *sdp, const char *r_sdp) {
-    /* fuze app*/
-    if (sdp->sdp_subject) {
-        if (strstr(sdp->sdp_subject, "FuzeMeeting")) { return SWITCH_TRUE; }
-        if (strstr(sdp->sdp_subject, "chrome")) { return SWITCH_TRUE; }
-        if (strstr(sdp->sdp_subject, "mozilla")) { return SWITCH_TRUE; }
-    }
-    if (sdp->sdp_origin) {
-        /* firefox */
-        if (sdp->sdp_origin->o_username) {
-            if (strstr(sdp->sdp_origin->o_username, "ozilla")) { return SWITCH_TRUE; }
-            if (strstr(sdp->sdp_origin->o_username, "chrome")) { return SWITCH_TRUE; }
-            if (strstr(sdp->sdp_origin->o_username, "FuzeMeeting")) { return SWITCH_TRUE; }
-        }
-        /* either chrome OR passthrough freeswitch */
-    }
-    if (strstr(r_sdp, "experiments/rtp-hdrext/abs-send-time")) { return SWITCH_TRUE; }
-    return SWITCH_FALSE;
-}
-
-const char * get_fuze_app_type(sdp_session_t *sdp, const char *r_sdp) {
-    /* return false; */
-    /* fuze app*/
-    if (sdp->sdp_subject) {
-        if (strstr(sdp->sdp_subject, "FuzeMeeting")) { return "FuzeMeeting"; }
-        if (strstr(sdp->sdp_subject, "chrome")) { return "chrome"; }
-        if (strstr(sdp->sdp_subject, "mozilla")) { return "mozilla"; }
-    }
-    if (sdp->sdp_origin) {
-        /* firefox */
-        if (sdp->sdp_origin->o_username) {
-            if (strstr(sdp->sdp_origin->o_username, "ozilla")) { return "mozilla"; }
-            if (strstr(sdp->sdp_origin->o_username, "chrome")) { return "chrome"; }
-            if (strstr(sdp->sdp_origin->o_username, "FuzeMeeting")) { return "FuzeMeeting"; }
-        }
-    }
-    /* either chrome OR passthrough freeswitch */
-    if (strstr(r_sdp, "experiments/rtp-hdrext/abs-send-time")) { return "chrome"; }
-    return NULL;
-}
-
-switch_bool_t is_chrome(sdp_session_t *sdp, const char *r_sdp) {
+switch_bool_t is_chrome(switch_core_session_t *session, sdp_session_t *sdp) {
     sdp_list_t *l;
-    if (strstr(r_sdp, "experiments/rtp-hdrext/abs-send-time")) { return SWITCH_TRUE; }
+    const char *sip_user_agent;
+    sip_user_agent = switch_channel_get_variable(session->channel, "sip_user_agent");
+    if (sip_user_agent && strstr(sip_user_agent, "Chrome") != NULL) { return SWITCH_TRUE; }
+    if (!sdp) { return SWITCH_FALSE; }
     for (l = sdp->sdp_emails; l; l = l->l_next) {
         if (l->l_text) {
             if (strstr(l->l_text, "chrome")) {
@@ -3420,6 +3382,53 @@ switch_bool_t is_chrome(sdp_session_t *sdp, const char *r_sdp) {
         }
     }
     return SWITCH_FALSE;
+}
+
+switch_bool_t is_firefox(switch_core_session_t *session, sdp_session_t *sdp) {
+    /* fuze app*/
+    const char *sip_user_agent;
+    sip_user_agent = switch_channel_get_variable(session->channel, "sip_user_agent");
+    if (sip_user_agent && strstr(sip_user_agent, "Firefox") != NULL) { return SWITCH_TRUE; }
+    if (!sdp) { return SWITCH_FALSE; }
+    if (sdp->sdp_subject) {
+        if (strstr(sdp->sdp_subject, "mozilla")) { return SWITCH_TRUE; }
+    }
+    if (sdp->sdp_origin) {
+        /* firefox */
+        if (sdp->sdp_origin->o_username) {
+            if (strstr(sdp->sdp_origin->o_username, "ozilla")) { return SWITCH_TRUE; }
+        }
+    }
+    return SWITCH_FALSE;
+}
+
+switch_bool_t is_fuze_app(switch_core_session_t *session, sdp_session_t *sdp) {
+    /* fuze app*/
+    const char *sip_user_agent = switch_channel_get_variable(session->channel, "sip_user_agent");
+
+    if (sip_user_agent && strstr(sip_user_agent, "FuzeMedia") != NULL) { return SWITCH_TRUE; }
+    if (is_chrome(session, sdp)) { return SWITCH_TRUE; }
+    if (is_firefox(session, sdp)) { return SWITCH_TRUE; }
+
+    if (sdp->sdp_subject) {
+        if (strstr(sdp->sdp_subject, "FuzeMeeting")) { return SWITCH_TRUE; }
+    }
+    if (sdp->sdp_origin) {
+        if (sdp->sdp_origin->o_username) {
+            if (strstr(sdp->sdp_origin->o_username, "FuzeMeeting")) { return SWITCH_TRUE; }
+        }
+        /* either chrome OR passthrough freeswitch */
+    }
+    return SWITCH_FALSE;
+}
+
+const char * get_fuze_app_type(switch_core_session_t *session, sdp_session_t *sdp) {
+    /* return false; */
+    /* fuze app*/
+    if (is_chrome(session, sdp)) { return "chrome"; }
+    if (is_firefox(session, sdp)) { return "mozilla"; }
+    if (is_fuze_app(session, sdp)) { return "FuzeMeeting"; }
+    return NULL;
 }
 
 SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *session, const char *r_sdp, uint8_t *proceed, switch_sdp_type_t sdp_type)
@@ -3634,12 +3643,12 @@ SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *s
     session->phone[0] = 0;
 
     /* set session name */
-    if (is_fuze_app(sdp, r_sdp)) {
+    if (is_fuze_app(session, sdp)) {
         if (sdp->sdp_subject) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
-                              "setting fuze_app for this session subject:%s app_type:%s\n", sdp->sdp_subject, get_fuze_app_type(sdp, r_sdp));
+                              "setting fuze_app for this session subject:%s app_type:%s\n", sdp->sdp_subject, get_fuze_app_type(session, sdp));
         }
-        switch_channel_set_variable(session->channel, "fuze_app", get_fuze_app_type(sdp, r_sdp));
+        switch_channel_set_variable(session->channel, "fuze_app", get_fuze_app_type(session, sdp));
         switch_rtp_set_fuze_app(session->channel, SWITCH_TRUE);
     }
 
@@ -3657,11 +3666,23 @@ SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *s
         }
     }
 
+    /* let's get some details */
+    {
+        const char *sip_contact_user;
+        const char *sip_user_agent;
+        sip_contact_user = switch_channel_get_variable(channel, "sip_contact_user");
+        sip_user_agent = switch_channel_get_variable(channel, "sip_user_agent");
+
+
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                          "user info contact: %s agent:%s\n", sip_contact_user, sip_user_agent);
+    }
+
     if (sdp->sdp_origin->o_username) {
-        if (strncmp(&sdp->sdp_origin->o_username[1], "ozilla", 6) == 0) {
+        if (is_firefox(session, sdp)) {
             strncat(session->email, "(mozilla)", SWITCH_CORE_EMAIL_LEN);
             switch_set_rtp_session_email(a_engine->rtp_session, session->email);
-        } else if (is_chrome(sdp, r_sdp)) {
+        } else if (is_chrome(session, sdp)) {
             strncat(session->email, "(chrome)", SWITCH_CORE_EMAIL_LEN);
             switch_set_rtp_session_email(a_engine->rtp_session, session->email);
         }
@@ -3874,12 +3895,8 @@ SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *s
                                                                            "rtp_has_crypto", SWITCH_MEDIA_TYPE_AUDIO, crypto, crypto_tag, sdp_type);
 
                 } else if (!strcasecmp(attr->a_name, "direction")) {
-                    if (!(sdp->sdp_origin->o_username && !strncmp(&sdp->sdp_origin->o_username[1], "ozilla", 6))) {
-                        if (!strcasecmp(attr->a_value, "active")) {
-                            switch_channel_set_variable(session->channel, "peer-direction", "active");
-                        }
-                    } else {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Not setting peer-direction due to firefox\n");
+                    if (!strcasecmp(attr->a_value, "active")) {
+                        switch_channel_set_variable(session->channel, "peer-direction", "active");
                     }
                 } else {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
@@ -5344,8 +5361,9 @@ static void check_dtls_reinvite(switch_core_session_t *session, switch_rtp_engin
             dtls_type_t xtype, dtype = switch_ice_direction(session) == SWITCH_CALL_DIRECTION_INBOUND ? DTLS_TYPE_CLIENT : DTLS_TYPE_SERVER;
 #else
             dtls_type_t xtype, dtype;
+            const char *direction = direction = switch_channel_get_variable(session->channel, "peer-direction");
 
-            if (switch_channel_get_variable(session->channel, "peer-direction")) {
+            if (direction) {
                 dtype = DTLS_TYPE_SERVER;
             } else {
                 dtype = switch_ice_direction(session) == SWITCH_CALL_DIRECTION_INBOUND ? DTLS_TYPE_CLIENT : DTLS_TYPE_SERVER;
@@ -5748,8 +5766,9 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_activate_rtp(switch_core_sessi
             dtls_type_t xtype, dtype = switch_channel_direction(smh->session->channel) == SWITCH_CALL_DIRECTION_INBOUND ? DTLS_TYPE_CLIENT : DTLS_TYPE_SERVER;
 #else
             dtls_type_t xtype, dtype;
+            const char *direction = direction = switch_channel_get_variable(session->channel, "peer-direction");
 
-            if (switch_channel_get_variable(session->channel, "peer-direction")) {
+            if (direction) {
                 dtype = DTLS_TYPE_SERVER;
             } else {
                 dtype = switch_channel_direction(smh->session->channel) == SWITCH_CALL_DIRECTION_INBOUND ? DTLS_TYPE_CLIENT : DTLS_TYPE_SERVER;
@@ -6180,8 +6199,9 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_activate_rtp(switch_core_sessi
                         dtype = switch_channel_direction(smh->session->channel) == SWITCH_CALL_DIRECTION_INBOUND ? DTLS_TYPE_CLIENT : DTLS_TYPE_SERVER;
 #else
                     dtls_type_t xtype, dtype;
+                    const char *direction = direction = switch_channel_get_variable(session->channel, "peer-direction");
 
-                    if (switch_channel_get_variable(smh->session->channel, "peer-direction")) {
+                    if (direction) {
                         dtype = DTLS_TYPE_SERVER;
                     } else {
                         dtype = switch_channel_direction(smh->session->channel) == SWITCH_CALL_DIRECTION_INBOUND ? DTLS_TYPE_CLIENT : DTLS_TYPE_SERVER;
@@ -8890,15 +8910,15 @@ SWITCH_DECLARE(void) switch_core_media_set_session_name(switch_core_session_t *s
         return;
     }
 
-    if (is_fuze_app(sdp, r_sdp)) {
+    if (is_fuze_app(session, sdp)) {
         const char *uuid;
         switch_core_session_t *other_session;
 
         if (sdp->sdp_subject) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
-                              "setting fuze_app for this session subject:%s app_type:%s\n", sdp->sdp_subject, get_fuze_app_type(sdp, r_sdp));
+                              "setting fuze_app for this session subject:%s app_type:%s\n", sdp->sdp_subject, get_fuze_app_type(session, sdp));
         }
-        switch_channel_set_variable(session->channel, "fuze_app", get_fuze_app_type(sdp, r_sdp));
+        switch_channel_set_variable(session->channel, "fuze_app", get_fuze_app_type(session, sdp));
         switch_rtp_set_fuze_app(session->channel, SWITCH_TRUE);
 
         if ((uuid = switch_channel_get_partner_uuid(session->channel)) &&
@@ -8907,9 +8927,9 @@ SWITCH_DECLARE(void) switch_core_media_set_session_name(switch_core_session_t *s
             if (other_channel) {
                 if (sdp->sdp_subject) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(other_session), SWITCH_LOG_INFO,
-                                      "setting fuze_app for this session as well subect:%s app_type%s\n", sdp->sdp_subject, get_fuze_app_type(sdp, r_sdp));
+                                      "setting fuze_app for this session as well subect:%s app_type%s\n", sdp->sdp_subject, get_fuze_app_type(session, sdp));
                 }
-                switch_channel_set_variable(session->channel, "fuze_app", get_fuze_app_type(sdp, r_sdp));
+                switch_channel_set_variable(session->channel, "fuze_app", get_fuze_app_type(session, sdp));
                 switch_rtp_set_fuze_app(other_channel, SWITCH_TRUE);
             }
             switch_core_session_rwunlock(other_session);
@@ -9022,7 +9042,7 @@ SWITCH_DECLARE(void) switch_core_media_set_email_and_phone(switch_core_session_t
             }
 
             if (sdp->sdp_origin->o_username) {
-                if (strncmp(&sdp->sdp_origin->o_username[1], "ozilla", 6) == 0) {
+                if (is_firefox(session, sdp)) {
                     strncat(session->email, "mozilla", SWITCH_CORE_EMAIL_LEN);
                     if (a_engine) {
                         switch_set_rtp_session_email(a_engine->rtp_session, session->email);
