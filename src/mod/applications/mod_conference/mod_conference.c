@@ -3791,7 +3791,7 @@ static int notify_activity(conference_obj_t *conference, conference_member_t *me
             /* make it active talker */
             if (member->consecutive_active_slots >= history_slot_count) {
                 if (test_eflag(conference, EFLAG_START_TALKING) &&
-                    switch_test_flag(member, MFLAG_CAN_SPEAK) &&
+                    (switch_test_flag(member, MFLAG_CAN_SPEAK) || switch_test_flag(member, MFLAG_USE_FAKE_MUTE)) &&
                     switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, CONF_EVENT_MAINT) ==
                     SWITCH_STATUS_SUCCESS) {
                     int val;
