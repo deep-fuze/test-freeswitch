@@ -4214,7 +4214,9 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
      * MQT-5318: don't recalculate active speakers while prompts are playing
      */
     count = 0;
-    if (!conference->fnode && !conference->async_fnode) {
+    if (!(conference->fnode || conference->async_fnode) ||
+        (conference->fnode && conference->fnode->leadin) ||
+        (conference->async_fnode && conference->async_fnode->leadin)) {
         count += 1;
         for (i = 0; i < MAX_ACTIVE_TALKERS; ++i) {
             if (temp_active_talkers[i] == NULL)
