@@ -3098,8 +3098,6 @@ SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_frame(conference_e
 
     switch_assert(frame != NULL);
 
-    // frame->codec = &encoder_state->write_codec;
-
     if (frame->codec == NULL || frame->codec->implementation == NULL) {
 #ifdef TRACE_ENCODE
         strncat(debug_path, "no_frame_codec,", 1024);
@@ -3181,6 +3179,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_frame(conference_e
         write_frame = &encoder_state->raw_write_frame;
         break;
     case SWITCH_STATUS_BREAK:
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "status == break!\n");
         status = SWITCH_STATUS_SUCCESS;
         goto error;
     case SWITCH_STATUS_NOOP:
@@ -3250,6 +3249,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_frame(conference_e
     switch (status) {
     case SWITCH_STATUS_RESAMPLE:
         resample++;
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "status == resample!\n");
         break;
     case SWITCH_STATUS_SUCCESS:
         encoder_state->enc_write_frame.codec = &encoder_state->write_codec;
@@ -3281,6 +3281,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_frame(conference_e
         goto error;
     default:
         *ret_enc_frame = NULL;
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "status == default!\n");
         goto error;
     }
     if (before_flags & SFF_IVR_FRAME) {

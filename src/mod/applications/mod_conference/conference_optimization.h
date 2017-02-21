@@ -56,11 +56,13 @@ typedef struct filelist {
 
 /* This is a frame.  Each codec will have a queue of frames. */
 typedef struct conference_frame {
-    switch_buffer_t *buffer;
     switch_frame_t frame;
     
     switch_bool_t encoded;
     switch_bool_t written;
+
+    switch_time_t time;
+
 } conference_frame_t;
 
 typedef struct switch_conference_encoder_state conference_encoder_state_t;
@@ -107,6 +109,8 @@ typedef struct conf_member_encoder_optimization {
     file_cursor_t cursor;
     
     switch_bool_t output_loop_initialized;
+
+  switch_time_t last_time_processed;
     uint32_t read_idx;
     
     uint64_t stats_cnt;
@@ -142,10 +146,7 @@ void cwc_destroy(conference_write_codec_t *cwc);
 switch_size_t cwc_read_buffer(conference_write_codec_t *cwc, uint32_t read_idx, uint8_t *data, uint32_t bytes);
 switch_bool_t cwc_write_buffer(conference_write_codec_t *cwc, int16_t *data,
                                uint32_t bytes);
-switch_bool_t cwc_set_frame(conference_write_codec_t *cwc, uint32_t read_idx, switch_frame_t *frame);
-switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t read_idx);
 switch_bool_t cwc_frame_written(conference_write_codec_t *cwc, uint32_t read_idx);
-switch_bool_t cwc_frame_encoded(conference_write_codec_t *cwc, uint32_t read_idx);
 conference_write_codec_t *cwc_get(conference_write_codec_t *cwc, int codec_id, int impl_id);
 
 /* Conference Encoder Optimization Functions */
@@ -169,9 +170,8 @@ switch_bool_t meo_encoder_exists(conf_member_encoder_optimization_t *meo);
 
 switch_bool_t meo_next_frame(conf_member_encoder_optimization_t *meo);
 switch_frame_t *meo_get_frame(conf_member_encoder_optimization_t *meo);
+
 switch_bool_t meo_frame_written(conf_member_encoder_optimization_t *meo);
-switch_bool_t meo_frame_encoded(conf_member_encoder_optimization_t *meo);
-switch_bool_t meo_set_frame(conf_member_encoder_optimization_t *meo, switch_frame_t *frame);
 void meo_reset_idx(conf_member_encoder_optimization_t *meo);
 switch_bool_t meo_file_exists(conf_member_encoder_optimization_t *meo, char *fname);
 

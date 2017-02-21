@@ -2102,6 +2102,14 @@ static switch_status_t conference_add_event_data(conference_obj_t *conference, s
     return status;
 }
 
+switch_bool_t is_muted(conference_member_t *member) {
+    if (member->ms == MS_UNMUTED) {
+        return SWITCH_FALSE;
+    } else {
+        return SWITCH_TRUE;
+    }
+}
+
 static void update_mute_state(conference_member_t *member, mute_event_t event)
 {
 
@@ -2750,7 +2758,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
         for (new_write_codec = conference->ceo.cwc[0]; new_write_codec; new_write_codec = new_write_codec->next) {
             if ((new_write_codec->codec_id == impl.codec_id) && (new_write_codec->impl_id == impl.impl_id)){
                 /* codec already in the list */
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, " codec already registered codec_id=%d impl_id=%d ianacode=%d\n",
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, " cwc codec already registered codec_id=%d impl_id=%d ianacode=%d\n",
                                   impl.codec_id, impl.impl_id, impl.ianacode);
                 break;
             }
@@ -2768,6 +2776,9 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                 audio_in_mutex_unlock(member);
                 conference_mutex_unlock(conference);
                 return SWITCH_STATUS_FALSE;
+            } else {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, " cwc codec added codec_id=%d impl_id=%d ianacode=%d\n",
+                                  impl.codec_id, impl.impl_id, impl.ianacode);
             }
         }
 
@@ -2971,9 +2982,6 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                 if (strlen(conference->meeting_id) > 0) {
                     if (strcmp(conference->meeting_id, meeting_id) != 0) {
                         memset(conference->meeting_id, 0, MAX_MEETING_ID_LEN);
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR,
-                                          "Conference member %s came in with meeting id %s previous meeting id %s\n",
-                                          member->mname, meeting_id, conference->meeting_id);
                         strncpy(conference->meeting_id, meeting_id, max_len);
                         switch_channel_set_variable(member->channel, "meeting", conference->meeting_id);
                     }
@@ -2988,12 +2996,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             }
             if (strlen(instance_id) > 0) {
                 int max_len = strlen(instance_id) > 8 ? 8 : strlen(instance_id);
-                if (strlen(conference->instance_id) > 0) {
-                    if (strcmp(conference->instance_id, instance_id) != 0) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "Conference member %s came in with instance id %s previous instance id %s\n",
-                                          member->mname, instance_id, conference->instance_id);
-                    }
-                } else {
+                if (strlen(conference->instance_id) == 0) {
                     strncpy(conference->instance_id, instance_id, max_len);
                     switch_channel_set_variable(member->channel, "meeting_instance", conference->instance_id);
                 }
@@ -4030,6 +4033,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         buf_in_use = switch_buffer_inuse(imember->audio_buffer);
         if (buf_in_use >= bytes) {
             if (buf_in_use >= bytes * (MAX_NUM_FRAMES_BUFFERED + 1)) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(imember->session), SWITCH_LOG_WARNING,
+                                  "tossing input data: in use (%" PRId64 ") >= max allowed (%u) ... tossing %" PRId64 "\n",
+                                  buf_in_use, bytes * (MAX_NUM_FRAMES_BUFFERED + 1), buf_in_use - (bytes * MAX_NUM_FRAMES_BUFFERED));
+
                 switch_buffer_toss(imember->audio_buffer, buf_in_use - (bytes * MAX_NUM_FRAMES_BUFFERED));
 
                 if (switch_test_flag(conference, CFLAG_DEBUG_STATS_ACTIVE) && conference->debug_stats && imember->roll_no < 32) {
@@ -4589,7 +4596,8 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
 
     if ((ready != cl->prev_ready) || (has_file_data != cl->prev_has_file_data)) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
-                          "changed conf state: ready now %d -> %d has_file_data %d -> %d conf->count=%d act_spkrs=%d\n",
+                          "M(%s)/I(%s): changed conf state: ready now %d -> %d has_file_data %d -> %d conf->count=%d act_spkrs=%d\n",
+                          conference->meeting_id, conference->instance_id,
                           cl->prev_ready, ready, cl->prev_has_file_data, has_file_data, conference->count, no_active_speakers);
         cl->prev_ready = ready;
         cl->prev_has_file_data = has_file_data;
@@ -4641,6 +4649,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         /* changed this to continue if "can't speak and not fake mute" */
         if (!switch_test_flag(omember, MFLAG_CAN_SPEAK) && !switch_test_flag(omember, MFLAG_USE_FAKE_MUTE))
             continue;
+
+        if (is_muted(omember)) {
+            continue;
+        }
 
         if (switch_test_flag(omember, MFLAG_USE_FAKE_MUTE) && switch_core_session_get_cn_state(omember->session))
             continue;
@@ -6349,6 +6361,20 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
                                                               switch_test_flag(member, MFLAG_USE_FAKE_MUTE) &&
                                                               !switch_core_session_get_cn_state(member->session));
 
+    if (switch_test_flag(member, MFLAG_USE_FAKE_MUTE)) {
+        /* tbd: change this to use the internal mute state as calculated based on inputs, etc */
+        can_speak = !switch_core_session_get_cn_state(member->session);
+    } else {
+        can_speak = switch_test_flag(member, MFLAG_CAN_SPEAK);
+    }
+
+    if (!can_speak && switch_buffer_inuse(member->audio_buffer)) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "can't speak flushing audio buffer %" PRId64 "\n",
+                          switch_buffer_inuse(member->audio_buffer));
+        switch_buffer_zero(member->audio_buffer);
+        switch_channel_audio_sync(channel);
+    }
+
     /* if the member can speak, compute the audio energy level and */
     /* generate events when the level crosses the threshold        */
     if (can_speak || switch_test_flag(member, MFLAG_MUTE_DETECT)) {
@@ -6494,8 +6520,10 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
          member->energy_level == 0 || 
          switch_test_flag(member->conference, CFLAG_AUDIO_ALWAYS) || 
          member->conference->last_active_talkers[0] == member || 
-         member->conference->last_active_talkers[1] == member)
-        && can_speak &&    !switch_test_flag(member->conference, CFLAG_WAIT_MOD) &&
+         member->conference->last_active_talkers[1] == member ||
+         member->conference->last_active_talkers[2] == member)
+        && can_speak &&
+        !switch_test_flag(member->conference, CFLAG_WAIT_MOD) &&
         (member->conference->count > 1 || member->conference->is_recording)) {
         switch_audio_resampler_t *read_resampler = member->read_resampler;
         void *data;
@@ -6522,6 +6550,8 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
             /* Write the audio into the input buffer */
             audio_in_mutex_lock(member);
             if (switch_buffer_inuse(member->audio_buffer) > il->flush_len) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "flushing audio buffer %" PRId64 " (> %d)\n",
+                                  switch_buffer_inuse(member->audio_buffer), il->flush_len);
                 switch_buffer_zero(member->audio_buffer);
                 switch_channel_audio_sync(channel);
             }
@@ -6940,8 +6970,12 @@ static void start_conference_loops(conference_member_t *member)
 
     if (ret != -1) {
         int idx = ret / globals.nthreads;
+
         member->meo.cwc = cwc_get(member->conference->ceo.cwc[idx], member->codec_id, member->impl_id);
         member->meo.filelist = filelist_get(globals.filelist[ret], member->codec_id, member->impl_id);
+
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "start_conference_loops mid:%s/%d set cwc idx=%d n_frames=%d\n",
+                          member->mname, member->id, idx, member->meo.cwc->num_conf_frames);
     }
 
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "start_conference_loops mid:%s/%d conference_list_added to %d\n",
@@ -7318,6 +7352,9 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                                               (ols->member->meo.cwc == NULL ? "null" : "set"),
                                               (ols->member->meo.filelist == NULL ? "null" : "set"),
                                               ols->member->id, ols->member->codec_id, ols->member->impl_id);
+                        } else {
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO, "move ol mid:%s/%d set cwc n_frames=%d\n",
+                                              ols->member->mname, ols->member->id, ols->member->meo.cwc->num_conf_frames);
                         }
 
                         if (prev == NULL) {
@@ -7457,6 +7494,10 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                 switch_monitor_change_desc(tid, switch_core_get_monitor_index(ols->member->session), "conference_thread");
                 ols->member->meo.cwc = cwc_get(ols->member->conference->ceo.cwc[list->idx/globals.nthreads],
                                                ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id);
+
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO, "new_ol mid:%s/%d set cwc n_frames=%d\n",
+                                  ols->member->mname, ols->member->id, ols->member->meo.cwc->num_conf_frames);
+
                 ols->member->meo.filelist = filelist_get(globals.filelist[list->idx],
                                                          ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id);
                 switch_channel_change_thread(ols->channel);
@@ -7711,7 +7752,6 @@ typedef enum {
 OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switch_timer_t *timer, uint32_t *time_since_last_send, int *sent_frames)
 {
     switch_event_t *event;
-    switch_buffer_t *use_buffer = NULL;
     uint32_t mux_used = 0;
     switch_time_t mutex_time = 0;
     conference_member_t *member = ols->member;
@@ -7797,7 +7837,6 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         }
     }
     
-    use_buffer = NULL;
     mux_used = (uint32_t) switch_buffer_inuse(member->mux_buffer);
     
     if (mux_used) {
@@ -7836,7 +7875,6 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         /* Flush the output buffer and write all the data (presumably muxed) back to the channel */
         /* locked above when copying in a new set of samples/buffer */
         audio_out_mutex_lock(member);
-        use_buffer = member->mux_buffer;
         ols->low_count = 0;
 
         /* Encoder Optimization: Output Loop */
@@ -7857,7 +7895,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         }
 
         /* If we have data in here we should process it as our own */
-        if ((ols->write_frame.datalen = (uint32_t) switch_buffer_read(use_buffer, ols->write_frame.data, ols->bytes))) {
+        if ((ols->write_frame.datalen = (uint32_t) switch_buffer_read(member->mux_buffer, ols->write_frame.data, ols->bytes))) {
             
             /* Fuze: this part hasn't changed */
             ols->write_frame.samples = ols->write_frame.datalen / 2;
@@ -7924,6 +7962,13 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         
         frame = process_file_play(member, &ols->write_frame, SWITCH_TRUE);
 
+        if (!frame) {
+            if (switch_core_session_enc_frame(member->session, &ols->write_frame, SWITCH_IO_FLAG_NONE, 0,
+                                              &frame) != SWITCH_STATUS_SUCCESS) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "member %d failed to encode\n", member->id);
+            }
+        }
+
         if (frame) {
             if (accumulate_and_send(ols, frame, &ols->acc_frame, &before_send_time) != SWITCH_STATUS_SUCCESS) {
                 switch_channel_hangup(channel, SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER);
@@ -7950,28 +7995,29 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
 
         audio_out_mutex_lock(member);
 
-        /* xxx */
+        switch_buffer_zero(member->mux_buffer);
+
         if (ols->individual == SWITCH_TRUE) {
             before_mutex_time = switch_micro_time_now();
             switch_mutex_lock(member->meo.cwc->codec_mutex);
             meo_reset_idx(&member->meo);
             switch_mutex_unlock(member->meo.cwc->codec_mutex);
             mutex_time += (switch_micro_time_now() - before_mutex_time);
-            
+
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
                               "member %d 2 T -> F rd=%d wr=%d s=%d\n", member->id,
                               member->meo.read_idx, member->meo.cwc->write_idx,
                               timer->samplecount);
             ols->individual = SWITCH_FALSE;
         }
-        
+
         for (int i = 0; i < member->meo.cwc->num_conf_frames; ) {
             switch_frame_t  *rdframe = NULL;
-            
+
             before_mutex_time = switch_micro_time_now();
             switch_mutex_lock(member->meo.cwc->codec_mutex);
             mutex_time += (switch_micro_time_now() - before_mutex_time);
-            
+
             if (!meo_frame_written(&member->meo)) {
                 if (i == 0) {
                     ret = OUTPUT_LOOP_OK_NO_FRAME;
@@ -7980,67 +8026,9 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
                 mutex_time += (switch_micro_time_now() - before_mutex_time);
                 break;
             }
-            
-            if (i > 0) {
-                member->meo.stats_cnt += 1;
-                
-                if (!switch_test_flag(member, MFLAG_CAN_SPEAK)) {
-                    member->meo.mute_cnt += 1;
-                }
-            }
-            
-            /* if we're the first to see this frame then encode it */
-            if (!meo_frame_encoded(&member->meo)) {
-                /* ok so we shouldn't be in here ... let's try to fix things and figure out why we're in here */
-                uint32_t codec_cnt = 0;
 
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
-                                  "member %d codec=%d cnts:0:%u 8:%u 9:%u rdidx=%d wr=%d en=%d\n", member->id, member->orig_read_impl.codec_id,
-                                  member->conference->g711ucnt, member->conference->g711acnt, member->conference->g722cnt,
-                                  member->meo.read_idx, meo_frame_written(&member->meo), meo_frame_encoded(&member->meo));
-
-                if (member->ianacode == 0) {
-                    codec_cnt = member->conference->g711ucnt;
-                } else if (member->ianacode == 8) {
-                    codec_cnt = member->conference->g711acnt;
-                } else if (member->ianacode == 9) {
-                    codec_cnt = member->conference->g722cnt;
-                }
-
-                if (!meo_encoder_exists(&member->meo) || codec_cnt == 0) {
-                    if (!meo_encoder_exists(&member->meo)) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR,
-                                          "frame not encoded because cwc thinks we have no encoder codec=%d cnt=%d\n", member->ianacode, codec_cnt);
-                    }
-                    if (codec_cnt == 0) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
-                                          "frame not encoded because cwc thinks we have no listeners codec=%d cnt=%d\n", member->ianacode, codec_cnt);
-                        /* force an encode */
-                        if (member->ianacode == 0 || member->ianacode == 8 || member->ianacode == 9) {
-                            ceo_set_listener_count(&member->conference->ceo, member->ianacode, 1);
-                        } else {
-                            ceo_set_listener_count_incr(&member->conference->ceo, 0, 1);
-                            ceo_set_listener_count_incr(&member->conference->ceo, 8, 1);
-                            ceo_set_listener_count_incr(&member->conference->ceo, 9, 1);
-                        }
-                    }
-                }
-                if (!meo_frame_written(&member->meo)) {
-                    /* well this is unfortunate */
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR,
-                                      "frame not encoded because no frame was written codec=%d cnt=%d\n", member->ianacode, codec_cnt);
-                }
-                if (!meo_frame_encoded(&member->meo)) {
-                    /* now try to force an encode */
-                    ceo_write_buffer(&member->conference->ceo, NULL, 0);
-                }
-            } else {
-                member->meo.shared_copy_cnt += 1;
-                member->meo.cwc->rd_cnt += 1;
-            }
-            
             rdframe = meo_get_frame(&member->meo);
-            
+
             if (rdframe == NULL) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
                                   "member %d null read frame\n",member->id);
@@ -8060,15 +8048,13 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
                 sent = 1;
                 *sent_frames += 1;
             }
-            
-            send_time += before_send_time;
-            
+
             sent_time = switch_micro_time_now() / 1000;
             if (sent_time - member->out_last_sent > 60) {
                 *time_since_last_send =(sent_time - member->out_last_sent);
             }
             member->out_last_sent = sent_time;
-            
+
             if (!meo_next_frame(&member->meo)) {
                 switch_mutex_unlock(member->meo.cwc->codec_mutex);
                 break;
@@ -8099,6 +8085,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             ret = OUTPUT_LOOP_OK_NOT_SENT;
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "adjusting timestamp by 160!\n");
             switch_rtp_update_ts(member->channel, 160);
+            member->data_sent += 160;
         }
     }
     
@@ -8802,9 +8789,9 @@ static switch_status_t conference_member_play_file(conference_member_t *member, 
         return status;
     }
 
-	if (member->mname && strcmp(member->mname, "recorder@fuze.com") == 0) {
-		return status;
-	}
+    if (member->mname && strcmp(member->mname, "recorder@fuze.com") == 0) {
+        return status;
+    }
 
     if ((expanded = switch_channel_expand_variables(switch_core_session_get_channel(member->session), file)) != file) {
         file = expanded;
