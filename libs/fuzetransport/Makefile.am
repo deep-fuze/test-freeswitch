@@ -35,6 +35,7 @@ libfuzetransport_la_SOURCES = src/core/Log.cpp \
                          src/CoreState.cpp \
                          src/TcpCore.cpp \
                          src/TlsCore.cpp \
+						 src/SecureRTP.cpp \
                          src/TcpTxrxState.cpp \
                          src/ProxyConnector.cpp \
                          src/DnsResolver.cpp \

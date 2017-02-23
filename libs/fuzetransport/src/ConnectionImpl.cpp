@@ -867,6 +867,18 @@ void ConnectionImpl::EnableRateReport(bool flag)
     
     bRateReport_ = flag;
 }
+
+void ConnectionImpl::GetSendStat(uint32_t &rCount, int64_t &rBytes)
+{
+    rCount = sendStat_.count_;
+    rBytes = sendStat_.totalBytes_;
+}
+
+void ConnectionImpl::GetRecvStat(uint32_t &rCount, int64_t &rBytes)
+{
+    rCount = recvStat_.count_;
+    rBytes = recvStat_.totalBytes_;
+}
     
 uint32_t ConnectionImpl::GetSendRetryCount()
 {

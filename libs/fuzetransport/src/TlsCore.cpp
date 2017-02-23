@@ -669,8 +669,13 @@ void DtlsCore::InitDtlsCertificate(SSL_CTX*& rpCtx, bool bServer)
     // rpCtx could be set if some other thread accessed right before
     if (!rpCtx) {
         SSL_CTX* p_ctx = SSL_CTX_new(bServer ?
+#ifndef FREE_SWITCH
+                                     DTLS_server_method() :
+                                     DTLS_client_method());
+#else
                                      DTLSv1_server_method() :
                                      DTLSv1_client_method());
+#endif
         if (EC_KEY* p_ecdh = EC_KEY_new_by_curve_name(NID_secp384r1)) {
             if (SSL_CTX_set_tmp_ecdh(p_ctx, p_ecdh) != 1) {
                 _ELOG_("SSL_CTX_set_tmp_ecdh failed");

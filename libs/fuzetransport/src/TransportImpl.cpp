@@ -54,6 +54,11 @@ void fuze_transport_at_exit()
     delete TransportImpl::GetInstance();
     gb_process_exiting = true;
 }
+
+bool IsAppExiting()
+{
+    return gb_process_exiting;
+}
     
 TransportImpl* TransportImpl::spInstance_;
 MutexLock      TransportImpl::sLock_;
@@ -156,6 +161,9 @@ TransportImpl::TransportImpl()
 
     // initialize DnsResolver
     dns::Resolver::Init();
+#if defined(__APPLE__) || defined(WIN32) || defined(__ANDROID_API__)
+    spResolver_.reset(new AsyncResolver);
+#endif
     
     // initialize srtp library
     fuze_srtp_init();
@@ -1073,6 +1081,8 @@ void TransportImpl::QueryDnsAsync(const string& rAddress,
                                   DnsObserver*  pObserver,
                                   void*         pArg)
 {
+    MLOG(rAddress << " [" << toStr(type) << "] observer " << pObserver);
+    
     if (!spResolver_) {
         spResolver_.reset(new AsyncResolver);
     }

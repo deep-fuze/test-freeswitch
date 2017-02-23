@@ -678,7 +678,10 @@ void SetDnsCache(Record::List& rList)
             rList.sort(NaptrCompare);
         }
         
-        TransportImpl::GetInstance()->SetDnsCache(rList);
+        // app could be exiting
+        if (TransportImpl* p = TransportImpl::GetInstance()) {
+            p->SetDnsCache(rList);
+        }
     }
 }
     
@@ -804,6 +807,8 @@ AsyncResolver::AsyncResolver()
     : thread_(this, "AsyncResolver")
     , running_(false)
 {
+    _MLOG_("");
+    
     ares_init(&channel_);
     SetAresOptions(channel_);
 
@@ -909,8 +914,12 @@ void AsyncResolver::Run()
     running_ = true;
     
     while (running_) {
-        if (ProcessQuery(channel_, 1) == NO_MORE_QUERY) {
+        QueryReturnType ret = ProcessQuery(channel_, 1);
+        if (ret == NO_MORE_QUERY) {
             semaphore_.Wait();
+        }
+        else if (ret == SELECT_FAILED) {
+            ResetChannel();
         }
         
         int64_t curr_time = GetTimeMs();
@@ -973,7 +982,9 @@ void AsyncResolver::DnsFallback(AsyncResolver::QueryData* pData)
         }
     }
     
-    pData->pObserver_->OnDnsReply(replies, pData->pArg_);
+    if (!IsAppExiting()) {
+        pData->pObserver_->OnDnsReply(replies, pData->pArg_);
+    }
 }
     
 void AsyncResolver::OnReply(void* pArg, int status, int timeouts, uint8_t* pBuf, int len)
@@ -981,6 +992,12 @@ void AsyncResolver::OnReply(void* pArg, int status, int timeouts, uint8_t* pBuf,
     // make sure that we release the allocated memory
     std::unique_ptr<QueryData> p_query((QueryData*)pArg);
 
+    // check if we are in shutdown process already
+    if (IsAppExiting()) {
+        _MLOG_("shutdown detected - ignore");
+        return;
+    }
+    
     if (status != ARES_SUCCESS) {
         _WLOG_(ares_strerror(status));
         if (!pBuf) {
@@ -1055,7 +1072,7 @@ void AsyncResolver::OnReply(void* pArg, int status, int timeouts, uint8_t* pBuf,
         SetDnsCache(extras);
     }
     
-    if (p_query->pObserver_) {
+    if (p_query->pObserver_ && !IsAppExiting()) {
         p_query->pObserver_->OnDnsReply(replies, p_query->pArg_);
     }
     

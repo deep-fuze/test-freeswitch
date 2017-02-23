@@ -53,16 +53,14 @@ MutexLock::MutexLock(const MutexLock* pLock)
 //------------------------------------------------------------------------------------
 MutexLock::~MutexLock()
 {
-    if (isExternal_)
-    {
+    if (isExternal_) {
 #if defined(WIN32)
         LeaveCriticalSection(cs_);
 #else
         pthread_mutex_unlock(mutex_);
 #endif
     }
-    else
-    {
+    else {
 #if defined(WIN32)
         DeleteCriticalSection(cs_);
         delete cs_;
@@ -79,8 +77,7 @@ MutexLock::~MutexLock()
 //------------------------------------------------------------------------------------
 void MutexLock::Lock()
 {
-    if (isExternal_ == false)  
-    {
+    if (isExternal_ == false) {
 #if defined(WIN32)
         EnterCriticalSection(cs_);
 #else
@@ -95,8 +92,7 @@ void MutexLock::Lock()
 //------------------------------------------------------------------------------------
 void MutexLock::Unlock()
 {
-    if (isExternal_ == false)  
-    {
+    if (isExternal_ == false) {
 #if defined(WIN32)
         LeaveCriticalSection(cs_);
 #else
@@ -107,12 +103,15 @@ void MutexLock::Unlock()
 
 bool MutexLock::Trylock()
 {
-    if (isExternal_ == false)
-    {
-#if !defined(WIN32)
+    if (isExternal_ == false) {
+#if defined(WIN32)
+        return TryEnterCriticalSection(cs_);
+#else
         return (pthread_mutex_trylock(mutex_) == 0);
 #endif
     }
+    
+    return false;
 }
 
 

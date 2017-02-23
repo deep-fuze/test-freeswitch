@@ -45,6 +45,7 @@ class ProxyConnector;
 //
 void TransportBaseEnded(TransportBaseImpl* p);
 void ConnectionEnded(ConnectionImpl* p);
+bool IsAppExiting();
     
 //
 // constant for better readability

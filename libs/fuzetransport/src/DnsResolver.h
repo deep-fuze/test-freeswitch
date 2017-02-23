@@ -82,7 +82,7 @@ private:
                         uint8_t* pBuf,
                         int      len);
     
-    struct QueryData // assume only A record only
+    struct QueryData
     {
         string        domain_;
         Record::Type  type_;

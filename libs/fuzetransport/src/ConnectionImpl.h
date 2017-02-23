@@ -114,6 +114,8 @@ public:
     virtual bool GetRemoteAddress(string& rIP, uint16_t& rPort);
     virtual void GetSendQInfo(size_t& rNum, uint32_t& rBufSize);
     virtual void EnableRateReport(bool flag);
+    virtual void GetSendStat(uint32_t& rCount, int64_t& rBytes);
+    virtual void GetRecvStat(uint32_t& rCount, int64_t& rBytes);
     virtual void EnablePortReservation(bool flag);
     virtual bool UsePortReservation();
     virtual NetworkBuffer::Ptr GetBuffer(uint32_t bufSize);

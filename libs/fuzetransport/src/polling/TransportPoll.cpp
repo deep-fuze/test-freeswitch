@@ -91,20 +91,20 @@ TransportPoll TransportPoll::inst;
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
-
-void TransportPoll::OnRateData(void *pContext,
-			RateType type,
-			uint16_t rateKbps,
-			uint16_t arrivedTime) {
+void TransportPoll::OnRateData(void*    pContext,
+                               RateType type,
+                               uint16_t rateKbps,
+                               uint16_t arrivedTime) {
+    
     if (g_rate_callback) {
         g_rate_callback(pContext, type, rateKbps, arrivedTime);
-    } else {
+    }
+    else {
         connection_wrap_t *conn_wrap = static_cast<connection_wrap_t *> (pContext);
-
-	if (conn_wrap) {
-	    conn_wrap->rateKbps[type-RT_LOCAL_SEND] = rateKbps;
-	    conn_wrap->arrivedTime[type-RT_LOCAL_SEND] = arrivedTime;
-	}
+        if (conn_wrap) {
+            conn_wrap->rateKbps[type-RT_LOCAL_SEND] = rateKbps;
+            conn_wrap->arrivedTime[type-RT_LOCAL_SEND] = arrivedTime;
+        }
     }
 }
 
@@ -117,42 +117,43 @@ void TransportPoll::OnDataReceived(void* pContext, Buffer::Ptr spBuffer)
         
         TransportEvent::Ptr te(new TEData(spBuffer));
 
-	string IP;
-	uint16_t port;
-	bool remChanged;
-	Buffer::Ptr rdBuf = te->Data(IP, port, remChanged);
+        string IP;
+        uint16_t port;
+        bool remChanged;
+        Buffer::Ptr rdBuf = te->Data(IP, port, remChanged);
 
-	if (rdBuf) {
-	  if (conn_wrap->ignore_size != 0) {
-	    if (rdBuf->size() < conn_wrap->ignore_size) {
-	      return;
-	    }
-	  }
+        if (rdBuf) {
+            if (conn_wrap->ignore_size != 0) {
+                if (rdBuf->size() < conn_wrap->ignore_size) {
+                    return;
+                }
+            }
 
 #ifdef COPY_TO_BUFFER
-	  if (remChanged == true) {
-	    if (!evutil_inet_pton(AF_INET, IP.c_str(), &(conn_wrap->last_from_addr_.sa.sin.sin_addr))) {
-
-	      te->len = 0;
-	    }
-	  }
-	  te->len = MIN(rdBuf->size(), 1500);
-	  memcpy(te->buffer, rdBuf->getBuf(), te->len);
+            if (remChanged == true) {
+                if (!evutil_inet_pton(AF_INET, IP.c_str(),
+                                      &(conn_wrap->last_from_addr_.sa.sin.sin_addr))) {
+                    te->len = 0;
+                }
+            }
+            te->len = MIN(rdBuf->size(), 1500);
+            memcpy(te->buffer, rdBuf->getBuf(), te->len);
 #endif
 
-	  conn_wrap->evq_.InsertNode(te);
-	  int qsize = conn_wrap->evq_.Size();
+            conn_wrap->evq_.InsertNode(te);
+            int qsize = conn_wrap->evq_.Size();
 
-	  if (qsize >= 2000) { // roughly 40 seconds delay then remove all
-            string lIp;
-            uint16_t lPort;
-            conn_wrap->conn_->GetLocalAddress(lIp, lPort);
-            MLOG("ALERT: High Event-Queue size: " << qsize << " on " <<
-                 lIp.c_str() << ":" << lPort << " - flushing the Event-Queue");
-            conn_wrap->evq_.Clear();
-	  }
-	}
-    } else {
+            if (qsize >= 2000) { // roughly 40 seconds delay then remove all
+                string lIp;
+                uint16_t lPort;
+                conn_wrap->conn_->GetLocalAddress(lIp, lPort);
+                MLOG("ALERT: High Event-Queue size: " << qsize << " on " <<
+                     lIp.c_str() << ":" << lPort << " - flushing the Event-Queue");
+                conn_wrap->evq_.Clear();
+            }
+        }
+    }
+    else {
       ELOG("Invalid Context or Buffer. Conext=" << (int64_t)pContext);
     }
 }
@@ -360,22 +361,23 @@ void* fuze_transport_tbase_create_connection(void *tbase, connection_type_t conn
             Connection::Ptr conn;
             if (conference) {
                 conn = spTBase->CreateConnection(rtcp ? "CRTC" : "CRTP");
-            } else {
+            }
+            else {
                 conn = spTBase->CreateConnection(rtcp ? "BRTC" : "BRTP");
             }
+            
             if (conn) {
-                
                 connection_wrap_t *conn_wrap = new connection_wrap_t;
                 conn_wrap->conn_ = conn;
                 conn_wrap->conn_type_ = conn_type;
-		conn_wrap->ignore_size = 0;
+                conn_wrap->ignore_size = 0;
                 
                 TransportDB::GetInstance().addConnection(conn_wrap);
                 
                 conn->SetAppContext(conn_wrap);
                 conn->RegisterObserver(&TransportPoll::GetInstance());
-                
-		conn->EnableRateReport(true);
+                conn->SetPayloadType(Connection::AUDIO);
+                conn->EnableRateReport(true);
                 
                 return conn_wrap;
             } 
@@ -462,7 +464,7 @@ transport_status_t fuze_transport_connection_start(void *conn)
 
     connection_wrap_t *conn_wrap = (connection_wrap_t *) conn;
     return (conn_wrap->conn_->Start(conn_type[conn_wrap->conn_type_]) == true) ? TR_STATUS_SUCCESS : TR_STATUS_FALSE;
- }
+}
 
 transport_status_t fuze_transport_socket_poll(void *conn, int timeout_us)
 {
@@ -490,11 +492,11 @@ transport_status_t fuze_transport_get_rates(void *conn, uint16_t *local_send, ui
 
 int64_t get_time_usec()
 {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  int64_t result = 1000000000LL * static_cast<int64_t>(ts.tv_sec) +
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    int64_t result = 1000000000LL * static_cast<int64_t>(ts.tv_sec) +
     static_cast<int64_t>(ts.tv_nsec);
-  return result / 1000;
+    return result / 1000;
 }
 
 transport_status_t fuze_transport_socket_read(void *conn, __sockaddr_t *from, 
@@ -519,82 +521,89 @@ transport_status_t fuze_transport_socket_read(void *conn, __sockaddr_t *from,
         event = conn_wrap->evq_.GetNext(false);
         int64_t diff = get_time_usec() - time;
         if (diff > 1000) {
-	  WLOG("Queue (" << conn_wrap->evq_.Size() << ") item took " << diff << " usec");
+            WLOG("Queue (" << conn_wrap->evq_.Size() << ") item took " << diff << " usec");
         }
 #else
-	event = conn_wrap->evq_.GetNext(false);
+        event = conn_wrap->evq_.GetNext(false);
 #endif
 
         if (event) {
 
 #ifdef COPY_TO_BUFFER
-	  if (event->len) {
-	    *from = conn_wrap->last_from_addr_;
-	    *bytes = MIN(event->len, *bytes);
-	    time = get_time_usec();
-	    memcpy(buf, event->buffer, *bytes);
-	    diff = get_time_usec() - time;
-	    if (diff > 1000) {
-	      WLOG("memcpy (" << conn_wrap->evq_.Size() << ") item took " << diff << " usec");
-	    }
-	    return TR_STATUS_SUCCESS;
-	  } else
-#endif
-	  {
-	    string IP;
-            uint16_t port;
-            bool remChanged;
-#ifdef DEBUG_TIMING
-	    time = get_time_usec();
-#endif
-            rdBuf = event->Data(IP, port, remChanged);
-
-            if (rdBuf) {
-                if (remChanged == true) {
-                    if (!evutil_inet_pton(AF_INET, IP.c_str(), &(from->sa.sin.sin_addr))) {
-                        *bytes = 0;
-                        return TR_STATUS_SOCKET_ERROR;
-                    }
-                    from->family = AF_INET;
-                    from->sa.sin.sin_port = htons(port);
-                    conn_wrap->last_from_addr_ = *from;
-                } else {
-                    *from = conn_wrap->last_from_addr_;
+            if (event->len) {
+                *from = conn_wrap->last_from_addr_;
+                *bytes = MIN(event->len, *bytes);
+                time = get_time_usec();
+                memcpy(buf, event->buffer, *bytes);
+                diff = get_time_usec() - time;
+                if (diff > 1000) {
+                    WLOG("memcpy (" << conn_wrap->evq_.Size() << ") item took " << diff << " usec");
                 }
-                
-                uint32_t buf_size = rdBuf->size();
-                *bytes = MIN(buf_size, *bytes);
-                if (*bytes < buf_size) {
-                    ELOG("Read Buffer size: " << *bytes << " is less than the data available: " << buf_size);
-                }
-                memcpy(buf, rdBuf->getBuf(), *bytes);
-                
-                if (*bytes > 2000) {
-                    ELOG("Read Buffer size large: " << *bytes);
-                }
-
-#ifdef DEBUG_TIMING
-		diff = get_time_usec() - time;
-		if (diff > 1000) {
-		  WLOG("read (" << conn_wrap->evq_.Size() << ") item took " << diff << " usec");
-		}
-#endif
                 return TR_STATUS_SUCCESS;
-            } else if (event->EvType() == ET_DISCONNECTED) {
-	      *bytes = 0;
-	      return TR_STATUS_DISCONNECTED;
-            } else if (event->EvType() == ET_FAILED) {
-	      *bytes = 0;
-	      return TR_STATUS_SOCKET_ERROR;
-	    } else if (event->EvType() == ET_CONNECTED) {
-	      /* do nothing */
-            } else {
-#ifdef DEBUG_TIMING
-	      diff = get_time_usec() - time;
-	      WLOG("de-Q'ed (" << conn_wrap->evq_.Size() << ") event type " << toStr(event->EvType()) << " time " << diff << " usec");
+            } else
 #endif
-	    }
-	  }
+            {
+                string IP;
+                uint16_t port;
+                bool remChanged;
+#ifdef DEBUG_TIMING
+                time = get_time_usec();
+#endif
+                rdBuf = event->Data(IP, port, remChanged);
+
+                if (rdBuf) {
+                    if (remChanged == true) {
+                        if (!evutil_inet_pton(AF_INET, IP.c_str(), &(from->sa.sin.sin_addr))) {
+                            *bytes = 0;
+                            return TR_STATUS_SOCKET_ERROR;
+                        }
+                        from->family = AF_INET;
+                        from->sa.sin.sin_port = htons(port);
+                        conn_wrap->last_from_addr_ = *from;
+                    }
+                    else {
+                        *from = conn_wrap->last_from_addr_;
+                    }
+                    
+                    uint32_t buf_size = rdBuf->size();
+                    *bytes = MIN(buf_size, *bytes);
+                    if (*bytes < buf_size) {
+                        ELOG("Read Buffer size: " << *bytes <<
+                             " is less than the data available: " << buf_size);
+                    }
+                    memcpy(buf, rdBuf->getBuf(), *bytes);
+                    
+                    if (*bytes > 2000) {
+                        ELOG("Read Buffer size large: " << *bytes);
+                    }
+
+#ifdef DEBUG_TIMING
+                    diff = get_time_usec() - time;
+                    if (diff > 1000) {
+                        WLOG("read (" << conn_wrap->evq_.Size() << ") item took " << diff << " usec");
+                    }
+#endif
+                    return TR_STATUS_SUCCESS;
+                }
+                else if (event->EvType() == ET_DISCONNECTED) {
+                    *bytes = 0;
+                    return TR_STATUS_DISCONNECTED;
+                }
+                else if (event->EvType() == ET_FAILED) {
+                    *bytes = 0;
+                    return TR_STATUS_SOCKET_ERROR;
+                }
+                else if (event->EvType() == ET_CONNECTED) {
+                    /* do nothing */
+                }
+                else {
+#ifdef DEBUG_TIMING
+                    diff = get_time_usec() - time;
+                    WLOG("de-Q'ed (" << conn_wrap->evq_.Size() << ") event type " <<
+                         toStr(event->EvType()) << " time " << diff << " usec");
+#endif
+                }
+            }
         }
     } while (event && !rdBuf);
 #ifdef DEBUG_TIMING
@@ -621,10 +630,13 @@ transport_status_t fuze_transport_socket_writeto(void *conn, __sockaddr_t *rem_a
     connection_wrap_t* conn_wrap = (connection_wrap_t*)conn;
 
     char ip_buf[16];
-    string IP = evutil_inet_ntop(AF_INET, static_cast<void *>(&rem_addr->sa.sin.sin_addr), ip_buf, sizeof(ip_buf));
+    string IP = evutil_inet_ntop(AF_INET, static_cast<void *>(&rem_addr->sa.sin.sin_addr),
+                                 ip_buf, sizeof(ip_buf));
 
-    if (fuze_transport_connection_set_remote_address(conn, IP.c_str(), ntohs(rem_addr->sa.sin.sin_port))) {
-        ELOG("Can not set Remote Address. Failed to send data to " << IP << ":" << ntohs(rem_addr->sa.sin.sin_port));
+    if (fuze_transport_connection_set_remote_address(conn, IP.c_str(),
+                                                     ntohs(rem_addr->sa.sin.sin_port))) {
+        ELOG("Can not set Remote Address. Failed to send data to " << IP <<
+             ":" << ntohs(rem_addr->sa.sin.sin_port));
         return TR_STATUS_FALSE;
     }
     

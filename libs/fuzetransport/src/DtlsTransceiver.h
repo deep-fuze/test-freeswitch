@@ -11,89 +11,9 @@
 
 #include <Transceiver.h>
 #include <TlsCore.h>
-
-#if defined(__ANDROID_API__) || defined(WIN32) || defined(__APPLE__)
-// The clients use libsrtp2.
-#include <srtp2/srtp.h>
-#else
-// The hubs still use libsrtp 1.x because opal still depends on it.
-#ifndef FREE_SWITCH
-#include <srtp/srtp.h>
-#else // freeswitch's srtp path
-#include <srtp.h>
-#endif
-#define srtp_crypto_policy_set_aes_cm_128_hmac_sha1_80 crypto_policy_set_aes_cm_128_hmac_sha1_80
-#define srtp_crypto_policy_set_aes_cm_128_hmac_sha1_32 crypto_policy_set_aes_cm_128_hmac_sha1_32
-#define srtp_crypto_policy_set_aes_cm_128_null_auth crypto_policy_set_aes_cm_128_null_auth
-#define srtp_crypto_policy_set_rtcp_default crypto_policy_set_rtcp_default
-#define srtp_err_status_ok err_status_ok
-#endif
+#include <SecureRTP.h>
 
 namespace fuze {
-
-class SRTP
-{
-public:
-    SRTP();
-    virtual ~SRTP();
-    
-    void Reset();
-    
-    enum Direction { SEND, RECV };
-    enum KeyType
-    {
-        AES_CM_128_NULL_AUTH,
-        AES_CM_128_HMAC_SHA1_80,
-        AES_CM_128_HMAC_SHA1_32
-    };
-    
-    int SetSRTPKey(Direction  dir,
-                   KeyType    type,
-                   uint8_t*   key,
-                   uint32_t   key_len);
-    
-    // Functions for encrypt and decrypt will write the result data
-    // to the input buffer only. Incase of encrypt, more data than
-    // input could be written.
-    void Encrypt(uint8_t* data, int* bytes_out);
-    void Decrypt(uint8_t* data, int* bytes_out);
-    
-    void EncryptRTCP(uint8_t* data, int* bytes_out);
-    void DecryptRTCP(uint8_t* data, int* bytes_out);
-    
-private:
-
-    struct Ctx
-    {
-        uint8_t  key_[SRTP_MASTER_KEY_LEN];
-        uint32_t key_len_;
-        KeyType  key_type_;
-        
-        Ctx();
-        int SetKey(KeyType type, uint8_t* key, uint32_t len);
-    };
-    
-    int ApplySRTPKey(Direction dir);
-    
-    uint8_t local_srtp_key_[SRTP_MASTER_KEY_LEN];
-    
-    srtp_ctx_t*     send_ctx_;
-    srtp_ctx_t*     recv_ctx_;
-    
-    srtp_policy_t*  send_policy_;
-    srtp_policy_t*  recv_policy_;
-    
-    Ctx             send_local_ctx_;
-    Ctx             recv_local_ctx_;
-    
-    bool            has_new_send_key_;
-    bool            has_new_recv_key_;
-    
-    MutexLock       key_lock_;
-};
-
-SRTP::KeyType toSRTPKeyType(const char* type);
-const char*   toStr(SRTP::KeyType key_type);
     
 class DtlsTransceiver : public Transceiver
                       , public TlsCoreUser

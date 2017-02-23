@@ -26,7 +26,7 @@
 #include <arpa/inet.h> // hton stuff
 #endif
 
-#ifndef NO_FUZECORE
+#ifndef FREE_SWITCH
 // integrating fuze log
 #include <fuze/core/Log.h>
 #include <fuze/core/Once.h>
@@ -39,7 +39,7 @@ namespace fuze
 int32_t  gDebugLevel = LEVEL_MSG;
 uint64_t gDebugArea  = ALL_ON;
 
-#ifndef NO_FUZECORE
+#ifndef FREE_SWITCH
 using namespace fuze::core;
 
 static Log::Pointer g_log;
@@ -478,7 +478,7 @@ void DebugOut::flush() try
 {
     pBuf_[WI_] = '\0';
 
-#ifndef NO_FUZECORE
+#ifndef FREE_SWITCH
     if (bFuzeLog_) {
         switch (type_)
         {
@@ -550,7 +550,7 @@ Hex::Hex(uint16_t num)
 
 void fuze_ext_log(int level, const char* format, ...)
 {
-#ifndef NO_FUZECORE
+#ifndef FREE_SWITCH
     va_list va;
     va_start(va, format);
     const string& msg = fuze::String::vformat(format, va);
