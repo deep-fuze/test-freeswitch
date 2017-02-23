@@ -490,6 +490,7 @@ transport_status_t fuze_transport_get_rates(void *conn, uint16_t *local_send, ui
     return TR_STATUS_SUCCESS;
 }
 
+#ifdef FREE_SWITCH
 int64_t get_time_usec()
 {
     struct timespec ts;
@@ -498,6 +499,7 @@ int64_t get_time_usec()
     static_cast<int64_t>(ts.tv_nsec);
     return result / 1000;
 }
+#endif
 
 transport_status_t fuze_transport_socket_read(void *conn, __sockaddr_t *from, 
                                               uint8_t *buf, size_t *bytes)

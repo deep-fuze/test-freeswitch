@@ -105,7 +105,7 @@ bool MutexLock::Trylock()
 {
     if (isExternal_ == false) {
 #if defined(WIN32)
-        return TryEnterCriticalSection(cs_);
+        return (TryEnterCriticalSection(cs_) == TRUE ? true : false);
 #else
         return (pthread_mutex_trylock(mutex_) == 0);
 #endif
