@@ -17,7 +17,9 @@ namespace fuze {
     
 void fuze_srtp_init()
 {
+#ifndef FREE_SWITCH
     _MLOG_("version: " << srtp_get_version_string());
+#endif
     srtp_init();
 }
 
