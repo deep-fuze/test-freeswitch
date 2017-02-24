@@ -2934,13 +2934,15 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             /* e=sip:LSurazski@fuze.com;transport=tls;ak=K07e263539dfd55f9;id=6669902;inst=5033486 */
             pch = strchr(member->sdpname,'i');
             
-            if ((pch = strstr(member->sdpname, "sip:")) != 0) {
+            if ((pch = strstr(member->sdpname, "sip:")) != 0 || 
+				(pch = strstr(member->sdpname, "sips:")) != 0) {
                 if ((ech = strstr(pch, ";")) != 0) {
+					pch = strstr(pch, ":")+1;
                     len = (ech - pch);
                     if (len > (MAX_MEMBERNAME_LEN-10)) {
                         len = MAX_MEMBERNAME_LEN - 10;
                     }
-                    strncpy(member->mname, pch+4, len-4);
+                    strncpy(member->mname, pch, len);
                     switch_channel_set_variable(member->channel, "attendee_name", member->mname);
                 } else {
                     switch_snprintf(member->mname, sizeof(member->mname)-1, "m%d", member->id);
