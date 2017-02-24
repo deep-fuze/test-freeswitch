@@ -52,7 +52,7 @@ libfuzetransport_la_LDFLAGS = -avoid-version -no-undefined $(AM_LDFLAGS)
 library_includedir =  $(prefix)/include
 library_include_HEADERS = \
 			include/Transport.h include/Common.h include/DnsClient.h include/Secure.h \
-			include/Timer include/Util.h include/Transport_c.h include/Buffer.h \
+			include/Timer.h include/Util.h include/Transport_c.h include/Buffer.h \
 			src/DnsResolver.h src/ConnectionImpl.h src/TcpTransceiver.h src/SecureRTP.h \
 			src/polling/TransportEvent.h src/ResourceMgr.h src/Transceiver.h src/TransportImpl.h \
 			src/TcpListener.h src/TransportBaseImpl.h src/UdpTransceiver.h src/DtlsTransceiver.h \
