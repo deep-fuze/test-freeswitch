@@ -262,7 +262,6 @@ void ceo_destroy(conf_encoder_optimization_t *ceo, char *name) {
 
 //#define SIMULATE_ENCODER_LOSS
 switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, uint32_t bytes, int32_t max) {
-    switch_time_t now = switch_time_now();
 #ifdef SIMULATE_ENCODER_LOSS
     int randoms = rand() % 10;
 #endif
