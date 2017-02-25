@@ -23,7 +23,6 @@
 
 #ifdef __linux__
 #include <cstring> // memset
-#include <cmath>
 #endif
 
 #define _LOG_(A,B) DEBUG_OUT(A, AREA_COM, "Con[b" << baseID_ << ":c" << ID() << ":" << name_ << "] " << __FUZE_FUNC__ << ": " << B)

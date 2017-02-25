@@ -11,6 +11,11 @@
 #include <sstream>
 #include <Log.h>
 
+#ifdef __linux__
+#include <cstring> // memset
+#include <cmath>
+#endif
+
 namespace fuze {
     
 StatData::StatData(const char* pUnit)
@@ -21,7 +26,7 @@ StatData::StatData(const char* pUnit)
 
 void StatData::Clear()
 {
-    memset(data_, 0, sizeof(uint16_t)*MAX_NUM);
+    memset(data_, 0, sizeof(data_));
     index_  = 0;
     seq_    = 0;
 }
