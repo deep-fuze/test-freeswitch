@@ -8197,6 +8197,7 @@ OUTPUT_LOOP_RET process_participant_output_end_member(participant_thread_data_t 
     
     conference_member_t *member = ols->member;
     switch_channel_t *channel = ols->channel;
+    switch_bool_t do_event = SWITCH_FALSE;
     
     set_ols_stopping(ols);
     
@@ -8208,6 +8209,9 @@ OUTPUT_LOOP_RET process_participant_output_end_member(participant_thread_data_t 
     conference_loop_input_cleanup(ols->ild);
     ols->stopped = SWITCH_TRUE;
     clear_member_state_locked(member, MFLAG_RUNNING);
+
+    switch_core_ioctl_stats(member->session, UPDATE_PERIODIC_STATS, &do_event);
+    switch_core_log_periodic(member->session, SWITCH_TRUE, SWITCH_TRUE);
 
     if (member->meo.stats_cnt != 0 && member->meo.cwc->stats_cnt != 0) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,

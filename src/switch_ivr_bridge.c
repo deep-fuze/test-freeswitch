@@ -842,7 +842,11 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
   end_of_bridge_loop:
 
   switch_core_timer_destroy(&timer);
-  switch_core_log_periodic(session_a, SWITCH_TRUE, SWITCH_TRUE);
+  {
+      switch_bool_t do_event = SWITCH_FALSE;
+      switch_core_ioctl_stats(session_a, UPDATE_PERIODIC_STATS, &do_event);
+      switch_core_log_periodic(session_a, SWITCH_TRUE, SWITCH_TRUE);
+  }
 
 #ifdef SWITCH_VIDEO_IN_THREADS
     if (vid_thread) {
