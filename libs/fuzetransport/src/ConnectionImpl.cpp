@@ -32,155 +32,6 @@ namespace fuze {
 
 NoTransceiver NoTransceiver::sInstance_;
 
-StatData::StatData(const char* pUnit)
-    : pUnit_(pUnit)
-{
-    Clear();
-}
-
-void StatData::Clear()
-{
-    memset(data_, 0, sizeof(uint16_t)*MAX_NUM);
-    index_  = 0;
-    seq_    = 0;
-}
-
-void StatData::SetData(uint16_t data)
-{
-    if (index_ < MAX_NUM) {
-        seq_++;
-        data_[index_++] = data;
-    }
-}
-    
-bool StatData::Display(ostringstream& rLog,
-                       const char*    pLog,
-                       const char*    pPrefix)
-{
-    bool result = false;
-    
-    if (index_ == 0) return false;
-    
-    bool b_print = false;
-    uint32_t avg = 0;
-    for (int i = 0; i < index_; ++i) {
-        avg += data_[i];
-        if (!b_print && data_[i]) {
-            b_print = true;
-        }
-    }
-    avg /= index_;
-    uint32_t stddev = 0;
-    for (int i = 0; i < index_; ++i) {
-        int diff = data_[i] - avg;
-        stddev += diff * diff;
-    }
-    stddev = static_cast<uint32_t>(std::sqrt((double)stddev/index_));
-    
-    if (b_print) {
-        rLog << "\n " << pLog << pPrefix << "Avg: " << avg << pUnit_
-             << " [StdDev: " << stddev << ", data("
-             << index_ << ")";
-        
-        for (int i = 0; i < index_; ++i) {
-            rLog << " " << data_[i];
-        }
-        rLog << "]";
-        result = true;
-    }
-    
-    index_ = 0;
-    
-    return result;
-}
-    
-Stat::Stat(ConnectionImpl* pConn)
-    : pConn_(pConn)
-    , local_(" kbps")
-    , remote_(" kbps")
-    , sendQ_("")
-    , sendBuf_(" B")
-    , sendRetry_("")
-    , arrival_(" ms")
-{
-    log_[0] = 0;
-    Clear();
-}
-    
-void Stat::Clear()
-{
-    count_       = 0;
-    bytes_       = 0;
-    bytes2_      = 0;
-    totalBytes_  = 0;
-    lastTime_    = 0;
-    lastArrival_ = 0;
-    lastSent_    = 0;
-    
-    local_.Clear();
-    remote_.Clear();
-    sendQ_.Clear();
-    sendBuf_.Clear();
-    arrival_.Clear();
-}
-    
-int Stat::AddBytes(uint32_t bytes)
-{
-    ++count_;
-    bytes_      += bytes;
-    bytes2_     += bytes;
-    totalBytes_ += bytes;
-    
-    int64_t curr_time = GetTimeMs();
-    int64_t diff = curr_time - lastTime_;
-
-    // skip the first time
-    if (lastTime_ == 0) {
-        lastTime_ = curr_time;
-        return -1;
-    }
-    
-    if (diff > PERIOD) {
-        uint16_t rate = (uint16_t)(diff ? (bytes_*8)/(diff) : 0);
-        
-        local_.SetData(rate);
-
-        if (pConn_) {
-            size_t   q_size = 0;
-            uint32_t q_buf_size = 0;
-            pConn_->GetSendQInfo(q_size, q_buf_size);
-            sendQ_.SetData((uint16_t)q_size);
-            sendBuf_.SetData(q_buf_size);
-            sendRetry_.SetData(pConn_->GetSendRetryCount());
-        }
-        
-        if (local_.index_ >= DISPLAY_CNT) {
-            std::ostringstream log;
-            log << "local seq # " << local_.seq_-local_.index_
-                << " ~ " << local_.seq_-1;
-            
-            if (!local_.Display(log, log_, "Local  ")) {
-                log << " (" << bytes2_ << " bytes)";
-            }
-            bytes2_ = 0;
-            
-            remote_.Display(log, log_, "Remote ");
-            arrival_.Display(log, log_, "Arrival ");
-            sendQ_.Display(log, log_, "Tx Queue #   ");
-            sendBuf_.Display(log, log_, "Tx Buf Size  ");
-            sendRetry_.Display(log, log_, "Tx Retry Cnt ");
-            DEBUG_OUT(LEVEL_MSG, AREA_COM, log_ << log.str());
-        }
-        
-        bytes_    = 0;
-        lastTime_ = curr_time;
-        
-        return rate;
-    }
-    
-    return -1;
-}
-
 void Connection::GenerateIceCredentials(string& ufrag, string& pwd)
 {
 //    ufrag = "1dNnhPLEV5ntNLe7";
@@ -1266,30 +1117,11 @@ void ConnectionImpl::DeliverRateData(fuze::ConnectionImpl::RateData &rRate)
     
 uint32_t ConnectionImpl::OnBytesSent(uint32_t bytesSent)
 {
-    int rate = sendStat_.AddBytes(bytesSent);
-    
-    if (rate != -1) {
-        uint16_t send_rate = (uint16_t)rate;
-        
-        if (bWYSWYG_) {
-            if (TcpTransceiver* p =
-                dynamic_cast<TcpTransceiver*>(pTransceiver_)) {
-                p->SendStat(Stat::TYPE_SEND,send_rate,
-                            sendStat_.local_.seq_);
-            }
-        }
-        
-        if (bRateReport_) {
-            int64_t curr_time = GetTimeMs();
-            if (!sendStat_.lastSent_) {
-                sendStat_.lastSent_ = curr_time;
-            }
-            uint16_t diff = uint16_t(curr_time - sendStat_.lastSent_);
-            OnRateData(RT_LOCAL_SEND, send_rate, diff);
-            sendStat_.lastSent_ = curr_time;
-        }
-    }
+    int64_t curr_time = GetTimeMs();
 
+    AddSendStat(bytesSent, curr_time);
+    AddRecvStat(0, curr_time); // check recv stat in case not active
+    
     if (sendStat_.count_ <= 5) {
         MLOG(bytesSent << "B (count: " << sendStat_.count_ << ")");
     }
@@ -1299,29 +1131,10 @@ uint32_t ConnectionImpl::OnBytesSent(uint32_t bytesSent)
 
 uint32_t ConnectionImpl::OnBytesRecv(uint32_t bytesRecv)
 {
-    int rate = recvStat_.AddBytes(bytesRecv);
+    int64_t curr_time = GetTimeMs();
     
-    if (rate != -1) {
-        uint16_t recv_rate = (uint16_t)rate;
-        
-        if (bWYSWYG_) {
-            if (TcpTransceiver* p =
-                dynamic_cast<TcpTransceiver*>(pTransceiver_)) {
-                p->SendStat(Stat::TYPE_RECV, recv_rate,
-                            recvStat_.local_.seq_);
-            }
-        }
-        
-        if (bRateReport_) {
-            int64_t curr_time = GetTimeMs();
-            if (!recvStat_.lastSent_) {
-                recvStat_.lastSent_ = curr_time;
-            }
-            uint16_t diff = uint16_t(curr_time - recvStat_.lastSent_);
-            OnRateData(RT_LOCAL_RECV, recv_rate, diff);
-            recvStat_.lastSent_ = curr_time;
-        }
-    }
+    AddRecvStat(bytesRecv, curr_time);
+    AddSendStat(0, curr_time); // check send stat in case not active
     
     if (recvStat_.count_ == 1) {
         if (pTransceiver_->ConnType() == CT_UDP) {
@@ -1336,6 +1149,58 @@ uint32_t ConnectionImpl::OnBytesRecv(uint32_t bytesRecv)
     return recvStat_.count_;
 }
 
+void ConnectionImpl::AddSendStat(uint32_t bytesSent, int64_t currTime)
+{
+    int rate = sendStat_.AddBytes(bytesSent, currTime);
+    
+    if (rate != -1) {
+        uint16_t send_rate = (uint16_t)rate;
+        
+        if (bWYSWYG_) {
+            if (TcpTransceiver* p =
+                dynamic_cast<TcpTransceiver*>(pTransceiver_)) {
+                p->SendStat(Stat::TYPE_SEND,send_rate,
+                            sendStat_.local_.seq_);
+            }
+        }
+        
+        if (bRateReport_) {
+            if (!sendStat_.lastSent_) {
+                sendStat_.lastSent_ = currTime;
+            }
+            uint16_t diff = uint16_t(currTime - sendStat_.lastSent_);
+            OnRateData(RT_LOCAL_SEND, send_rate, diff);
+            sendStat_.lastSent_ = currTime;
+        }
+    }
+}
+
+void ConnectionImpl::AddRecvStat(uint32_t bytesRecv, int64_t currTime)
+{
+    int rate = recvStat_.AddBytes(bytesRecv, currTime);
+    
+    if (rate != -1) {
+        uint16_t recv_rate = (uint16_t)rate;
+        
+        if (bWYSWYG_) {
+            if (TcpTransceiver* p =
+                dynamic_cast<TcpTransceiver*>(pTransceiver_)) {
+                p->SendStat(Stat::TYPE_RECV, recv_rate,
+                            recvStat_.local_.seq_);
+            }
+        }
+        
+        if (bRateReport_) {
+            if (!recvStat_.lastSent_) {
+                recvStat_.lastSent_ = currTime;
+            }
+            uint16_t diff = uint16_t(currTime - recvStat_.lastSent_);
+            OnRateData(RT_LOCAL_RECV, recv_rate, diff);
+            recvStat_.lastSent_ = currTime;
+        }
+    }
+}
+    
 void ConnectionImpl::ClearStat()
 {
     // Once we are connected, clear data stat used

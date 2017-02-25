@@ -35,7 +35,8 @@ libfuzetransport_la_SOURCES = src/core/Log.cpp \
                          src/CoreState.cpp \
                          src/TcpCore.cpp \
                          src/TlsCore.cpp \
-						 src/SecureRTP.cpp \
+                         src/SecureRTP.cpp \
+                         src/Stat.cpp \
                          src/TcpTxrxState.cpp \
                          src/ProxyConnector.cpp \
                          src/DnsResolver.cpp \
@@ -58,8 +59,8 @@ library_include_HEADERS = \
 			src/TcpListener.h src/TransportBaseImpl.h src/UdpTransceiver.h src/DtlsTransceiver.h \
 			src/core/Compat.h src/core/MutexLock.h src/polling/Queue.h \
 			src/core/Thread.h src/core/Log.h src/core/NotCopyable.h \
-			src/core/ConditionVariable.h  \
-			src/CoreState.h src/Prober.h src/Resource.h \
+			src/core/ConditionVariable.h \
+			src/CoreState.h src/Prober.h src/Resource.h src/Stat.h \
 			src/Server.h src/ServerCore.h src/TcpCore.h src/TcpCore.h \
 			src/TcpTxrxState.h src/TlsCore.h src/MediaBridge.h src/core/Semaphore.h
 

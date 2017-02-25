@@ -15,67 +15,13 @@
 #include <Thread.h>
 #include <atomic>
 #include <queue>
+#include <Stat.h>
 
 namespace fuze {
 
-using std::ostringstream;
 using std::queue;
 using core::RawMemory;
     
-struct StatData
-{
-    static const uint16_t MAX_NUM = 200;
-
-    uint16_t     data_[MAX_NUM];
-    uint16_t     index_;
-    uint32_t     seq_;
-    const char*  pUnit_;
-    
-    StatData(const char* pUnit);
-    
-    void Clear();
-    void SetData(uint16_t data);
-    bool Display(ostringstream& rLog,
-                 const char*    pLog,
-                 const char*    pPrefix);
-};
-    
-struct Stat
-{
-    static const int64_t  PERIOD      = 1000; // 1 seconds
-    static const uint16_t DISPLAY_CNT = 10;
-    static const uint8_t  TYPE_SEND   = 0;
-    static const uint8_t  TYPE_RECV   = 1;
-    
-    uint32_t  count_;
-    int64_t   bytes_;
-    int64_t   bytes2_; // track intermittent usage
-    int64_t   totalBytes_;
-    int64_t   lastTime_;
-    char      log_[64];
-    
-    StatData  local_;       // local bandwidth
-    StatData  remote_;      // remote bandwidth
-    StatData  sendQ_;       // sendQ_ size
-    StatData  sendBuf_;     // buffer size to send
-    StatData  sendRetry_;   // retry (full socket buffer)
-    StatData  arrival_;     // jitter of receiving stat
-    int64_t   lastArrival_; // timestamp of remote report
-    int64_t   lastSent_;    // timestamp of our report
-    
-    ConnectionImpl* pConn_; // sendStat on sendQ Info
-    
-    // set ConnectionImpl for report
-    Stat(ConnectionImpl* pConn = 0);
-    
-    void Clear();
-    
-    // Add bytes so that we can measure usage
-    // returns rate in kbps if available
-    // -1 means rate is not calculated yet
-    int AddBytes(uint32_t bytes);
-};
-
 const uint16_t RTP_TIMEOUT  = 5000;  // 5 seconds
 const uint16_t RTCP_TIMEOUT = 30000; // 30 seconds
 const uint16_t READ_TIMEOUT = 15000; // 15 seconds
@@ -160,6 +106,8 @@ public:
     // Calculating bandwidth usage rate
     uint32_t OnBytesSent(uint32_t bytesSent);
     uint32_t OnBytesRecv(uint32_t bytesRecv);
+    void     AddSendStat(uint32_t bytesSent, int64_t currTime);
+    void     AddRecvStat(uint32_t bytesRecv, int64_t currTime);
     void ClearStat();
     void OnStatReceived(Buffer::Ptr spStat);
     void OnMapReceived(Buffer::Ptr spMap);
