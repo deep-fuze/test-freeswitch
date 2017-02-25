@@ -1574,6 +1574,7 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
                                 (long) stats, (long) engine);
         return;
     }
+
     samples_per_second =  switch_rtp_get_samples_per_second(engine->rtp_session);
 
     mask_rtp_periodic_stats(session, type);
@@ -1704,7 +1705,12 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
     if (event_trigger == SWITCH_FALSE) {
         for (int i = 0; i < STATS_MAX; i++) {
             if (strlen(stats->str[i]) > 0) {
-                set_periodic_stats_value(session, RTP_RECV_RATE+i, stats->str[i], type);
+				int idx = RTP_RECV_RATE+i;
+                set_periodic_stats_value(session, idx, stats->str[i], type);
+				if (idx == RTP_SEND_LEVEL || idx == RTP_RECV_LEVEL) {
+					switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+									  "stats[%s] = [ %s ]\n",  rtp_stat_name[idx], stats->str[i]);
+				}
             }
         }
     }

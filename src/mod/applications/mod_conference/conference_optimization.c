@@ -7,7 +7,7 @@
 #define CONF_DBUFFER_SIZE CONF_BUFFER_SIZE
 
 static switch_bool_t cwc_set_frame(conference_write_codec_t *cwc, uint32_t read_idx, switch_frame_t *frame);
-static switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t read_idx);
+static switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t read_idx, int32_t *max);
 static switch_bool_t cwc_frame_encoded(conference_write_codec_t *cwc, uint32_t read_idx);
 
 SWITCH_DECLARE(conference_encoder_state_t *) switch_core_conference_encode_alloc(switch_memory_pool_t *pool);
@@ -111,7 +111,7 @@ void cwc_destroy(conference_write_codec_t *cwc) {
     }
 }
 
-switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t *data, uint32_t bytes) {
+switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t *data, uint32_t bytes, int32_t max) {
     if (bytes > ENC_FRAME_DATA) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "cwc_write_buffer = %d\n", bytes);
         return SWITCH_FALSE;
@@ -136,6 +136,7 @@ switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t
         cwc->frames[cwc->write_idx].frame.samples = bytes/2;
         cwc->frames[cwc->write_idx].frame.codec = &cwc->frame_codec;
         cwc->frames[cwc->write_idx].time = switch_time_now();
+        cwc->frames[cwc->write_idx].max = max;
 
         encode_status = switch_core_conference_encode_frame(cwc->encoder, &cwc->frames[cwc->write_idx].frame, flags, &ret_enc_frame);
         if (encode_status == SWITCH_STATUS_SUCCESS && ret_enc_frame) {
@@ -150,7 +151,7 @@ switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t
     return SWITCH_TRUE;
 }
 
-switch_bool_t cwc_write_and_copy_buffer(conference_write_codec_t *cwc, conference_write_codec_t *cwc0, int16_t *data, uint32_t bytes) {
+switch_bool_t cwc_write_and_copy_buffer(conference_write_codec_t *cwc, conference_write_codec_t *cwc0, int16_t *data, uint32_t bytes, int32_t max) {
     if (bytes > ENC_FRAME_DATA) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "cwc_write_buffer = %d\n", bytes);
         return SWITCH_FALSE;
@@ -167,6 +168,7 @@ switch_bool_t cwc_write_and_copy_buffer(conference_write_codec_t *cwc, conferenc
         cwc_set_frame(cwc, cwc->write_idx, &cwc0->frames[cwc0->write_idx].frame);
         cwc->frames[cwc->write_idx].written = SWITCH_TRUE;
         cwc->frames[cwc->write_idx].time = cwc0->frames[cwc0->write_idx].time;
+        cwc->frames[cwc->write_idx].max = max;
     }
     switch_mutex_unlock(cwc->codec_mutex);
 
@@ -185,8 +187,14 @@ switch_bool_t cwc_set_frame(conference_write_codec_t *cwc, uint32_t idx, switch_
     }
 }
 
-static switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t read_idx) {
-    return (cwc->frames[read_idx].encoded == SWITCH_TRUE) ? &cwc->frames[read_idx].frame : NULL;
+static switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t read_idx, int32_t *max) {
+    if (cwc->frames[read_idx].encoded == SWITCH_TRUE) {
+        *max = cwc->frames[read_idx].max;
+        return &cwc->frames[read_idx].frame;
+    } else {
+        *max = 0;
+        return NULL;
+    }
 }
 
 switch_bool_t cwc_frame_written(conference_write_codec_t *cwc, uint32_t read_idx) {
@@ -253,7 +261,8 @@ void ceo_destroy(conf_encoder_optimization_t *ceo, char *name) {
 }
 
 //#define SIMULATE_ENCODER_LOSS
-switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, uint32_t bytes) {
+switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, uint32_t bytes, int32_t max) {
+    switch_time_t now = switch_time_now();
 #ifdef SIMULATE_ENCODER_LOSS
     int randoms = rand() % 10;
 #endif
@@ -261,6 +270,7 @@ switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, 
     if (data) {
         memcpy(ceo->buffer, data, bytes);
         ceo->bytes = bytes;
+        ceo->max = max;
     } else {
 #ifdef SIMULATE_ENCODER_LOSS
         randoms = 0;
@@ -274,13 +284,13 @@ switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, 
          wp_ptr = wp_ptr->next) {
 #ifdef SIMULATE_ENCODER_LOSS
         if (randoms < 8) {
-            cwc_write_and_encode_buffer(wp_ptr, data, bytes);
+            cwc_write_and_encode_buffer(wp_ptr, data, bytes, max);
         } else {
             wp_ptr->frames[wp_ptr->write_idx].written = SWITCH_TRUE;
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "skipping\n");
         }
 #else
-        cwc_write_and_encode_buffer(wp_ptr, data, bytes);
+        cwc_write_and_encode_buffer(wp_ptr, data, bytes, max);
 #endif
     }
 
@@ -291,11 +301,11 @@ switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, 
              wp_ptr = wp_ptr->next) {
 #ifdef SIMULATE_ENCODER_LOSS
             if (randoms < 8) {
-                cwc_write_and_copy_buffer(wp_ptr, cwc0, data, bytes);
+                cwc_write_and_copy_buffer(wp_ptr, cwc0, data, bytes, max);
                 cwc0 = cwc0->next;
             }
 #else
-            cwc_write_and_copy_buffer(wp_ptr, cwc0, data, bytes);
+            cwc_write_and_copy_buffer(wp_ptr, cwc0, data, bytes, max);
             cwc0 = cwc0->next;
 #endif
         }
@@ -388,8 +398,8 @@ switch_bool_t meo_encoder_exists(conf_member_encoder_optimization_t *meo) {
 }
 
 /* xxx */
-switch_frame_t *meo_get_frame(conf_member_encoder_optimization_t *meo) {
-    return cwc_get_frame(meo->cwc, meo->read_idx);
+switch_frame_t *meo_get_frame(conf_member_encoder_optimization_t *meo, int32_t *max) {
+    return cwc_get_frame(meo->cwc, meo->read_idx, max);
 }
 
 switch_bool_t meo_frame_written(conf_member_encoder_optimization_t *meo) {

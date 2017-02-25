@@ -335,6 +335,9 @@ extern "C" {
 */
 	uint8_t ulaw_to_alaw(uint8_t ulaw);
 
+short ulaw_to_linear_table(uint8_t idx);
+short alaw_to_linear_table(uint8_t idx);
+
 #ifdef __cplusplus
 }
 #endif

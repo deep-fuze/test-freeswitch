@@ -21,7 +21,7 @@ typedef struct encoded_file {
     char name[MAX_FILENAME];
     
     uint32_t bytes;
-    
+
     switch_bool_t done;
     switch_bool_t writing;
 } encoded_file_t;
@@ -62,6 +62,7 @@ typedef struct conference_frame {
     switch_bool_t written;
 
     switch_time_t time;
+    int32_t max;
 
 } conference_frame_t;
 
@@ -135,13 +136,14 @@ typedef struct conf_encoder_optimization {
 
     uint32_t bytes;
     int16_t buffer[ENC_FRAME_DATA];
+    int32_t max;
 
     switch_bool_t enabled;
 } conf_encoder_optimization_t;
 
 uint32_t cwc_get_idx(conference_write_codec_t *cwc);
 void cwc_next(conference_write_codec_t *cwc);
-//switch_bool_t cwc_initialize(conference_write_codec_t *cwc, switch_memory_pool_t *mutex_pool, switch_memory_pool_t *frame_pool, switch_bool_t create_encoder);
+
 void cwc_destroy(conference_write_codec_t *cwc);
 switch_size_t cwc_read_buffer(conference_write_codec_t *cwc, uint32_t read_idx, uint8_t *data, uint32_t bytes);
 switch_bool_t cwc_write_buffer(conference_write_codec_t *cwc, int16_t *data,
@@ -153,7 +155,7 @@ conference_write_codec_t *cwc_get(conference_write_codec_t *cwc, int codec_id, i
 void ceo_start_write(conf_encoder_optimization_t *ceo);
 switch_bool_t ceo_initilialize(conf_encoder_optimization_t *ceo, switch_memory_pool_t *pool);
 void ceo_destroy(conf_encoder_optimization_t *ceo, char *name);
-switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, uint32_t bytes);
+switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, uint32_t bytes, int32_t max);
 switch_status_t ceo_write_new_wc(conf_encoder_optimization_t *ceo, switch_codec_t *frame_codec, switch_codec_t *write_codec,
                                  int codec_id, int impl_id, int ianacode);
 
@@ -169,7 +171,7 @@ switch_size_t meo_read_buffer(conf_member_encoder_optimization_t *meo, uint8_t *
 switch_bool_t meo_encoder_exists(conf_member_encoder_optimization_t *meo);
 
 switch_bool_t meo_next_frame(conf_member_encoder_optimization_t *meo);
-switch_frame_t *meo_get_frame(conf_member_encoder_optimization_t *meo);
+switch_frame_t *meo_get_frame(conf_member_encoder_optimization_t *meo, int32_t *max);
 
 switch_bool_t meo_frame_written(conf_member_encoder_optimization_t *meo);
 void meo_reset_idx(conf_member_encoder_optimization_t *meo);

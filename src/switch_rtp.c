@@ -55,6 +55,7 @@
 #include "include/Transport_c.h"
 #include "include/ProtoBufIf.h"
 #include "interface/webrtc_neteq_if.h"
+#include "g711.h"
 
 /*
  * frequency for printing out packet stats
@@ -534,6 +535,12 @@ struct switch_rtp {
 
     switch_bool_t active;
     switch_bool_t muted;
+
+    uint32_t low_level_duration;
+    switch_time_t low_level_start;
+
+    int32_t level_out;
+    int32_t level_in;
 };
 
 struct switch_rtcp_report_block {
@@ -4687,6 +4694,12 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->bad_packet_size_recv = 0;
     rtp_session->ignore_rtp_size = 0;
 
+    rtp_session->low_level_duration = 0;
+    rtp_session->low_level_start = 0;
+
+    rtp_session->level_out = -1;
+    rtp_session->level_in = -1;
+
     rtp_session->stats.recv_rate_history_idx = 0;
     rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
     memset(rtp_session->stats.recv_rate_history, 0, sizeof(uint16_t)*RTP_STATS_RATE_HISTORY);
@@ -7641,6 +7654,29 @@ SWITCH_DECLARE(switch_status_t) switch_rtcp_zerocopy_read_frame(switch_rtp_t *rt
     return SWITCH_STATUS_TIMEOUT;
 }
 
+int32_t switch_rtp_max_data_value(uint8_t payload, uint8_t *data, int len) {
+    int32_t ret = -1;
+    int32_t max = 0;
+    if (payload == 0) {
+        for (int i = 0; i < len; i++) {
+            short val = abs(ulaw_to_linear_table(data[i]));
+            if (val > max) {
+                max = val;
+            }
+        }
+        ret = max;
+    } else if (payload == 8) {
+        for (int i = 0; i < len; i++) {
+            short val = abs(alaw_to_linear_table(data[i]));
+            if (val > max) {
+                max = val;
+            }
+        }
+        ret = max;
+    }
+    return ret;
+}
+
 SWITCH_DECLARE(switch_status_t) switch_rtp_zerocopy_read_frame(switch_rtp_t *rtp_session, switch_frame_t *frame, switch_io_flag_t io_flags)
 {
     int bytes = 0;
@@ -7729,6 +7765,13 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_zerocopy_read_frame(switch_rtp_t *rtp
     if (frame->payload == 9 || frame->payload == 8 || frame->payload == 0) {
         int frames = bytes / 80;
         bytes = frames * 80;
+    }
+
+    if (!rtp_session->use_webrtc_neteq) {
+        int32_t max = switch_rtp_max_data_value(frame->payload, (uint8_t *)frame->data, bytes);
+        if (max > rtp_session->level_in) {
+            rtp_session->level_in = max;
+        }
     }
 
     frame->datalen = bytes;
@@ -8283,6 +8326,20 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                     if (send_msg->header.pt != 13) {
                         send_msg->header.pt = 13;
                     }
+                }
+
+                /* make sure we track that we're muted! */
+                if (!rtp_session->muted) {
+                    rtp_session->muted = SWITCH_TRUE;
+                }
+
+            } else {
+                int32_t max = switch_rtp_max_data_value(send_msg->header.pt, (uint8_t *)rtp_session->recv_msg.body, datalen);
+                if (max > rtp_session->level_out) {
+                    rtp_session->level_out = max;
+                }
+                if (rtp_session->muted) {
+                    rtp_session->muted = SWITCH_FALSE;
                 }
             }
 
@@ -9125,6 +9182,11 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
         }
     }
 
+    if (level_in == -1 && rtp_session->level_in > -1) {
+        level_in = rtp_session->level_in;
+        rtp_session->level_in = -1;
+    }
+
     if (level_in > -1) {
         rtp_stat_add_value(rtp_session, RTP_RECV_LEVEL, "%d", level_in, rtp_session->stats.last_recv_level);
     }
@@ -9157,9 +9219,26 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
         rtp_stat_add_value(rtp_session, RTP_PER_LOST, "%0.2f", loss, rtp_session->stats.last_lost_percent);
     }
 
+    if (level_out == -1 && rtp_session->level_out > -1) {
+        level_out = rtp_session->level_out;
+        rtp_session->level_out = -1;
+    }
+
     if (level_out > -1) {
         rtp_stat_add_value(rtp_session, RTP_SEND_LEVEL, "%d", level_out, rtp_session->stats.last_send_level);
+
+        if (level_out < 300) {
+            if (rtp_session->low_level_duration == 0) {
+                rtp_session->low_level_start = switch_time_now();
+            }
+            rtp_session->low_level_duration += 1;
+        } else if (rtp_session->low_level_duration >= 3) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "Normal output level (%d) after %ds at low level\n",
+                              level_out, rtp_session->low_level_duration);
+            rtp_session->low_level_duration = 0;
+        }
     }
+
 
     if (active > -1) {
         rtp_stat_add_value(rtp_session, RTP_ACTIVE_SPEAKER, "%d", active, rtp_session->stats.last_active_speaker);

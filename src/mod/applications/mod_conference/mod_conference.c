@@ -827,6 +827,8 @@ struct conference_member {
     switch_time_t audio_out_mutex_time;
     int audio_in_mutex_line;
     int audio_out_mutex_line;
+
+    int32_t max_out_level;
 };
 
 typedef enum {
@@ -2738,6 +2740,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     member->was_active = SWITCH_FALSE;
     member->in_cn = SWITCH_FALSE;
     member->ms = MS_UNMUTED;
+    member->max_out_level = 0;
 
     meo_initialize(&member->meo);
     
@@ -2935,9 +2938,9 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             pch = strchr(member->sdpname,'i');
             
             if ((pch = strstr(member->sdpname, "sip:")) != 0 || 
-				(pch = strstr(member->sdpname, "sips:")) != 0) {
+                (pch = strstr(member->sdpname, "sips:")) != 0) {
                 if ((ech = strstr(pch, ";")) != 0) {
-					pch = strstr(pch, ":")+1;
+                    pch = strstr(pch, ":")+1;
                     len = (ech - pch);
                     if (len > (MAX_MEMBERNAME_LEN-10)) {
                         len = MAX_MEMBERNAME_LEN - 10;
@@ -3963,6 +3966,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
     int16_t main_frame_16[SWITCH_RECOMMENDED_BUFFER_SIZE / 2];
     switch_time_t delta; //, delta2;
     int count;
+    int32_t max_mix;
 
 #define CTR_DEBUG_STR_LEN 4096
 
@@ -4670,11 +4674,15 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
     }
 
     /* Fuze: at this point main_frame = sum(active speakers) + conference_ivr */
+    max_mix = 0;
     for (x = 0; x < bytes / 2; x++) {
         int32_t z;
         z = main_frame[x];
         switch_normalize_to_16bit(z);
         main_frame_16[x] = (int16_t) z;
+        if (abs(z) > max_mix) {
+            max_mix = z;
+        }
     }
 
     delta = switch_time_now() - delta;
@@ -4682,7 +4690,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
     delta = switch_time_now();
 
     /* Encoder Optimization: Write the conference mix to the Conference Encoder Optimization object */
-    ceo_write_buffer(&conference->ceo, main_frame_16, bytes);
+    ceo_write_buffer(&conference->ceo, main_frame_16, bytes, max_mix);
 
     delta = switch_time_now() - delta;
     if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
@@ -4771,6 +4779,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                 }
                 /* Now we can convert to 16 bit. */
                 switch_normalize_to_16bit(z);
+                if (abs(z) > omember->max_out_level) {
+                    omember->max_out_level = abs(z);
+                }
+
                 write_frame_raw[x] = (int16_t) z;
             }
 
@@ -7779,7 +7791,8 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
 
     if (ols->ild->leadin_over) {
         if (ols->check_ticks++ >= ols->ticks_per_stats_check) {
-            switch_rtp_update_rtp_stats(member->channel, member->score, -1 /* level_out */, member->one_of_active);
+            switch_rtp_update_rtp_stats(member->channel, member->score, member->max_out_level, member->one_of_active);
+            member->max_out_level = 0;
             ols->check_ticks = 0;
         }
     } else {
@@ -8015,6 +8028,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
 
         for (int i = 0; i < member->meo.cwc->num_conf_frames; ) {
             switch_frame_t  *rdframe = NULL;
+            int32_t max;
 
             before_mutex_time = switch_micro_time_now();
             switch_mutex_lock(member->meo.cwc->codec_mutex);
@@ -8029,7 +8043,11 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
                 break;
             }
 
-            rdframe = meo_get_frame(&member->meo);
+            rdframe = meo_get_frame(&member->meo, &max);
+
+            if (max > member->max_out_level) {
+                member->max_out_level = max;
+            }
 
             if (rdframe == NULL) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING,
@@ -8691,6 +8709,10 @@ static switch_status_t conference_play_file(conference_obj_t *conference, char *
 
     fnode->type = NODE_TYPE_FILE;
     fnode->leadin = leadin;
+
+    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "M(%s)/I(%s) playing file to conference: %s\n",
+                      conference->meeting_id, conference->instance_id, file);
+
 
     /* Open the file */
     fnode->fh.pre_buffer_datalen = SWITCH_DEFAULT_FILE_BUFFER_LEN;
