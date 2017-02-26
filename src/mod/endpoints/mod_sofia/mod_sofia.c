@@ -5794,6 +5794,12 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_sofia_load)
 
     crtp_init(*module_interface);
 
+	/*
+	 * enable sip logging by default
+	 */
+    mod_sofia_globals.tracelevel = SWITCH_LOG_INFO;
+    sofia_glue_global_siptrace(1);
+
     /* indicate that the module should continue to be loaded */
     return SWITCH_STATUS_SUCCESS;
 }
