@@ -7,7 +7,7 @@
 #define CONF_DBUFFER_SIZE CONF_BUFFER_SIZE
 
 static switch_bool_t cwc_set_frame(conference_write_codec_t *cwc, uint32_t read_idx, switch_frame_t *frame);
-static switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t read_idx, int32_t *max);
+static switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t read_idx, int16_t *max);
 static switch_bool_t cwc_frame_encoded(conference_write_codec_t *cwc, uint32_t read_idx);
 
 SWITCH_DECLARE(conference_encoder_state_t *) switch_core_conference_encode_alloc(switch_memory_pool_t *pool);
@@ -111,7 +111,7 @@ void cwc_destroy(conference_write_codec_t *cwc) {
     }
 }
 
-switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t *data, uint32_t bytes, int32_t max) {
+switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t *data, uint32_t bytes, int16_t max) {
     if (bytes > ENC_FRAME_DATA) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "cwc_write_buffer = %d\n", bytes);
         return SWITCH_FALSE;
@@ -151,7 +151,7 @@ switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t
     return SWITCH_TRUE;
 }
 
-switch_bool_t cwc_write_and_copy_buffer(conference_write_codec_t *cwc, conference_write_codec_t *cwc0, int16_t *data, uint32_t bytes, int32_t max) {
+switch_bool_t cwc_write_and_copy_buffer(conference_write_codec_t *cwc, conference_write_codec_t *cwc0, int16_t *data, uint32_t bytes, int16_t max) {
     if (bytes > ENC_FRAME_DATA) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "cwc_write_buffer = %d\n", bytes);
         return SWITCH_FALSE;
@@ -187,7 +187,7 @@ switch_bool_t cwc_set_frame(conference_write_codec_t *cwc, uint32_t idx, switch_
     }
 }
 
-static switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t read_idx, int32_t *max) {
+static switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t read_idx, int16_t *max) {
     if (cwc->frames[read_idx].encoded == SWITCH_TRUE) {
         *max = cwc->frames[read_idx].max;
         return &cwc->frames[read_idx].frame;
@@ -261,7 +261,7 @@ void ceo_destroy(conf_encoder_optimization_t *ceo, char *name) {
 }
 
 //#define SIMULATE_ENCODER_LOSS
-switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, uint32_t bytes, int32_t max) {
+switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, uint32_t bytes, int16_t max) {
 #ifdef SIMULATE_ENCODER_LOSS
     int randoms = rand() % 10;
 #endif
@@ -397,7 +397,7 @@ switch_bool_t meo_encoder_exists(conf_member_encoder_optimization_t *meo) {
 }
 
 /* xxx */
-switch_frame_t *meo_get_frame(conf_member_encoder_optimization_t *meo, int32_t *max) {
+switch_frame_t *meo_get_frame(conf_member_encoder_optimization_t *meo, int16_t *max) {
     return cwc_get_frame(meo->cwc, meo->read_idx, max);
 }
 

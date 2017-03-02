@@ -828,7 +828,8 @@ struct conference_member {
     int audio_in_mutex_line;
     int audio_out_mutex_line;
 
-    int32_t max_out_level;
+    int16_t max_out_level;
+    int16_t max_input_level;
 };
 
 typedef enum {
@@ -2741,6 +2742,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     member->in_cn = SWITCH_FALSE;
     member->ms = MS_UNMUTED;
     member->max_out_level = 0;
+    member->max_input_level = 0;
 
     meo_initialize(&member->meo);
     
@@ -3966,7 +3968,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
     int16_t main_frame_16[SWITCH_RECOMMENDED_BUFFER_SIZE / 2];
     switch_time_t delta; //, delta2;
     int count;
-    int32_t max_mix;
+    int16_t max_mix;
 
 #define CTR_DEBUG_STR_LEN 4096
 
@@ -4681,9 +4683,11 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         switch_normalize_to_16bit(z);
         main_frame_16[x] = (int16_t) z;
         if (abs(z) > max_mix) {
-            max_mix = z;
+            max_mix = (int16_t) abs(z);
         }
     }
+
+    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "max_mix=%d\n", max_mix);
 
     delta = switch_time_now() - delta;
     if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
@@ -6393,7 +6397,7 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
     /* generate events when the level crosses the threshold        */
     if (can_speak || switch_test_flag(member, MFLAG_MUTE_DETECT)) {
         uint32_t energy = 0, i = 0, samples = 0, j = 0;
-        int16_t *data;
+        int16_t *data, max;
         int agc_period = (member->read_impl.actual_samples_per_second / member->read_impl.samples_per_packet) / 4;
 
         data = il->read_frame->data;
@@ -6408,10 +6412,15 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
         }
 
         if ((samples = il->read_frame->datalen / sizeof(*data))) {
+            int16_t ad;
+            max = 0;
             for (i = 0; i < samples; i++) {
-                energy += abs(data[j]);
+                ad = abs(data[j]);
+                energy += ad;
+                if (ad > max) { max =  ad; }
                 j += member->read_impl.number_of_channels;
             }
+            if (max > member->max_input_level) { member->max_input_level = max; }
 
             member->score = energy / samples;
         }
@@ -7791,8 +7800,9 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
 
     if (ols->ild->leadin_over) {
         if (ols->check_ticks++ >= ols->ticks_per_stats_check) {
-            switch_rtp_update_rtp_stats(member->channel, member->score, member->max_out_level, member->one_of_active);
+            switch_rtp_update_rtp_stats(member->channel, member->max_input_level, member->max_out_level, member->one_of_active);
             member->max_out_level = 0;
+            member->max_input_level = 0;
             ols->check_ticks = 0;
         }
     } else {
@@ -8028,7 +8038,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
 
         for (int i = 0; i < member->meo.cwc->num_conf_frames; ) {
             switch_frame_t  *rdframe = NULL;
-            int32_t max;
+            int16_t max;
 
             before_mutex_time = switch_micro_time_now();
             switch_mutex_lock(member->meo.cwc->codec_mutex);
