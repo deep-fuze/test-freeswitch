@@ -2851,6 +2851,24 @@ static int add_cname(switch_rtp_t *rtp_session, void *body, switch_rtcp_hdr_t *p
     return nbytes;
 }
 
+#if 0
+static void switch_rtp_reset_expected_packets(switch_rtp_t *rtp_session)
+{
+    int exp_total;
+
+    if (!rtp_session) { return; }
+
+    if (rtp_session->seq_rollover) {
+        exp_total = (rtp_session->seq_rollover - 1) * ((int) 0xffff + 1) +
+            (0xffff - rtp_session->base_seq) + rtp_session->last_seq + 2;
+    } else {
+        exp_total = (rtp_session->last_seq == rtp_session->base_seq) ? 0 :
+            rtp_session->last_seq - rtp_session->base_seq + 1;
+    }
+    rtp_session->total_received = exp_total;
+}
+#endif
+
 static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
 {
     int ret = 0;
@@ -2979,7 +2997,9 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
                                      + sizeof(struct switch_rtcp_source))/4);
 
             if (switch_core_session_get_cn_state(rtp_session->session)) {
+                rtp_session->total_received = exp_total;
                 rtp_session->stats.cumulative_lost = 0;
+                rep->sr_source.fraction_lost = 0;
             } else {
                 rtp_session->stats.cumulative_lost = exp_total - rtp_session->total_received;
             }
