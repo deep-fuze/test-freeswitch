@@ -4687,8 +4687,6 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         }
     }
 
-    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "max_mix=%d\n", max_mix);
-
     delta = switch_time_now() - delta;
     if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
     delta = switch_time_now();

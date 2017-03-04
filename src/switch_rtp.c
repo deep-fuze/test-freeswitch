@@ -426,7 +426,6 @@ struct switch_rtp {
     switch_rtp_stats_t stats;
     int rtcp_interval;
     uint32_t send_rtcp;
-    switch_time_t next_rtcp_send;
     switch_bool_t rtcp_fresh_frame;
     uint8_t been_active_talker;
 
@@ -541,6 +540,8 @@ struct switch_rtp {
 
     int32_t level_out;
     int32_t level_in;
+
+    switch_time_t last_rtcp_send;
 };
 
 struct switch_rtcp_report_block {
@@ -2817,7 +2818,7 @@ static int add_rx_congestion(switch_rtp_t *rtp_session, void *body, switch_rtcp_
 static int add_cname(switch_rtp_t *rtp_session, void *body, switch_rtcp_hdr_t *pHeader)
 {
     struct switch_rtcp_s_desc_trunk *cname_item = (struct switch_rtcp_s_desc_trunk *)body;
-    char bufa[30];
+    char bufa[40];
     int nbytes, pad;
     const char *str_cname;
 
@@ -2829,11 +2830,13 @@ static int add_cname(switch_rtp_t *rtp_session, void *body, switch_rtcp_hdr_t *p
     cname_item->ssrc = htonl(rtp_session->ssrc);
     cname_item->cname = 0x1;
 
+    memset(bufa, 0, 40);
     str_cname = switch_get_addr(bufa, sizeof(bufa), rtp_session->rtcp_local_addr);
     cname_item->length = (uint8_t)strlen(str_cname);
     memcpy ((char*)cname_item->text, str_cname, strlen(str_cname));
 
-    nbytes = sizeof(struct switch_rtcp_s_desc_trunk)+cname_item->length;
+    // nbytes = sizeof(struct switch_rtcp_s_desc_trunk)+cname_item->length;
+    nbytes = 6 + cname_item->length + 1;
 
     /*Make sure the total length is aligned with 32-bit boundary; Pad it with NULL bytes*/
     pad = nbytes % 4;
@@ -2851,6 +2854,7 @@ static int add_cname(switch_rtp_t *rtp_session, void *body, switch_rtcp_hdr_t *p
 static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
 {
     int ret = 0;
+    switch_time_t now = switch_time_now();
 
     if (rtp_session->fir_countdown) {
         //if (rtp_session->fir_countdown == FIR_COUNTDOWN) {
@@ -2868,27 +2872,11 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
         rtp_session->fir_countdown--;
     }
 
-#if 0
-    /*
-     * Fuze: the way we operate we generally don't ever want to produce CNG packets
-     */
-    if (rtp_session->flags[SWITCH_RTP_FLAG_AUTO_CNG] && rtp_session->send_msg.header.ts && rtp_session->cng_pt &&
-        rtp_session->timer.samplecount >= (rtp_session->last_write_samplecount + (rtp_session->samples_per_interval * 60))) {
-        uint8_t data[10] = { 0 };
-        switch_frame_flag_t frame_flags = SFF_NONE;
-        data[0] = 65;
-        rtp_session->cn++;
-
-        get_next_write_ts(rtp_session, 0);
-        rtp_session->send_msg.header.ts = htonl(rtp_session->ts);
-
-        switch_rtp_write_manual(rtp_session, (void *) data, 2, 0, rtp_session->cng_pt, ntohl(rtp_session->send_msg.header.ts), &frame_flags);
-
-        if (switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_USE_TIMER)) {
-            rtp_session->last_write_samplecount = rtp_session->timer.samplecount;
-        }
+    /* Send an RTCP packet at least every 20 seconds! */
+    if ((now - rtp_session->last_rtcp_send) > (20*1000*1000) && rtp_session->send_rtcp == 0) {
+        /* too long since rtcp ... send! */
+        rtp_session->send_rtcp = SWITCH_RTCP_NORMAL;
     }
-#endif
 
     if (rtp_session->rtcp_sock_output &&
         switch_rtp_test_flag(rtp_session, SWITCH_RTP_FLAG_ENABLE_RTCP) &&
@@ -3010,6 +2998,8 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
 
             if (rtcp_write(rtp_session, rtcp_bytes) != SWITCH_STATUS_SUCCESS) {
                 reset_period_data = SWITCH_FALSE;
+            } else {
+                rtp_session->last_rtcp_send = now;
             }
         } else if (rtp_session->send_rtcp & SWITCH_RTCP_RX_CONGESTION && rtp_session->stats.time > RTP_STATS_RATE_HISTORY) {
             memset(rtp_session->rtcp_send_msg.body, 0, sizeof(rtp_session->rtcp_send_msg.body));
@@ -3018,6 +3008,8 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
 
             if (rtcp_write(rtp_session, rtcp_bytes) != SWITCH_STATUS_SUCCESS) {
                 reset_period_data = SWITCH_FALSE;
+            } else {
+                rtp_session->last_rtcp_send = now;
             }
         }
 
@@ -4699,6 +4691,8 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
 
     rtp_session->level_out = -1;
     rtp_session->level_in = -1;
+
+    rtp_session->last_rtcp_send = switch_time_now();
 
     rtp_session->stats.recv_rate_history_idx = 0;
     rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
