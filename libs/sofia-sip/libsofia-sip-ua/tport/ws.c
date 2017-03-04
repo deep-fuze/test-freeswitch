@@ -269,6 +269,9 @@ int ws_handshake(wsh_t *wsh)
 		goto err;
 	}
 	
+	if ((e-p) > 255) {
+	  goto err;
+	}
 	strncpy(uri, p, e-p);
 	
 	cheezy_get_var(wsh->buffer, "Sec-WebSocket-Key", key, sizeof(key));
