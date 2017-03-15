@@ -9112,7 +9112,7 @@ SWITCH_DECLARE(void) switch_rtp_reset_rtp_stats(switch_channel_t *channel)
 
 #define rtp_stat_add_value(rtp_session, rtpstat, type_str, value, last_value) \
     { \
-        if (value != last_value) { \
+        if (value != last_value || rtp_session->stats.len[statno] == RTP_STATS_STR_SIZE) { \
             int statno = rtpstat-RTP_RECV_RATE; \
             if (rtp_session->stats.len[statno] < RTP_STATS_STR_SIZE) { \
                 strncat(rtp_session->stats.eos[statno], ":", rtp_session->stats.len[statno]); \
