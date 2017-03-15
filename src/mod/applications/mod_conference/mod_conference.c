@@ -7135,9 +7135,11 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
     ts[0] = ts[1] = ts[2] = ts[3] = ts[4] = ts[5] = ts[6] = switch_time_now();
 #endif
 
+#if 0
     if (list->tid < globals.nthreads) {
         switch_core_thread_set_cpu_affinity(list->tid);
     }
+#endif
 
     while (1) {
         int count = 0, count_null = 0, count_not_sent = 0, count_ok = 0, count_no_frame = 0, count_long_sends = 0;
@@ -7629,46 +7631,36 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             if (runs > 10 && current_time >= next_wake_up) {
                 wake_up_delta = 1000;
             }
-            if (current_time < next_wake_up || runs > 10) {
+            if (wake_up_delta) {
                 switch_time_t delta2;
-                if (wake_up_delta > 1000 || runs > 10) {
 #ifdef SIMULATE_DELAY
-                    if (rand_delay > 20000 && rand_delay < 60000) {
-                        wake_up_delta += rand_delay;
-                    }
+                if (rand_delay > 20000 && rand_delay < 60000) {
+                    wake_up_delta += rand_delay;
+                }
 #endif
-                    release_conference_thread_list_lock(list->idx, runs);
-                    switch_sleep(wake_up_delta);
+                release_conference_thread_list_lock(list->idx, runs);
+                switch_sleep(wake_up_delta);
 
-                    delta2 = switch_time_now() - current_time;
+                delta2 = switch_time_now() - current_time;
 
-                    runs = 0;
-                    conference_thread_list_lock(list->idx, tid);
+                runs = 0;
+                conference_thread_list_lock(list->idx, tid);
 
-                    if (wake_up_delta > 0 && (delta2 - wake_up_delta) > 10000) {
-                        if (behind == 0 && list->count) {
-                            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
-                                              "output loop %d count=%d overslept sleep_target=%" PRId64 " actual=%" PRId64 "\n",
-                                              list->idx, list->count, wake_up_delta, delta2);
-                        }
-                        behind += 1;
-                    } else {
-                        if (behind > 1 && list->count) {
-                            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "output loop %d count=%d caught up after %d cycles\n",
-                                              list->idx, list->count, behind);
-                        }
-                        behind = 0;
-                    }
-                    time_asleep =  wake_up_delta;
-                } else {
-                    if (behind == 0) {
+                if (wake_up_delta > 0 && (delta2 - wake_up_delta) > 10000) {
+                    if (behind == 0 && list->count) {
                         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
-                                          "output loop %d count=%d short sleep ... skipping sleep delta=%" PRId64 "\n",
-                                          list->idx, list->count, wake_up_delta);
+                                          "output loop %d count=%d overslept sleep_target=%" PRId64 " actual=%" PRId64 "\n",
+                                          list->idx, list->count, wake_up_delta, delta2);
                     }
                     behind += 1;
-                    time_asleep = 0;
+                } else {
+                    if (behind > 1 && list->count) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "output loop %d count=%d caught up after %d cycles\n",
+                                          list->idx, list->count, behind);
+                    }
+                    behind = 0;
                 }
+                time_asleep =  wake_up_delta;
             } else {
                 if (behind == 0 && list->count) {
                     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
@@ -13638,7 +13630,7 @@ static conference_obj_t *conference_find(char *name, char *domain)
     return conference;
 }
 
-#define MAX_PARTICIPANTS_PER_THREAD 400
+#define MAX_PARTICIPANTS_PER_THREAD 300
 #define MAX_PARTICIPANTS_PER_OTHREAD 400
 
 /* create a new conferene with a specific profile */
