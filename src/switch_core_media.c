@@ -2134,6 +2134,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_read_frame(switch_core_session
                 if (switch_channel_get_variable(session->channel, "execute_on_media_timeout")) {
                     *frame = &engine->read_frame;
                     switch_set_flag((*frame), SFF_CNG);
+                    switch_set_flag((*frame), SFF_TIMEOUT);
                     (*frame)->datalen = engine->read_impl.encoded_bytes_per_packet;
                     memset((*frame)->data, 0, (*frame)->datalen);
                     switch_channel_execute_on(session->channel, "execute_on_media_timeout");

@@ -267,9 +267,9 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
     now = switch_time_now();
 
     if (!session->paused && !(flags & SWITCH_IO_FLAG_CANT_SPEAK) &&
-		session->last_jbuf_time[0] && (now-session->last_jbuf_time[0]) > 60000) {
+        session->last_jbuf_time[0] && (now-session->last_jbuf_time[0]) > 60000) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
-						  "Long time since switch_core_session_fast_read_frame_from_jitterbuffer was called %" PRId64 "ms\n",
+                          "Long time since switch_core_session_fast_read_frame_from_jitterbuffer was called %" PRId64 "ms\n",
                           (now-session->last_jbuf_time[0])/1000);
     }
     session->last_jbuf_time[0] = now;
@@ -826,6 +826,9 @@ done:
     } else {
         if (flag & SFF_CNG) {
             switch_set_flag((*frame), SFF_CNG);
+        }
+        if (flag & SFF_TIMEOUT) {
+            switch_set_flag((*frame), SFF_TIMEOUT);
         }
     }
 even_more_done:

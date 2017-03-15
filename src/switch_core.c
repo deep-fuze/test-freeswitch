@@ -1583,6 +1583,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_init(switch_core_flag_t flags, switc
 	runtime.dummy_cng_frame.buflen = sizeof(runtime.dummy_data);
 	runtime.dbname = "core";
 	switch_set_flag((&runtime.dummy_cng_frame), SFF_CNG);
+	switch_set_flag((&runtime.dummy_cng_frame), SFF_TIMEOUT);
 	switch_set_flag((&runtime), SCF_AUTO_SCHEMAS);
 	switch_set_flag((&runtime), SCF_CLEAR_SQL);
 	switch_set_flag((&runtime), SCF_API_EXPANSION);

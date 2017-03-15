@@ -7398,6 +7398,7 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
             */
 
             *flags |= (SFF_CNG);
+            *flags |= (SFF_TIMEOUT);
             *payload_type = (switch_payload_t) rtp_session->recv_msg.header.pt;
             ret = 2 + rtp_header_len;
 
