@@ -1198,7 +1198,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
     /* fuze: so we don't init the plc anymore but webrtc neteq has a built in plc so ... */
     if (switch_test_flag(*frame, SFF_CNG)) {
 
-        if (!session->in_cn_period) {
+        if (!session->in_cn_period && !switch_test_flag(*frame, SFF_TIMEOUT)) {
             session->in_cn_period = SWITCH_TRUE;
         }
 
