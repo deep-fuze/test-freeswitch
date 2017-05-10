@@ -138,7 +138,7 @@ void fuze_conference_accept(switch_core_session_t *session, ivrc_profile_t *prof
 /*******************************************************************************/
 
 #define AUTH_EMAIL "null-callwave_service@relay11.callwave.com"
-#define AUTH_PASSWD "callwave_serviceP4ssw0rd"
+#define AUTH_PASSWD "2ymkRlqIoDkuYhAOEXqfjTZoSktLXqCM"
 #define MAX_MEETING_NUMBER_LEN 10
 #define CONTENT "Content-Type application/x-www-form-urlencoded"
 #define BODY_FMT "auth_email=%s&auth_password=%s&mobile_number=%s&dialed_number=%s&iso_code=%s"
