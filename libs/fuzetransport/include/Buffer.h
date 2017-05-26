@@ -3,13 +3,13 @@
 
 #include <ciso646>
 
-#if defined(_LIBCPP_VERSION) || defined(_WIN32) // Use libc++
+#if (__cplusplus >= 201103L) || defined(_MSC_VER) // Use libc++
 #include <memory>
 #else
 #include <tr1/memory>
 #endif
 
-#if defined (_LIBCPP_VERSION) || defined (_WIN32) // Use libc++
+#if (__cplusplus >= 201103L) || defined(_MSC_VER) // Use libc++
     #define fuze_shared_ptr std::shared_ptr
     #define fuze_weak_ptr std::weak_ptr
     #define fuze_dynamic_pointer_cast std::dynamic_pointer_cast

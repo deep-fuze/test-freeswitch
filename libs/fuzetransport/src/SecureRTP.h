@@ -42,6 +42,9 @@ public:
     virtual void   SetRemoteKey(KeyType type, const string& rRemoteKey);
     virtual string GetRemoteKey();
     
+    virtual int GetAuthTagLen(bool isRtp) const {return (send_policy_ ? (isRtp ? send_policy_->rtp.auth_tag_len : send_policy_->rtcp.auth_tag_len) : 0);}
+    virtual void SetWindowSize(unsigned long windowSize) {window_size_ = windowSize;}
+
     virtual void Encrypt(uint8_t* data, int* bytes_out);
     virtual void Decrypt(uint8_t* data, int* bytes_out);
     
@@ -87,6 +90,8 @@ private:
     bool            has_new_recv_key_;
     
     MutexLock       key_lock_;
+
+    unsigned long   window_size_;
 };
 
 

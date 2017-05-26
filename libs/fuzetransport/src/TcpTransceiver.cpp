@@ -325,6 +325,13 @@ void TcpTransceiver::Reset()
         }
         else {
             if (socket_ != INVALID_SOCKET) {
+                if (TransportImpl* p = TransportImpl::GetInstance()) {
+                    if (flowID_ != 0) {
+                        p->UnsetQoSTag(socket_, flowID_);
+                        flowID_ = 0;
+                    }
+                }
+
                 evutil_closesocket(socket_);
             }
         }
@@ -619,98 +626,7 @@ void TcpTransceiver::SetSocketOption()
     }
 #endif
     
-    // if original connection type is UDP then use NO_DELAY option
-    if (pConn_->GetOriginalConnectionType() == CT_UDP) {
-#ifndef WIN32
-        MLOG("Setting ToS bit as 0xE0");
-        int tos = 0xe0;
-        if (setsockopt(socket_, IPPROTO_IP, IP_TOS,
-                       (char*)&tos, sizeof(tos)) < 0) {
-            MLOG("Unable to set ToS");
-        }
-        
-#ifdef SO_NET_SERVICE_TYPE
-        int st = INVALID_ID;
-        const char* p_log = "";
-        
-        //
-        // per socket.h comment on SO_NET_SERVICE_TYPE
-        //
-        if (pConn_->IsPayloadType(Connection::AUDIO)) {
-            st = NET_SERVICE_TYPE_VO;
-            p_log = "VO";
-        }
-        else if (pConn_->IsPayloadType(Connection::VIDEO)) {
-            st = NET_SERVICE_TYPE_VI;
-            p_log = "VI";
-        }
-        else if (pConn_->IsPayloadType(Connection::SS)) {
-            st = NET_SERVICE_TYPE_RV;
-            p_log = "RV";
-        }
-        else if (pConn_->IsPayloadType(Connection::SIP)) {
-            st = NET_SERVICE_TYPE_SIG;
-            p_log = "SIG";
-        }
-        
-        if (st != INVALID_ID) {
-            if (setsockopt(socket_, SOL_SOCKET, SO_NET_SERVICE_TYPE,
-                           (char*)&st, sizeof(st)) < 0) {
-                MLOG("NET_SERVICE_TYPE (" << p_log << ") not available");
-            }
-            else {
-                MLOG("NET_SERVICE_TYPE (" << p_log << ")");
-            }
-        }
-#endif
-
-#else
-		HANDLE QOSHandle;
-		QOS_VERSION version;
-
-		version.MajorVersion = 1;
-		version.MinorVersion = 0;
-
-        if (!pfnQosCreateHandle_) {
-			WLOG("qWAVE not available.");
-		}
-        else if (pfnQosCreateHandle_(&version, &QOSHandle) == 0) {
-			WLOG("Couldn't create QOS handle err=" << GetLastError());
-		}
-        else {
-            QOS_FLOWID flowid = 0;
-            QOS_TRAFFIC_TYPE qos_type = QOSTrafficTypeBestEffort;
-            
-            if (pConn_) {
-                if (pConn_->IsPayloadType(Connection::AUDIO)) {
-                    qos_type = QOSTrafficTypeVoice;
-                }
-                else if (pConn_->IsPayloadType(Connection::VIDEO)) {
-                    qos_type = QOSTrafficTypeAudioVideo;
-                }
-                else if (pConn_->IsPayloadType(Connection::SS)) {
-                    qos_type = QOSTrafficTypeAudioVideo;
-                }
-                else if (pConn_->IsPayloadType(Connection::SIP)) {
-                    qos_type = QOSTrafficTypeControl;
-                }
-            }
-            
-            sockaddr* p_saddr = (sockaddr*)pConn_->GetRemoteAddress().SockAddr();
-
-            if (!pfnQosAddSocketToFlow_) {
-				WLOG("qWAVE not available.");
-			}
-			else if (pfnQosAddSocketToFlow_(QOSHandle, socket_, p_saddr, qos_type,
-                                            QOS_NON_ADAPTIVE_FLOW, &flowid) == 0) {
-				MLOG("Not allowed to add socket to QOS flow [" << GetLastError() << "]");
-			}
-            else {
-				MLOG("Successfully added socket to QOS flow");
-			}
-		}
-#endif
-    }
+    TransportImpl::GetInstance()->SetQoSTag(socket_, pConn_, flowID_);
     
 #ifdef SO_NOSIGPIPE
     on = 1;

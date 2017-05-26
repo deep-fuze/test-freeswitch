@@ -92,6 +92,13 @@ void UdpTransceiver::Reset()
         
         if (socket_ != INVALID_SOCKET) {
             
+            if (TransportImpl* p = TransportImpl::GetInstance()) {
+                if (flowID_ != 0) {
+                    p->UnsetQoSTag(socket_, flowID_);
+                    flowID_ = 0;
+                }
+            }
+
             if (!reservedPort_) {
                 evutil_closesocket(socket_);
             }
@@ -172,6 +179,8 @@ bool UdpTransceiver::Start()
         return false;
     }
     
+    TransportImpl* p_tp = TransportImpl::GetInstance();
+    
     //
     // if local address is not available but remote address is,
     // this means this is connected UDP we are creating. Otherwise,
@@ -195,8 +204,7 @@ bool UdpTransceiver::Start()
     bool bResult = false;
     
     if (!connectedUdp_) {
-        if (PortReserve::Ptr sp_rsv
-                = TransportImpl::GetInstance()->GetReservedPort(addr.Port())) {
+        if (PortReserve::Ptr sp_rsv = p_tp->GetReservedPort(addr.Port())) {
             MLOG("Found reserved port: " << addr.Port() <<
                  " (s:" << sp_rsv->sock_ << ")");
             socket_ = sp_rsv->sock_;
@@ -251,95 +259,7 @@ bool UdpTransceiver::Start()
         evutil_make_socket_nonblocking(socket_);
         evutil_make_listen_socket_reuseable(socket_);
         
-#ifndef WIN32
-        MLOG("Setting ToS bit as 0xE0");
-        int tos = 0xe0;
-        if (setsockopt(socket_, IPPROTO_IP, IP_TOS,
-                       (char*)&tos, sizeof(tos)) < 0) {
-            MLOG("Unable to set ToS");
-        }
-
-#ifdef SO_NET_SERVICE_TYPE
-        int st = INVALID_ID;
-        const char* p_log = "";
-        
-        //
-        // per socket.h comment on SO_NET_SERVICE_TYPE
-        //
-        if (pConn_->IsPayloadType(Connection::AUDIO)) {
-            st = NET_SERVICE_TYPE_VO;
-            p_log = "VO";
-        }
-        else if (pConn_->IsPayloadType(Connection::VIDEO)) {
-            st = NET_SERVICE_TYPE_VI;
-            p_log = "VI";
-        }
-        else if (pConn_->IsPayloadType(Connection::SS)) {
-            st = NET_SERVICE_TYPE_RV;
-            p_log = "RV";
-        }
-        else if (pConn_->IsPayloadType(Connection::SIP)) {
-            st = NET_SERVICE_TYPE_SIG;
-            p_log = "SIG";
-        }
-        
-        if (st != INVALID_ID) {
-            if (setsockopt(socket_, SOL_SOCKET, SO_NET_SERVICE_TYPE,
-                           (char*)&st, sizeof(st)) < 0) {
-                MLOG("NET_SERVICE_TYPE (" << p_log << ") not available");
-            }
-            else {
-                MLOG("NET_SERVICE_TYPE (" << p_log << ")");
-            }
-        }
-#endif
-        
-#else
-		HANDLE QOSHandle;
-		QOS_VERSION version;
-
-		version.MajorVersion = 1;
-		version.MinorVersion = 0;
-
-		if (!pfnQosCreateHandle_) {
-			WLOG("qWAVE not available.");
-		}
-		else if (pfnQosCreateHandle_(&version, &QOSHandle) == 0) {
-			WLOG("Couldn't create QOS handle err=" << GetLastError());
-		}
-		else {
-			QOS_FLOWID flowid = 0;
-			QOS_TRAFFIC_TYPE qos_type = QOSTrafficTypeBestEffort;
-
-			if (pConn_) {
-                if (pConn_->IsPayloadType(Connection::AUDIO)) {
-                    qos_type = QOSTrafficTypeVoice;
-                }
-                else if (pConn_->IsPayloadType(Connection::VIDEO)) {
-                    qos_type = QOSTrafficTypeAudioVideo;
-                }
-                else if (pConn_->IsPayloadType(Connection::SS)) {
-                    qos_type = QOSTrafficTypeAudioVideo;
-                }
-                else if (pConn_->IsPayloadType(Connection::SIP)) {
-                    qos_type = QOSTrafficTypeControl;
-                }
-			}
-            
-            sockaddr* p_saddr = (sockaddr*)pConn_->GetRemoteAddress().SockAddr();
-            
-			if (!pfnQosAddSocketToFlow_) {
-				WLOG("qWAVE not available.");
-			}
-			else if (pfnQosAddSocketToFlow_(QOSHandle, socket_, p_saddr, qos_type,
-                                            QOS_NON_ADAPTIVE_FLOW, &flowid) == 0) {
-				MLOG("Not allowed to add socket to QOS flow [" << GetLastError() << "]");
-			}
-			else {
-				MLOG("Successfully added socket to QOS flow");
-			}
-		}
-#endif
+        p_tp->SetQoSTag(socket_, pConn_, flowID_);
         
         if (pConn_->IsPayloadType(Connection::SIP)) {
             MLOG("adjusting recv buf size to 30000");
@@ -348,7 +268,7 @@ bool UdpTransceiver::Start()
 
         uint16_t timeout = 0;
         
-        if (TransportImpl::GetInstance()->IsAppServer() == false) {
+        if (p_tp->IsAppServer() == false) {
             if (pConn_->IsFallback()) {
                 if (pConn_->IsPayloadType(Connection::RTP)) {
                     timeout = RTP_TIMEOUT;
@@ -357,7 +277,7 @@ bool UdpTransceiver::Start()
                     timeout = RTCP_TIMEOUT;
                 }
                 
-                if (timeout != 0 && TransportImpl::GetInstance()->IsUdpBlocked()) {
+                if (timeout != 0 && p_tp->IsUdpBlocked()) {
                     timeout /= 5;
                     MLOG("UDP seems blocked - shorten timeout to " << timeout << " ms");
                     // if proxy is not set then try longer timeout

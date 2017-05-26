@@ -49,7 +49,7 @@ extern "C" { ThreadRet WINAPI dispatch_thread(void* pArg); }
 class Thread
 {
 public:
-    Thread(Runnable* pRunnable, const char* pName = "");
+    Thread(Runnable* pRunnable, const char* pName = "FTLib");
     
     // start the thread
     bool Start(bool bTimeCritical = false);

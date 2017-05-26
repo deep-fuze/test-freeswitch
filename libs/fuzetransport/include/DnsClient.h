@@ -22,6 +22,8 @@ vector<string> TranslateToIPs(const string& rAddress);
 
 namespace dns {
     
+    using fuze::core::Buffer;
+    
     struct Record
     {
         typedef fuze_shared_ptr<Record> Ptr;
@@ -37,6 +39,8 @@ namespace dns {
         
         bool operator==(const Record& rRhs);
         
+        virtual void Serialize(std::ostringstream& rStr) = 0;
+        
         virtual ~Record() {}
     };
     
@@ -46,6 +50,10 @@ namespace dns {
         
         string  hostName_;
         bool    bad_; // internal usage
+        
+        virtual void Serialize(std::ostringstream& rStr);
+        
+        A() : bad_(false) {}
     };
     
     struct SRV : public Record
@@ -56,6 +64,10 @@ namespace dns {
         uint32_t  weight_;
         uint32_t  port_;
         string    name_;
+
+        virtual void Serialize(std::ostringstream& rStr);
+        
+        SRV() : priority_(0), weight_(0), port_(0) {}
     };
     
     struct NAPTR : public Record
@@ -68,6 +80,10 @@ namespace dns {
         string    services_;
         string    regexp_;
         string    replacement_;
+        
+        virtual void Serialize(std::ostringstream& rStr);
+        
+        NAPTR() : order_(0), pref_(0) {}
     };
     
     class Resolver

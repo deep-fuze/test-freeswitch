@@ -19,9 +19,7 @@
 #include <memory>
 
 namespace fuze {
-    
-using std::auto_ptr;
-    
+        
 // structure that holds binding info of server's listening connection
 struct BindingInfo
 {

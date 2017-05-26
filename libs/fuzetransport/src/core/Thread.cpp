@@ -15,6 +15,38 @@
 
 #define _LOG_(A,B) DEBUG_OUT(A, AREA_COM, __FUZE_FUNC__ << ": " << B)
 
+#ifdef WIN32
+namespace
+{
+    const DWORD MS_VC_EXCEPTION = 0x406D1388;
+#pragma pack(push,8)  
+    typedef struct tagTHREADNAME_INFO
+    {
+        DWORD dwType; // Must be 0x1000.  
+        LPCSTR szName; // Pointer to name (in user addr space).  
+        DWORD dwThreadID; // Thread ID (-1=caller thread).  
+        DWORD dwFlags; // Reserved for future use, must be zero.  
+    } THREADNAME_INFO;
+#pragma pack(pop)  
+    void SetThreadName(const char* threadName) {
+        THREADNAME_INFO info;
+        info.dwType = 0x1000;
+        info.szName = threadName;
+        info.dwThreadID = 0xFFFFFFFF;
+        info.dwFlags = 0;
+#pragma warning(push)  
+#pragma warning(disable: 6320 6322)  
+        __try {
+            RaiseException(MS_VC_EXCEPTION, 0, sizeof(info) / sizeof(ULONG_PTR), (ULONG_PTR*)&info);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+        }
+#pragma warning(pop)  
+    }
+}
+
+#endif
+
 namespace fuze {
     
 Thread::Thread(Runnable* pRunnable, const char* pName)
@@ -164,7 +196,15 @@ ThreadRet WINAPI dispatch_thread(void* pArg)
         // initialize seed for rand()
         srand(seed);
     }
-    
+
+#ifdef WIN32
+    SetThreadName(p_thread->name_.c_str());
+#elif defined(__APPLE__)
+    pthread_setname_np(p_thread->name_.c_str());
+#else
+    pthread_setname_np(pthread_self(), p_thread->name_.substr(0, 15).c_str());
+#endif
+
     MLOG(p_thread->name_ << " starting");
         
     try {

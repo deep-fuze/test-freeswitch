@@ -252,6 +252,7 @@ SRTP::SRTP()
     , recv_policy_(new srtp_policy_t)
     , has_new_send_key_(false)
     , has_new_recv_key_(false)
+    , window_size_(128)
 {
     memset(send_policy_, 0, sizeof(srtp_policy_t));
     memset(recv_policy_, 0, sizeof(srtp_policy_t));
@@ -429,7 +430,8 @@ int SRTP::ApplySRTPKey(Direction dir)
     
     policy->key             = local_ctx->key_;
     policy->rtp.sec_serv    = sec_serv_conf_and_auth;
-    policy->window_size     = 128;
+    policy->allow_repeat_tx = 1;
+    policy->window_size     = window_size_;
     
     srtp_crypto_policy_set_rtcp_default(&policy->rtcp);
     

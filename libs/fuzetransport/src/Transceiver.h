@@ -12,11 +12,6 @@
 #include <TransportImpl.h>
 #include <Resource.h>
 
-#ifdef WIN32
-#include <qos2.h>
-#include <fuze/core/win32/DllImport.h>
-#endif
-
 namespace fuze {
 
 //
@@ -35,36 +30,10 @@ public:
     virtual void SetConnectionID(int connID) = 0;
     virtual ConnectionType ConnType()  = 0;
     
-    explicit Transceiver(int ID) :
-        Resource(ID)
-#ifdef WIN32
-        // qWAVE isn't available on Windows Server by default, so we load it
-        // dynamically and fail gracefully if it isn't present.
-        , pfnQosCreateHandle_(L"qwave.dll", "QOSCreateHandle")
-        , pfnQosAddSocketToFlow_(L"qwave.dll", "QOSAddSocketToFlow")
-#endif
-        {
-        }
+    explicit Transceiver(int ID) : Resource(ID), flowID_(0) {}
 
-#ifdef WIN32
 protected:
-    // qWAVE isn't available on Windows Server by default, so we load it
-    // dynamically and fail gracefully if it isn't present.
-    typedef BOOL(__stdcall *PFNQOSCreateHandle)(
-        _In_    PQOS_VERSION    Version,
-        _Out_   PHANDLE         QOSHandle);
-
-    typedef BOOL(__stdcall *PFNQOSAddSocketToFlow)(
-        _In_        HANDLE              QOSHandle,
-        _In_        SOCKET              Socket,
-        _In_opt_    PSOCKADDR           DestAddr,
-        _In_        QOS_TRAFFIC_TYPE    TrafficType,
-        _In_opt_    DWORD               Flags,
-        _Inout_     PQOS_FLOWID         FlowId);
-
-    fuze::core::win32::DllImport<PFNQOSCreateHandle> pfnQosCreateHandle_;
-    fuze::core::win32::DllImport<PFNQOSAddSocketToFlow> pfnQosAddSocketToFlow_;
-#endif
+    unsigned long flowID_; // for qWave
 };
 
 } // namespace fuze

@@ -41,7 +41,11 @@
 // indicate that application is in process of exiting and
 // we shouldn't be servicing anymore
 //
-namespace { bool gb_process_exiting = false; }
+namespace
+{
+    bool gb_process_exiting = false;
+    bool gb_transport_gone  = false;
+}
 
 namespace fuze {
 
@@ -51,8 +55,9 @@ namespace fuze {
 void fuze_transport_at_exit()
 {
     _MLOG_("app is exiting");
-    delete TransportImpl::GetInstance();
     gb_process_exiting = true;
+    delete TransportImpl::GetInstance();
+    gb_transport_gone = true;
 }
 
 bool IsAppExiting()
@@ -104,7 +109,7 @@ void ConnectionEnded(ConnectionImpl* p)
     
 TransportImpl* TransportImpl::GetInstance()
 {
-    if (gb_process_exiting) return 0;
+    if (gb_transport_gone) return 0;
     
     if (!spInstance_) {
         MutexLock scoped(&sLock_);
@@ -131,6 +136,21 @@ TransportImpl::TransportImpl()
     , bServerMode_(false)
     , spProber_(new Prober)
     , qIndex_(0)
+    , dscpAudio_(46)
+    , dscpVideo_(34)
+    , dscpSS_(34)
+    , dscpSIP_(26)
+    , bNetServiceType_(false)
+#ifdef WIN32
+    // qWAVE isn't available on Windows Server by default, so we load it
+    // dynamically and fail gracefully if it isn't present.
+    , pfnQosCreateHandle_(L"qwave.dll", "QOSCreateHandle")
+    , pfnQosCloseHandle_(L"qwave.dll", "QOSCloseHandle")
+    , pfnQosAddSocketToFlow_(L"qwave.dll", "QOSAddSocketToFlow")
+    , pfnQosRemoveSocketFromFlow_(L"qwave.dll", "QOSRemoveSocketFromFlow")
+    , pfnQosSetFlow_(L"qwave.dll", "QOSSetFlow")
+    , qosHandle_(0)
+#endif
 {
 #ifdef WIN32
     WSADATA data;
@@ -141,10 +161,27 @@ TransportImpl::TransportImpl()
     if (evthread_use_windows_threads() == -1) {
         ELOG("Failed to set windows thread on libevent");
     }
+
+    QOS_VERSION version;
+
+    version.MajorVersion = 1;
+    version.MinorVersion = 0;
+
+    if (pfnQosCreateHandle_) {
+        if (pfnQosCreateHandle_(&version, &qosHandle_) == 0) {
+            WLOG("Couldn't create QOS handle " << GetLastError());
+            qosHandle_ = 0;
+        }
+    }
 #else
     if (evthread_use_pthreads() == -1) {
         ELOG("Failed to set pthread on libevent");
     }
+    
+#ifdef FUZE_IOS_BUILD
+    bNetServiceType_ = true;
+#endif
+    
 #endif
     
 #ifdef DEBUG
@@ -189,6 +226,10 @@ TransportImpl::TransportImpl()
     
     // add one threads by default
     AddWorkerThread(0);
+
+#ifdef __APPLE__
+    RetrieveDnsCache();
+#endif
 }
 
 TransportImpl::~TransportImpl()
@@ -238,7 +279,11 @@ TransportImpl::~TransportImpl()
         event_base_free(pEventBase_);
         pEventBase_ = 0;
     }
-    
+
+#ifdef __APPLE__
+    StoreDnsCache();
+#endif
+
     if (spProxy_) {
         spProxy_.reset();
     }
@@ -249,6 +294,10 @@ TransportImpl::~TransportImpl()
     dns::Resolver::Terminate();
     
 #if defined(WIN32)
+    if (qosHandle_) {
+        pfnQosCloseHandle_(qosHandle_);
+    }
+
     MLOG("WSACleanup");
 	WSACleanup();
 #endif
@@ -260,11 +309,140 @@ TransportImpl::~TransportImpl()
     }
 }
 
-bool TransportImpl::Initialized()
+#ifdef __APPLE__
+void SetDnsFileCache(std::string cache);
+void GetDnsFileCache(std::string& rCache);
+    
+void TransportImpl::StoreDnsCache()
 {
-    return (pEventBase_ != 0);
+    // Serialize and store the stale cache in user default on Mac/iOS
+    ClearDnsCache();
+    std::ostringstream store;
+    uint32_t cache_cnt = 0;
+    for (auto& i : staleCache_) {
+        for (auto& kv : i) {
+            for (auto& j : kv.second) {
+                j->Serialize(store);
+                cache_cnt++;
+            }
+        }
+    }
+    
+    string store_str = store.str();
+    if (!store_str.empty()) {
+        MLOG("Storing " << cache_cnt << " dns file cache ");
+        SetDnsFileCache(store_str);
+    }
 }
 
+void TransportImpl::RetrieveDnsCache()
+{
+    using namespace dns;
+    
+    string cache;
+    GetDnsFileCache(cache);
+    if (cache.empty()) return;
+    
+    const char* pParam = cache.c_str();
+    const char* pEnd   = pParam + cache.size();
+    
+    uint32_t cache_cnt = 0;
+    
+    while (pParam < pEnd) {
+        
+        Record::Type type;
+        
+        if (*pParam == 'A') {
+            type = Record::A;
+        }
+        else if (*pParam == 'S') {
+            type = Record::SRV;
+        }
+        else if (*pParam == 'N') {
+            type = Record::NAPTR;
+        }
+        else {
+            ELOG("Invalid type string: " << pParam);
+            return;
+        }
+        
+        pParam += 2; // pass type
+        
+        const char* p_param_end = strchr(pParam, ';');
+        if (!p_param_end || p_param_end > pEnd) {
+            ELOG("Format error: " << pParam);
+            return;
+        }
+        
+        size_t param_len = size_t(p_param_end - pParam);
+        
+        const char* p_equal = strchr(pParam, '=');
+        if (!p_equal || p_equal > pEnd) {
+            ELOG("Format error: " << pParam);
+            return;
+        }
+        size_t name_len = p_equal - pParam;
+        
+        string name, value;
+        name.assign(pParam, name_len);
+        value.assign(pParam+name_len+1, param_len-name_len-1);
+
+        Record::Ptr sp_rec;
+        
+        if (type == Record::A) {
+            A::Ptr sp_a(new A);
+            sp_a->hostName_ = value;
+            sp_rec = sp_a;
+        }
+        else if (type == Record::SRV) {
+            SRV::Ptr sp_srv(new SRV);
+            size_t pos = value.find(':');
+            if (pos != string::npos) {
+                sp_srv->name_ = value.substr(0, pos);
+                sp_srv->port_ = atoi(&value[pos+1]);
+                sp_rec = sp_srv;
+            }
+            else {
+                ELOG("Format error: " << value);
+            }
+        }
+        else {
+            NAPTR::Ptr sp_naptr(new NAPTR);
+            size_t pos = value.find(':');
+            if (pos != string::npos) {
+                sp_naptr->replacement_ = value.substr(0, pos);
+                sp_naptr->services_    = value.substr(pos+1);
+                sp_rec = sp_naptr;
+            }
+            else {
+                ELOG("Format error: " << value);
+            }
+        }
+        
+        if (sp_rec) {
+            sp_rec->domain_ = name;
+            sp_rec->type_   = type;
+
+            DnsRecordMap::iterator it = staleCache_[type].find(name);
+            if (it != staleCache_[type].end()) {
+                it->second.push_back(sp_rec);
+            }
+            else {
+                Record::List new_list;
+                new_list.push_back(sp_rec);
+                staleCache_[type][name] = new_list;
+            }
+            cache_cnt++;
+        }
+        
+        p_param_end++; // skip semi colon in the end
+        pParam = p_param_end;
+    }
+    
+    MLOG("Retrieved " << cache_cnt << " dns file cache");
+}
+#endif
+    
 void TransportImpl::AddWorkerThread(size_t workerId)
 {
     MLOG(workerId);
@@ -625,6 +803,28 @@ string TransportImpl::GetMappingInfo()
     return mapInfo_;
 }
     
+void TransportImpl::SetDSCP(Connection::PayloadType type,
+                            uint32_t value)
+{
+    MLOG(toStr(type) << " - " << value << " (" << toStrDSCP(value) << ")");
+    
+    switch (type)
+    {
+    case Connection::AUDIO: dscpAudio_ = value; break;
+    case Connection::SIP:   dscpSIP_   = value; break;
+    case Connection::VIDEO: dscpVideo_ = value; break;
+    case Connection::SS:    dscpSS_    = value; break;
+    default:;
+    }
+}
+
+void TransportImpl::EnableNetServiceType(bool flag)
+{
+    MLOG((flag ? "ON" : "OFF"));
+    
+    bNetServiceType_ = flag;
+}
+    
 bool TransportImpl::CreateEvent(event*&           rpEvent,
                                 evutil_socket_t   sock,
                                 short             what,
@@ -957,13 +1157,11 @@ void TransportImpl::SetDnsCache(Record::List& rList)
             for (auto& sp : it->second) {
                 if (*sp_rec == *sp) {
                     found = true;
-                    if (sp_rec->expire_ > sp->expire_) {
+                    if (sp_rec->expire_ > sp->expire_ &&
+                        sp_rec->expire_ - sp->expire_ > 1000) {
                         _MLOG_(sp_rec << " - ttl extended with " <<
                                sp_rec->expire_ - sp->expire_ << "ms");
                         sp = sp_rec;
-                    }
-                    else {
-                        _MLOG_(sp_rec << " - ignored as recent cache");
                     }
                     break;
                 }
@@ -1018,17 +1216,6 @@ Record::List TransportImpl::GetStaleDnsCache(const string& rDomain, Record::Type
     DnsRecordMap::iterator it = staleCache_[type].find(rDomain);
     if (it != staleCache_[type].end()) {
         if (!it->second.empty()) {
-            // if this is bad A record then fix as we are treating as dns replies
-            if (type == Record::A) {
-                for (auto& sp_a : it->second) {
-                    if (A::Ptr sp = fuze_dynamic_pointer_cast<A>(sp_a)) {
-                        if (sp->bad_ == true) {
-                            sp->bad_ = false;
-                        }
-                    }
-                }
-            }
-
             rec_list = it->second;
         }
     }
@@ -1081,13 +1268,144 @@ void TransportImpl::QueryDnsAsync(const string& rAddress,
                                   DnsObserver*  pObserver,
                                   void*         pArg)
 {
-    MLOG(rAddress << " [" << toStr(type) << "] observer " << pObserver);
+    DLOG(rAddress << " [" << toStr(type) << "] observer " << pObserver);
     
     if (!spResolver_) {
         spResolver_.reset(new AsyncResolver);
     }
     
     spResolver_->SetQuery(rAddress, type, pObserver, pArg);
+}
+
+void TransportImpl::SetQoSTag(int sock, ConnectionImpl* pConn, unsigned long& rFlowID)
+{
+
+#ifndef WIN32
+
+#if defined(SO_NET_SERVICE_TYPE)
+    if (bNetServiceType_) {
+        int st = INVALID_ID;
+        
+        //
+        // per socket.h comment on SO_NET_SERVICE_TYPE
+        //
+        if (pConn->IsPayloadType(Connection::AUDIO)) {
+            st = NET_SERVICE_TYPE_VO;
+        }
+        else if (pConn->IsPayloadType(Connection::VIDEO)) {
+            st = NET_SERVICE_TYPE_VI;
+        }
+        else if (pConn->IsPayloadType(Connection::SS)) {
+            st = NET_SERVICE_TYPE_RV;
+        }
+        else if (pConn->IsPayloadType(Connection::SIP)) {
+            st = NET_SERVICE_TYPE_SIG;
+        }
+        
+        if (st != INVALID_ID) {
+            if (setsockopt(sock, SOL_SOCKET, SO_NET_SERVICE_TYPE,
+                           (char*)&st, sizeof(st)) < 0) {
+                WLOG("NET_SERVICE_TYPE not available");
+            }
+            else {
+                MLOG("NET_SERVICE_TYPE set");
+            }
+        }
+    }
+#endif
+    int tos = 0;
+    
+    if (pConn->IsPayloadType(Connection::AUDIO)) {
+        tos = dscpAudio_ << 2;
+    }
+    else if (pConn->IsPayloadType(Connection::VIDEO)) {
+        tos = dscpVideo_ << 2;
+    }
+    else if (pConn->IsPayloadType(Connection::SS)) {
+        tos = dscpSS_ << 2;
+    }
+    else if (pConn->IsPayloadType(Connection::SIP)) {
+        tos = dscpSIP_ << 2;
+    }
+
+    if (tos != 0) {
+        int dscp = tos >> 2;
+        if (setsockopt(sock, IPPROTO_IP, IP_TOS,
+                       (char*)&tos, sizeof(tos)) < 0) {
+            WLOG("Unable to set DSCP " << dscp <<
+                 " (" << toStrDSCP(dscp) << ")");
+        }
+        else {
+            MLOG("DSCP value set to " << dscp <<
+                 " (" << toStrDSCP(dscp) << ")");
+        }
+    }    
+#else // WIN32
+    if (qosHandle_) {
+        QOS_TRAFFIC_TYPE qos_type = QOSTrafficTypeBestEffort;
+        if (pConn) {
+            if (pConn->IsPayloadType(Connection::AUDIO)) {
+                // this is set as CS7
+                qos_type = QOSTrafficTypeVoice;
+            }
+            else if (pConn->IsPayloadType(Connection::VIDEO) ||
+                     pConn->IsPayloadType(Connection::SS)) {
+                qos_type = QOSTrafficTypeAudioVideo;
+            }
+            else if (pConn->IsPayloadType(Connection::SIP)) {
+                qos_type = QOSTrafficTypeExcellentEffort;
+            }
+        }
+        sockaddr* p_saddr = (sockaddr*)pConn->GetRemoteAddress().SockAddr();
+        
+        if (pfnQosAddSocketToFlow_(qosHandle_, sock, p_saddr, qos_type,
+                                   QOS_NON_ADAPTIVE_FLOW, &rFlowID) == 0) {
+            WLOG("Failed to add socket to QOS flow [" << GetLastError() << "]");
+        }
+        else {
+            MLOG("socket " << sock << " added to QOS flow ID [" << rFlowID << "]");
+            DWORD dscp_value = 0;
+            if (pConn) {
+                if (pConn->IsPayloadType(Connection::AUDIO)) {
+                    dscp_value = dscpAudio_;
+                }
+                else if (pConn->IsPayloadType(Connection::VIDEO)) {
+                    dscp_value = dscpVideo_;
+                }
+                else if (pConn->IsPayloadType(Connection::SS)) {
+                    dscp_value = dscpSS_;
+                }
+                else if (pConn->IsPayloadType(Connection::SIP)) {
+                    dscp_value = dscpSIP_;
+                }
+            }
+            if (pfnQosSetFlow_(qosHandle_, rFlowID, QOSSetOutgoingDSCPValue,
+                               sizeof(DWORD), &dscp_value, 0, NULL) == 0) {
+                MLOG("Not allowed to set DSCP value " << dscp_value <<
+                     " (" << toStrDSCP(dscp_value) <<
+                     ") [GetLastError " << GetLastError() << "]");
+            }
+            else {
+                MLOG("DSCP value set to " << dscp_value <<
+                     " (" << toStrDSCP(dscp_value) << ")");
+            }            
+        }
+    }
+#endif
+}
+
+void TransportImpl::UnsetQoSTag(evutil_socket_t sock, unsigned long flowID)
+{
+#ifdef WIN32
+    if (qosHandle_) {
+        if (pfnQosRemoveSocketFromFlow_(qosHandle_, sock, flowID, 0) == 0) {
+            ELOG("Failed to remove socket from flow " << GetLastError());
+        }
+        else {
+            MLOG("socket " << sock << " with QoS flow ID " << flowID);
+        }
+    }
+#endif
 }
     
 WorkerThread::Ptr TransportImpl::GetWorker(fuze::ConnectionImpl* pConn)

@@ -84,7 +84,8 @@ namespace msg {
             msg_len = get_http_length(pBuf, bufLen);
             if (msg_len > 0) {
                 MLOG("HTTP message (" << bufLen <<
-                     "B)\n" << (char*)pBuf);
+                     "B)\n--------------------\nRECEIVE:\n\n" <<
+                     (char*)pBuf << "--------------------");
             }
         }
         else if (is_tls(*pBuf)) {

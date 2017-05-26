@@ -146,7 +146,8 @@ int Stat::AddBytes(uint32_t bytes, int64_t currTime)
                 << " ~ " << local_.seq_-1;
             
             if (!local_.Display(log, log_, "Local  ")) {
-                log << " (" << bytes2_ << " bytes)";
+                log << " (" << bytes2_ << "B, total "
+                    << totalBytes_ << "B, cnt " << count_<< ")";
             }
             bytes2_ = 0;
             

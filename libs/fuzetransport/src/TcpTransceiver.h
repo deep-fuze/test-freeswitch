@@ -21,7 +21,6 @@
 namespace fuze {
 
 using std::queue;
-using std::auto_ptr;
 
 //
 // TcpFramer handles fragment/defragment of

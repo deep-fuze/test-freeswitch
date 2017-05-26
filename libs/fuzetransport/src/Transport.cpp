@@ -617,7 +617,6 @@ const char* toStr(EventType type)
     case ET_REFUSED:       return "REFUSED";
     case ET_FAILED:        return "FAILED";
     case ET_IN_PROGRESS:   return "IN PROGRESS";
-    case ET_APP_DELAY:     return "APP DELAY";
     default:               return "NONE";
     }
 }
@@ -650,7 +649,51 @@ const char* toStr(RateType type)
     default:             return "INVALID";
     }
 }
+    
+const char* toStr(Connection::PayloadType type)
+{
+    switch (type)
+    {
+    case Connection::STUN:  return "STUN";
+    case Connection::RTP:   return "RTP";
+    case Connection::RTCP:  return "RTCP";
+    case Connection::SIP:   return "SIP";
+    case Connection::AUDIO: return "AUDIO";
+    case Connection::VIDEO: return "VIDEO";
+    case Connection::SS:    return "SS";
+    default:                return "INVALID";
+    }
+}
 
+const char* toStrDSCP(uint32_t value)
+{
+    switch (value)
+    {
+    case 0:   return "CS0";
+    case 8:   return "CS1";
+    case 16:  return "CS2";
+    case 24:  return "CS3";
+    case 32:  return "CS4";
+    case 40:  return "CS5";
+    case 48:  return "CS6";
+    case 56:  return "CS7";
+    case 46:  return "EF";
+    case 10:  return "AF11";
+    case 12:  return "AF12";
+    case 14:  return "AF13";
+    case 18:  return "AF21";
+    case 20:  return "AF22";
+    case 22:  return "AF23";
+    case 26:  return "AF31";
+    case 28:  return "AF32";
+    case 30:  return "AF33";
+    case 34:  return "AF41";
+    case 36:  return "AF42";
+    case 38:  return "AF43";
+    default:  return "?";
+    }
+}
+    
 int64_t StartTimerEx(Timer::Ptr pTimer, int32_t ms, int32_t appData,
                      const char* pFile, int line)
 {

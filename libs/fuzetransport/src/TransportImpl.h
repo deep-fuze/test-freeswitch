@@ -26,6 +26,12 @@
 #include <netinet/in.h>
 #endif
 
+#ifdef WIN32
+#include <qos2.h>
+#include <fuze/core/win32/DllImport.h>
+using fuze::core::win32::DllImport;
+#endif
+
 namespace fuze {
 
 using std::set;
@@ -109,7 +115,6 @@ public:
     virtual ~TransportImpl();
     
     // Transport Interface
-    virtual bool Initialized();
     virtual void EnableServerMode(Mode mode = MODE_FW_443);
     virtual void SetNumberOfThread(int numThreads = -1);
     virtual TransportBase::Ptr CreateBase(const char* pName = 0);
@@ -126,7 +131,10 @@ public:
     virtual string GetAkamaiMapping(const string& rRemote);
     virtual void   SetMappingInfo(const string& mapInfo);
     virtual string GetMappingInfo();
-    
+    virtual void   SetDSCP(Connection::PayloadType type,
+                           uint32_t value);
+    virtual void   EnableNetServiceType(bool flag);
+
     // Register event
     bool CreateEvent(event*&           rpEvent,
                      evutil_socket_t   sock,
@@ -191,6 +199,12 @@ public:
                        Record::Type  type,
                        DnsObserver*  pObserver,
                        void*         pArg);
+    
+    void SetQoSTag(evutil_socket_t sock, 
+                   ConnectionImpl* pConn, 
+                   unsigned long&  rFlowID);
+    void UnsetQoSTag(evutil_socket_t sock,
+                     unsigned long   flowID);
     
 private:
     TransportImpl();
@@ -272,11 +286,67 @@ private: // DNS Cache
     DnsRecordMap           dnsCache_[Record::MAX_NUM];
     DnsRecordMap           staleCache_[Record::MAX_NUM];
     MutexLock              dnsLock_;
+
+#ifdef __APPLE__
+    void StoreDnsCache();
+    void RetrieveDnsCache();
+#endif
     
 private: // Thread workers
     
     vector<WorkerThread::Ptr> threadQ_;
     size_t                    qIndex_;
+
+private:
+
+    uint32_t               dscpAudio_;
+    uint32_t               dscpVideo_;
+    uint32_t               dscpSS_;
+    uint32_t               dscpSIP_;
+    bool                   bNetServiceType_;
+    
+#ifdef WIN32
+    // qWAVE isn't available on Windows Server by default, so we load it
+    // dynamically and fail gracefully if it isn't present.
+    typedef BOOL(__stdcall *PFNQOSCreateHandle)(
+        _In_    PQOS_VERSION    Version,
+        _Out_   PHANDLE         QOSHandle);
+
+    typedef BOOL(__stdcall *PFNQOSCloseHandle)(
+        _In_        HANDLE      QOSHandle);
+
+    typedef BOOL(__stdcall *PFNQOSAddSocketToFlow)(
+        _In_        HANDLE              QOSHandle,
+        _In_        SOCKET              Socket,
+        _In_opt_    PSOCKADDR           DestAddr,
+        _In_        QOS_TRAFFIC_TYPE    TrafficType,
+        _In_opt_    DWORD               Flags,
+        _Inout_     PQOS_FLOWID         FlowId);
+
+    typedef BOOL(__stdcall *PFNQOSRemoveSocketFromFlow)(
+        _In_       HANDLE     QOSHandle,
+        _In_opt_   SOCKET     Socket,
+        _In_       QOS_FLOWID FlowId,
+        _Reserved_ DWORD      Flags
+    );
+
+    typedef BOOL(__stdcall *PFNQOSSetFlow)(
+        _In_       HANDLE       QOSHandle,
+        _In_       QOS_FLOWID   FlowId,
+        _In_       QOS_SET_FLOW Operation,
+        _In_       ULONG        Size,
+        _In_       PVOID        Buffer,
+        _Reserved_ DWORD        Flags,
+        _Out_opt_  LPOVERLAPPED Overlapped
+    );
+
+    DllImport<PFNQOSCreateHandle>          pfnQosCreateHandle_;
+    DllImport<PFNQOSCloseHandle>           pfnQosCloseHandle_;
+    DllImport<PFNQOSAddSocketToFlow>       pfnQosAddSocketToFlow_;
+    DllImport<PFNQOSRemoveSocketFromFlow>  pfnQosRemoveSocketFromFlow_;
+    DllImport<PFNQOSSetFlow>               pfnQosSetFlow_;
+    HANDLE                                 qosHandle_;
+#endif
 };
     
 } // namespace fuze

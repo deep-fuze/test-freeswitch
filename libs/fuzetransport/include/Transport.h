@@ -59,9 +59,7 @@ enum EventType
     ET_DISCONNECTED,
     ET_REFUSED,       // remote is not reachable and will trigger failover
     ET_FAILED,        // Connection failed and can't connect to far end
-    ET_IN_PROGRESS,   // notification of failover in process
-    
-    ET_APP_DELAY      // Notify app that it is delaying transport work
+    ET_IN_PROGRESS    // notification of failover in process
 };
 
 const char* toStr(EventType type);
@@ -226,6 +224,8 @@ public:
     virtual ~Connection() {}
 };
 
+const char* toStr(Connection::PayloadType type);
+    
 typedef map<string, string> CongestionInfo;
     
 //-----------------------------------------------------------------------------
@@ -339,10 +339,6 @@ public:
     // Use fuze log from fuze::core
     static void EnableFuzeLog();
     
-    // Indicate if transport is initialized correctly
-    //
-    virtual bool Initialized() = 0;
-    
     enum Mode { MODE_FW_443, MODE_ONLY };
     
     // Indicates this transport is used by Server and
@@ -396,11 +392,17 @@ public:
     virtual void   SetMappingInfo(const string& mapInfo) = 0;
     virtual string GetMappingInfo() = 0;
     
+    virtual void SetDSCP(Connection::PayloadType type,
+                         uint32_t value) = 0;
+    virtual void EnableNetServiceType(bool flag) = 0;
+    
     virtual ~Transport() {}
   
 protected:
     Transport();
 };
+
+const char* toStrDSCP(uint32_t value);
     
 } // namespace fuze
 

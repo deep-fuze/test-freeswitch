@@ -62,6 +62,7 @@ void DtlsTransceiver::Init()
     logCnt_       = 0;
     stunCnt_      = 0;
     lastStunTime_ = 0;
+    flowID_       = 0;
 
     memset(pName_, 0, 16);
 
@@ -83,6 +84,11 @@ void DtlsTransceiver::Reset()
         if (pWriteEvent_) event_free(pWriteEvent_);
         
         if (socket_ != INVALID_SOCKET) {
+            if (TransportImpl* p = TransportImpl::GetInstance()) {
+                if (flowID_ != 0) {
+                    p->UnsetQoSTag(socket_, flowID_);
+                }
+            }
             evutil_closesocket(socket_);
         }
         
@@ -309,14 +315,7 @@ bool DtlsTransceiver::Start()
         evutil_make_socket_nonblocking(socket_);
         evutil_make_listen_socket_reuseable(socket_);
         
-#ifndef WIN32
-        MLOG("Setting ToS bit as 0xE0");
-        int tos = 0xe0;
-        if (setsockopt(socket_, IPPROTO_IP, IP_TOS,
-                       (char*)&tos, sizeof(tos)) < 0) {
-            MLOG("Unable to set ToS");
-        }
-#endif
+        TransportImpl::GetInstance()->SetQoSTag(socket_, pConn_, flowID_);
         
         if (pDtlsCore_) {
             ELOG("TlsCore exists already!");

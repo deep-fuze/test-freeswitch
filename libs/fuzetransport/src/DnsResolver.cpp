@@ -8,6 +8,7 @@
 
 #include <DnsResolver.h>
 #include <TransportImpl.h>
+#include <sstream>
 #include <Log.h>
 
 #define DNS__16BIT(p)  ((unsigned short)((unsigned int) 0xffff & \
@@ -144,6 +145,9 @@ void NameServerList(ares_channel& channel)
             }
             
             num_ns++;
+            if (num_ns >= 10) {
+                break;
+            }
         }
         
         if (num_ns == 0) {
@@ -574,6 +578,21 @@ QueryReturnType ProcessQuery(ares_channel channel, int timeout)
         ares_process(channel, &read_fds, &write_fds);
     }
 }
+
+void A::Serialize(std::ostringstream& rStr)
+{
+    rStr << "A:" << domain_ << "=" << hostName_  << ";";
+}
+
+void SRV::Serialize(std::ostringstream& rStr)
+{
+    rStr << "S:" << domain_ << "=" << name_ << ":" << port_ << ";";
+}
+
+void NAPTR::Serialize(std::ostringstream& rStr)
+{
+    rStr << "N:" << domain_ << "=" << replacement_ << ":" << services_ << ";";
+}
     
 void ResolverImpl::OnReply(void* pArg, int status, int timeouts, uint8_t* pBuf, int len)
 {
@@ -692,9 +711,7 @@ void Resolver::Init()
         _ELOG_("ares_library_init: " << ares_strerror(status));
     }
     
-    for (int i = 0; i < 10; ++i) {
-        memset(s_name_server[i], 0, INET6_ADDRSTRLEN);
-    }
+    memset(s_name_server, 0, sizeof(s_name_server));
 }
     
 void Resolver::Terminate()
@@ -792,8 +809,13 @@ Record::List ResolverImpl::Query(int timeout)
     
     // if there is no cache available then do query
     if (do_query) {
-        if (ProcessQuery(channel_, timeout) == APP_TIMEOUT_REACHED) {
-            _MLOG_("App timeout " << timeout << " sec reached");
+        int64_t app_timeout = GetTimeMs() + timeout*1000;
+        while (ProcessQuery(channel_, 1) == APP_TIMEOUT_REACHED) {
+            if (IsAppExiting()) break;
+            if (GetTimeMs() >= app_timeout) {
+                _MLOG_("App timeout " << timeout << " sec reached");
+                break;
+            }
         }
     }
     
@@ -863,7 +885,6 @@ void AsyncResolver::SetQuery(const string& rDomain,
                                                                    type);
             if (!cache.empty()) {
                 _MLOG_("stale cache found [" << toStr(type) << "] " << rDomain);
-                       
             }
         }
         else {
@@ -889,7 +910,7 @@ void AsyncResolver::SetQuery(const string& rDomain,
         for (auto& it : queryData_) {
             if (it->domain_ == rDomain && it->type_ == type &&
                 !pObserver && !pArg) {
-                _MLOG_("Found duplicate query - ignored");
+                _DLOG_("Found duplicate query - ignored");
                 return;
             }
         }
@@ -901,10 +922,7 @@ void AsyncResolver::SetQuery(const string& rDomain,
         p_info->pObserver_ = pObserver;
         p_info->pArg_      = pArg;
      
-        {
-            queryData_.push_back(p_info);
-        }
-        
+        queryData_.push_back(p_info);
         semaphore_.Post();
     }
 }

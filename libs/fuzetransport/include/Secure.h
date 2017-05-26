@@ -34,6 +34,9 @@ public:
     virtual void   SetRemoteKey(KeyType type, const string& rRemoteKey) = 0;
     virtual string GetRemoteKey() = 0;
     
+    virtual int GetAuthTagLen(bool isRtp) const = 0;
+    virtual void SetWindowSize(unsigned long windowSize) = 0;
+
     // Functions for encrypt and decrypt will write the result data
     // to the input buffer only. Incase of encrypt, more data than
     // input could be written.

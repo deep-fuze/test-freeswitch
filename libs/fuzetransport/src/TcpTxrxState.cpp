@@ -333,8 +333,8 @@ void StateSetupMapTls::OnConnected(TcpTransceiver* p)
 {
     if (p->bConnected_ == false) {
         Buffer::Ptr sp_map = p->MakeMapRequest();
-        MLOG("Sending Mapping request over TLS\n" <<
-             (char*)sp_map->getBuf());
+        MLOG("Sending Mapping request over TLS\n--------------------\nSEND:\n\n" <<
+             (char*)sp_map->getBuf() << "--------------------");
         p->spTlsCore_->ProcessData(sp_map->getBuf(),
                                    sp_map->size(),
                                    TlsCore::PT_ENCRYPT);

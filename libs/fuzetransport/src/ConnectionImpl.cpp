@@ -899,6 +899,10 @@ void ConnectionImpl::DeliverData(Buffer::Ptr spBuffer)
         ELOG("unknown exception");
     }
     
+    // it's possible that while we were in app callback, connection
+    // has been reset by application
+    if (!IsActive()) return;
+    
 	int64_t diff = GetTimeMs() - start_time;
 	if (diff > 5) {
         timeStat_.SetData((uint16_t)diff);
@@ -917,8 +921,6 @@ void ConnectionImpl::DeliverData(Buffer::Ptr spBuffer)
             timeStat_.Display(log, "",  "Time Delayed ");
             delayStat_.Display(log, "", "Delay Gap    ");
             WLOG("App delayed transport thread" << log.str());
-            
-            OnEvent(ET_APP_DELAY, "App delaying transport thread");
         }
 	}
 }
@@ -1022,7 +1024,9 @@ void ConnectionImpl::OnEvent(EventType eType, const char* pReason)
         eventQ_.push(event_data);
     }
     
-    spWorker_->SetWork(this);
+    if (spWorker_) {
+        spWorker_->SetWork(this);
+    }
 }
 
 void ConnectionImpl::DeliverEventData(EventData &rEvent)
@@ -1086,7 +1090,9 @@ void ConnectionImpl::OnRateData(RateType type, uint16_t rate, uint16_t delta)
         rateQ_.push(rate_data);
     }
     
-    spWorker_->SetWork(this);
+    if (spWorker_) {
+        spWorker_->SetWork(this);
+    }
 }
 
 void ConnectionImpl::DeliverRateData(fuze::ConnectionImpl::RateData &rRate)
