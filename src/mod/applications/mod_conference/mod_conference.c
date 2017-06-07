@@ -2723,6 +2723,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     filelist_t *pFL;
     switch_codec_implementation_t impl ={0};
     conference_write_codec_t *new_write_codec;
+    const char *sdpname;
 
     switch_assert(conference != NULL);
     switch_assert(member != NULL);
@@ -2827,6 +2828,20 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
         }
         switch_mutex_unlock(globals.filelist_mutex);
     }
+
+    if (!switch_test_flag(member, MFLAG_NOCHANNEL)) {
+           channel = switch_core_session_get_channel(member->session);
+
+           if (channel) {
+               sdpname = switch_channel_get_variable(channel, "email-sdp");
+               if (sdpname) {
+                   if (strstr(sdpname, "recorder@fuze.com") != 0) {
+                       set_member_state_locked(member, MFLAG_GHOST);
+                   }
+               }
+           }
+    }
+
     
     if (switch_test_flag(conference, CFLAG_INDICATE_MUTE))
     {
@@ -3024,9 +3039,11 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
         if (member->mname && strcmp(member->mname, "recorder@fuze.com") == 0) {
             char recordings_path[1024];
 
-            set_member_state_locked(member, MFLAG_GHOST);
-            conference->count_ghosts++;
-            conference->count--;
+            if (!switch_test_flag(member, MFLAG_GHOST)) {
+                set_member_state_locked(member, MFLAG_GHOST);
+                conference->count_ghosts++;
+                conference->count--;
+            }
             switch_snprintf(recordings_path, 1024, "/recordings/r%s_%"PRId64".wav", member->conference->uuid_str, switch_time_now());
 
             launch_conference_record_thread(member->conference, recordings_path, SWITCH_FALSE);
