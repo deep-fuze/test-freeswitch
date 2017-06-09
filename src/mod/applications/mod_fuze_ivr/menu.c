@@ -7,6 +7,7 @@
 #include "ivr.h"
 #include "menu.h"
 #include "config.h"
+#include "utils.h"
 
 /*******************************************************************************/
 const char *get_menu_name(const char *menu_tag) 
@@ -153,12 +154,18 @@ char *ivrc_menu_get_input_set(switch_core_session_t *session, ivrc_profile_t *pr
 	ivre_playback(session, &menu->ivre_d, switch_event_get_header(menu->event_phrases, "instructions"), NULL, menu->phrase_params, NULL, menu->ivr_entry_timeout);
 	
 	if (menu->ivre_d.result == RES_TIMEOUT) {
-	    ivre_playback_dtmf_buffered(session, switch_event_get_header(menu->event_phrases, "timeout"), NULL, NULL, NULL, 0);
-	    loc_stored = &loc_stored_data;
-	    menu->ivre_d.result = RES_WAITFORMORE;
-	    menu->ivre_d.audio_stopped = SWITCH_FALSE;
-	    memcpy(loc_stored, &(menu->ivre_d), sizeof(loc_stored_data));
-	    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: ID stored: %s\n", menu->ivre_d.dtmf_stored);
+	    if (strlen(menu->ivre_d.dtmf_stored) >= 1) {
+	        result = switch_core_session_strdup(session, menu->ivre_d.dtmf_stored);
+		menu->ivr_maximum_attempts = --retry;
+		retry = -1;
+	    } else {
+	        ivre_playback_dtmf_buffered(session, switch_event_get_header(menu->event_phrases, "timeout"), NULL, NULL, NULL, 0);
+		loc_stored = &loc_stored_data;
+		menu->ivre_d.result = RES_WAITFORMORE;
+		menu->ivre_d.audio_stopped = SWITCH_FALSE;
+		memcpy(loc_stored, &(menu->ivre_d), sizeof(loc_stored_data));
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: ID stored: %s\n", menu->ivre_d.dtmf_stored);
+	    }
 	} 
 	else if (menu->ivre_d.result == RES_INVALID) {
 	    ivre_playback_dtmf_buffered(session, switch_event_get_header(menu->event_phrases, "invalid"), NULL, NULL, NULL, 0);

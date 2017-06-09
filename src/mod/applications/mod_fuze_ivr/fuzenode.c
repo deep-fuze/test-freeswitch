@@ -163,6 +163,8 @@ server_iso_code_t server_list[] =
         {"sin", "SG"},
         {"syd", "AU"},
         {"sof", "BG"},
+        {"hkg", "HK"},
+        {"fra", "DE"},
         { NULL, "US" }
 };
 
@@ -245,14 +247,7 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
 		    //------------------------------------------ IVRC
 		    profile->authenticated = SWITCH_FALSE;
 		    if (fPtr) {
-		        const char *host = switch_core_get_hostname();
-			int expected_meeting_id_len;
-
-			if (strstr(host, "prod") != 0) {
-			    expected_meeting_id_len = PROD_MEETING_ID_LEN;
-			} else {
-			    expected_meeting_id_len = PREPROD_MEETING_ID_LEN;
-			}
+			int expected_meeting_id_len = fuze_expected_meeting_id_len();
 
 			fPtr(session, profile);
 
@@ -261,7 +256,7 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
 			if (profile->id && !zstr(profile->id)) {
                             int len = strlen(profile->id);
 
-                            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: len=%d profile->id=%s host=%s\n", len, profile->id, host);
+                            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: len=%d profile->id=%s\n", len, profile->id);
 
                             if (len > expected_meeting_id_len) {
                                 char buf[MAX_MEETING_NUMBER_LEN + 1];

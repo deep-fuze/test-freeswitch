@@ -6,6 +6,9 @@
 
 #include "ivr.h"
 
+#define PREPROD_MEETING_ID_LEN 7
+#define PROD_MEETING_ID_LEN 8
+
 static int match_dtmf(switch_core_session_t *session, ivre_data_t *loc)
 {
 	switch_bool_t is_invalid[128] = { SWITCH_FALSE };

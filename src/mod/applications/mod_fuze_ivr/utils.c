@@ -7,6 +7,20 @@
 #include <switch.h>
 #include "utils.h"
 
+#define PREPROD_MEETING_ID_LEN 7
+#define PROD_MEETING_ID_LEN 8
+
+int fuze_expected_meeting_id_len()
+{
+    const char *host = switch_core_get_hostname();
+
+    if (strstr(host, "prod") != 0) {
+        return PROD_MEETING_ID_LEN;
+    } else {
+        return PREPROD_MEETING_ID_LEN;
+    }
+}
+
 /*******************************************************************************/
 const char *fuze_session_encode(switch_core_session_t *session, const char *string)
 {
