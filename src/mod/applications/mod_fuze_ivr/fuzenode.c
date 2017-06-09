@@ -291,8 +291,8 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
 		    if (status == FUZE_STATUS_SUCCESS) { // 200 && 200 && conf_address --> bridge/transfer to conference
 		        profile->authenticated = SWITCH_TRUE;
 			switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_AUTH_OK, SWITCH_FALSE);
-			switch_channel_set_variable_var_check(channel, "meeeting_number", profile->id, SWITCH_FALSE);
-			switch_channel_set_variable_var_check(channel, "meeeting_pin", pin, SWITCH_FALSE);
+			switch_channel_set_variable_var_check(channel, "meeting_number", profile->id, SWITCH_FALSE);
+			switch_channel_set_variable_var_check(channel, "meeting_pin", pin, SWITCH_FALSE);
 			switch_channel_set_variable_var_check(channel, "dialed_number" , dialed_number, SWITCH_FALSE);
 			switch_ivr_phrase_macro(session, "connected@fuze_ivr", NULL, NULL, NULL); // Why here?
 			fuze_session_bridge(session, profile);
@@ -301,28 +301,28 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
 		    else if (status == FUZE_STATUS_NOTFOUND) { // 403, 404
 		       switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeCause_INVALID_PIN, SWITCH_FALSE); // json_code
 		       switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
-		       switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: Invalid PIN entered\n"); // %d times/num_attempts
+		       switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Invalid PIN entered meeting#: %s pin : %s\n", profile->id, pin); // %d times/num_attempts
 		       switch_ivr_phrase_macro(session, "invalid_entry@fuze_ivr",NULL,NULL,NULL);
 		       continue;
 		    }
 		    else if (status == FUZE_STATUS_RESTRICTED) { // 405
 		        switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_RESTRICTED_ACCESS, SWITCH_FALSE); // json_code
 			switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: International dial-in not authorized for the meeting the user is attempting to join\n");
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: International dial-in not authorized for the meeting the user is attempting to join\n");
 			switch_ivr_phrase_macro(session, "restricted@fuze_ivr",NULL,NULL,NULL);
 			return;
 		    }
 		    else if (status == FUZE_STATUS_TIMEOUT) { // 406
 		        switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_NO_MINUTES, SWITCH_FALSE);
 			switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC:  No minutes available for the account\n");
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC:  No minutes available for the account\n");
 			switch_ivr_phrase_macro(session, "no_minutes@fuze_ivr",NULL,NULL,NULL);
 			return;
 		    }
 		    else {
 		        switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_UNKNOWN_CODE, SWITCH_FALSE); // json_code
 			switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: Internal authentication failed: %d\n", status);
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Internal authentication failed: %d meeting#: %s pin : %s\n", status, profile->id, pin);
 			switch_ivr_phrase_macro(session, "call_cannot_be_completed@fuze_ivr",NULL,NULL,NULL);
 			return;
 		    }
@@ -363,8 +363,8 @@ void fuze_transfer(switch_core_session_t *session, ivrc_profile_t *profile)
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: authenticate_caller_url: %s%s\n", url, AUTHENTICATE_CALLER_SERVICE);
 
                 profile->authenticated = SWITCH_FALSE;
-                meeting_pin = switch_channel_get_variable(channel, "meeeting_pin");
-                meeting_number = switch_channel_get_variable(channel, "meeeting_number");
+                meeting_pin = switch_channel_get_variable(channel, "meeting_pin");
+                meeting_number = switch_channel_get_variable(channel, "meeting_number");
                 switch_channel_del_variable_prefix(channel,"sip_refer_to");
 
                 if(zstr(meeting_pin))
@@ -386,7 +386,7 @@ void fuze_transfer(switch_core_session_t *session, ivrc_profile_t *profile)
                 else if (status == FUZE_STATUS_NOTFOUND) { // 403, 404
                         switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeCause_INVALID_PIN, SWITCH_FALSE);
                         switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: Invalid PIN entered\n"); // %d times/num_attempts
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Invalid PIN entered meeting_id=%s pin=%s\n", meeting_number, meeting_pin); // %d times/num_attempts
                         switch_ivr_phrase_macro(session, "invalid_entry@fuze_ivr",NULL,NULL,NULL);
                         return;
                 }
@@ -407,7 +407,7 @@ void fuze_transfer(switch_core_session_t *session, ivrc_profile_t *profile)
                 else {
                         switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_UNKNOWN_CODE, SWITCH_FALSE); // json_code
                         switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: Internal authentication failed: %d\n", status);
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: Internal authentication failed: %d meeting_id=%s pin=%s\n", status, meeting_number, meeting_pin);
                         switch_ivr_phrase_macro(session, "call_cannot_be_completed@fuze_ivr",NULL,NULL,NULL);
                         return;
                 }
