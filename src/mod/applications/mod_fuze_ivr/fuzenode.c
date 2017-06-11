@@ -21,6 +21,8 @@ ivrc_menu_function_t menu_list[] =
         { NULL, NULL }
 };
 
+#define MAX_EMAIL_LEN 1024
+
 /*******************************************************************************/
 void fuze_session_bridge(switch_core_session_t *session, ivrc_profile_t *profile)
 {
@@ -39,6 +41,14 @@ void fuze_session_bridge(switch_core_session_t *session, ivrc_profile_t *profile
         if (profile->is_retired == SWITCH_TRUE) {
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,"IVRC: destination number is retired\n");
                 switch_ivr_phrase_macro(session, "retired@fuze_ivr", NULL, NULL, NULL);
+        }
+
+        if (profile->id && profile->meeting_instance_id && switch_channel_get_variable(channel, "caller_id_number")) {
+                char email[MAX_EMAIL_LEN];
+                switch_snprintf(email, MAX_EMAIL_LEN, "sip:%s@%s;id=%s;inst=%s", switch_channel_get_variable(channel, "caller_id_number"),
+                                switch_core_get_hostname(), profile->id, profile->meeting_instance_id);
+
+                switch_channel_set_variable(channel, "email-sdp", email);
         }
         switch_channel_set_variable_var_check(channel, "extension", extension, SWITCH_FALSE);
         destination_number = switch_channel_get_variable(channel, "destination_number");
@@ -375,6 +385,7 @@ void fuze_transfer(switch_core_session_t *session, ivrc_profile_t *profile)
                 if (status == FUZE_STATUS_SUCCESS) { // 200 && 200 && conf_address --> bridge/transfer to conference
                         profile->authenticated = SWITCH_TRUE;
                         switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_AUTH_OK, SWITCH_FALSE);
+                        switch_channel_set_variable(channel, "meeting_id", meeting_number);
                         fuze_session_bridge(session, profile);
                         return;
                 }

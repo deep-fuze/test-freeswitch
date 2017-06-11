@@ -540,6 +540,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_lock_hangup(_In_ switch
 
 #ifdef SWITCH_DEBUG_RWLOCKS
 SWITCH_DECLARE(void) switch_core_session_perform_write_lock(_In_ switch_core_session_t *session, const char *file, const char *func, int line);
+SWITCH_DECLARE(void) switch_core_session_perform_write_lock_timeout(_In_ switch_core_session_t *session, const char *file, const char *func, int line);
 #endif
 
 /*! 
@@ -548,8 +549,10 @@ SWITCH_DECLARE(void) switch_core_session_perform_write_lock(_In_ switch_core_ses
 */
 #ifdef SWITCH_DEBUG_RWLOCKS
 #define switch_core_session_write_lock(session) switch_core_session_perform_write_lock(session, __FILE__, __SWITCH_FUNC__, __LINE__)
+#define switch_core_session_write_lock_timeout(session) switch_core_session_perform_write_lock_timeout(session, __FILE__, __SWITCH_FUNC__, __LINE__)
 #else
 SWITCH_DECLARE(void) switch_core_session_write_lock(_In_ switch_core_session_t *session);
+SWITCH_DECLARE(void) switch_core_session_write_lock_timeout(_In_ switch_core_session_t *session);
 #endif
 
 #ifdef SWITCH_DEBUG_RWLOCKS

@@ -1705,12 +1705,12 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
     if (event_trigger == SWITCH_FALSE) {
         for (int i = 0; i < STATS_MAX; i++) {
             if (strlen(stats->str[i]) > 0) {
-				int idx = RTP_RECV_RATE+i;
+                int idx = RTP_RECV_RATE+i;
                 set_periodic_stats_value(session, idx, stats->str[i], type);
-				if (idx == RTP_SEND_LEVEL || idx == RTP_RECV_LEVEL) {
-					switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
-									  "stats[%s] = [ %s ]\n",  rtp_stat_name[idx], stats->str[i]);
-				}
+                if (idx == RTP_SEND_LEVEL || idx == RTP_RECV_LEVEL) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                                      "stats[%s] = [ %s ]\n",  rtp_stat_name[idx], stats->str[i]);
+                }
             }
         }
     }
@@ -6970,6 +6970,28 @@ SWITCH_DECLARE(void) switch_core_media_gen_local_sdp(switch_core_session_t *sess
 
     if (strlen(session->email) > 0) {
         switch_snprintf(buf + strlen(buf), SDPBUFLEN - strlen(buf), "e=%s\n", session->email);
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Looking for email (found) %s\n", session->email);
+    } else {
+        const char *email = switch_channel_get_variable(session->channel, "email-sdp");
+
+        if (email) {
+            switch_snprintf(buf + strlen(buf), SDPBUFLEN - strlen(buf), "e=%s\n", email);
+        } else {
+            switch_core_session_t *other_session;
+            switch_channel_t *other_channel;
+            const char *uuid;
+
+            if ((uuid = switch_channel_get_partner_uuid(session->channel))
+                && (other_session = switch_core_session_locate(uuid))) {
+                other_channel = switch_core_session_get_channel(other_session);
+                if (other_channel) {
+                    email = switch_channel_get_variable(other_channel, "email-sdp");
+                    if (email) {
+                        switch_snprintf(buf + strlen(buf), SDPBUFLEN - strlen(buf), "e=%s\n", email);
+                    }
+                }
+            }
+        }
     }
 
     if (strlen(session->phone) > 0) {

@@ -42,6 +42,7 @@
 #include "interface/webrtc_neteq_if.h"
 #include "switch_monitor.h"
 #include "conference_optimization.h"
+#include "conference_utils.h"
 
 #define DEFAULT_AGC_LEVEL 1100
 #define CONFERENCE_UUID_VARIABLE "conference_uuid"
@@ -780,8 +781,12 @@ struct conference_member {
     uint32_t flush_len;
     uint32_t low_count;
 
+#define FUZE_PIN_LEN 4
     /* Fuze */
     uint8_t muted_state;
+    char pin[FUZE_PIN_LEN+1];
+    switch_time_t last_pin_time;
+    int authenticate;
 
     const char *sdpname;
     char mname[MAX_MEMBERNAME_LEN];
@@ -830,6 +835,8 @@ struct conference_member {
 
     int16_t max_out_level;
     int16_t max_input_level;
+
+    conf_auth_profile_t auth_profile;
 };
 
 typedef enum {
@@ -2709,6 +2716,38 @@ static void silence_transport_for_member(conference_member_t *member)
     }
 }
 
+static void conference_add_moderator(conference_obj_t *conference, conference_member_t *member)
+{
+    if (conference->count > 1 && !switch_test_flag(conference, CFLAG_STARTED)) {
+        /*
+         * We play conference-starting prompt when:
+         *     1. first moderator joins while one or more attendees waiting, or
+         *      2. first attendee joins while moderator is waiting.
+         */
+        if ((conference->count > 1 && find_moderator(conference)) ||
+            (switch_test_flag(member, MFLAG_MOD) && get_moderator_count(conference) == 1)) {
+            conference_stop_file(conference, FILE_STOP_ASYNC);
+            conference_stop_file(conference, FILE_STOP_ALL);
+            for (int i = 0; i < eMemberListTypes_Recorders; i++) {
+                for (conference_member_t *exist_mem = conference->member_lists[i]; exist_mem; exist_mem = exist_mem->next)
+                    {
+                        if (!switch_test_flag(exist_mem, MFLAG_NOCHANNEL)) {
+                            conference_member_play_file(exist_mem,
+                                                        conference->begin_sound, CONF_DEFAULT_LEADIN, 1);
+                        }
+                    }
+            }
+            set_conference_state_unlocked(conference, CFLAG_STARTED);
+        }
+    }
+
+    if (switch_test_flag(conference, CFLAG_WAIT_MOD) && switch_test_flag(member, MFLAG_MOD)) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), 
+                          SWITCH_LOG_INFO, "Seen moderator first time for: %s. Clearing CFLAG_WAIT_MOD.\n",
+                          conference->name);
+        clear_conference_state_unlocked(conference, CFLAG_WAIT_MOD);
+    }
+}
 
 /* Gain exclusive access and add the member to the list */
 static switch_status_t conference_add_member(conference_obj_t *conference, conference_member_t *member)
@@ -2719,7 +2758,6 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     call_list_t *call_list = NULL;
     switch_channel_t *channel = NULL;
     const char *controls = NULL;
-    conference_member_t *exist_mem;
     filelist_t *pFL;
     switch_codec_implementation_t impl ={0};
     conference_write_codec_t *new_write_codec;
@@ -2751,6 +2789,9 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
 
     member->time_of_first_packet = 0;
 
+    member->pin[0] = 0;
+    member->last_pin_time = switch_time_now();
+    member->authenticate = 0;
     if (!switch_test_flag(member,MFLAG_NOCHANNEL)){
 
         /* get a pointer to the codec implementation */
@@ -3074,32 +3115,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             switch_channel_set_variable(channel, "conference_call_key", key);
         }
 
-        if (conference->count > 1 && !switch_test_flag(conference, CFLAG_STARTED)) {
-            /*
-             * We play conference-starting prompt when:
-             *     1. first moderator joins while one or more attendees waiting, or
-             *      2. first attendee joins while moderator is waiting.
-             */
-            if ((conference->count > 1 && find_moderator(conference)) ||
-                (switch_test_flag(member, MFLAG_MOD) && get_moderator_count(conference) == 1)) {
-                for (int i = 0; i < eMemberListTypes_Recorders; i++) {
-                    for (exist_mem = conference->member_lists[i]; exist_mem; exist_mem = exist_mem->next)
-                    {
-                        if (!switch_test_flag(exist_mem, MFLAG_NOCHANNEL)) {
-                            conference_member_play_file(exist_mem,
-                                conference->begin_sound, CONF_DEFAULT_LEADIN, 1);
-                        }
-                    }
-                }
-                set_conference_state_unlocked(conference, CFLAG_STARTED);
-            }
-        }
-
-        if (switch_test_flag(conference, CFLAG_WAIT_MOD) && switch_test_flag(member, MFLAG_MOD)) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "Seen moderator first time for: %s. Clearing CFLAG_WAIT_MOD.\n",
-                                        conference->name);
-                          clear_conference_state_unlocked(conference, CFLAG_WAIT_MOD);
-        }
+        conference_add_moderator(conference, member);
 
         if (conference->count > 1) {
             if (conference->moh_sound && !switch_test_flag(conference, CFLAG_WAIT_MOD)) {
@@ -6157,6 +6173,35 @@ static void process_dtmf(conference_member_t *member)
 
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
                           "DTMF! %s\n", dtmf);
+        if (!member->authenticate && !switch_test_flag(member, MFLAG_MOD)) {
+            switch_time_t now = switch_time_now()/1000;
+            /* reset pin */
+            if ((now - member->last_pin_time)/1000 > 2) {
+                member->pin[0] = 0;
+            }
+            /* add a digit */
+            if (strlen(member->pin) < FUZE_PIN_LEN) {
+                int idx = strlen(member->pin); 
+                for (int i = 0; i < strlen(dtmf); i ++) {
+                    if (dtmf[i] >= '0' && dtmf[i] <= '9') {
+                        if (idx > FUZE_PIN_LEN) {
+                            memcpy(&member->pin[0], &member->pin[1], FUZE_PIN_LEN);
+                            idx -= 1;
+                        }
+                        member->pin[idx] = dtmf[i];
+                        member->pin[idx+1] = 0;
+                        idx += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            if (strlen(member->pin) == FUZE_PIN_LEN) {
+                /* authenticate */
+                member->authenticate = 1;
+            }
+            member->last_pin_time = now;
+        }
 
         if (switch_test_flag(member, MFLAG_DIST_DTMF)) {
             conference_send_all_dtmf(member, member->conference, dtmf);
@@ -7016,15 +7061,35 @@ static void start_conference_loops(conference_member_t *member)
                           member->mname, member->id, idx, member->meo.cwc->num_conf_frames);
     }
 
-    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "start_conference_loops mid:%s/%d conference_list_added to %d\n",
-                      member->mname, member->id, ret);
+    while (1) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "start_conference_loops cond_wait mid:%s/%d\n",
+                          member->mname, member->id);
+        switch_mutex_lock(ols.cond_mutex);
+        switch_thread_cond_wait(ols.cond, ols.cond_mutex);
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "and we're back from the wait conf:%s mid:%s/%d\n",
+                          member->conference->meeting_id, member->mname, member->id);
+        if (member->authenticate != 0) {
+            /* set pin */
+            if (authenticate(member->session, &member->auth_profile, member->conference->meeting_id, member->pin, SWITCH_FALSE) == FUZE_STATUS_SUCCESS) {
+                switch_set_flag(member, MFLAG_MOD);
+                if (member->conference->ack_sound) {
+                    conference_member_play_file(member, member->conference->ack_sound, CONF_DEFAULT_LEADIN, 1);
+                }
+                conference_add_moderator(member->conference, member);
+            } else {
+                if (member->conference->bad_pin_sound) {
+                    conference_member_play_file(member, member->conference->bad_pin_sound, CONF_DEFAULT_LEADIN, 1);
+                }
 
-    switch_mutex_lock(ols.cond_mutex);
-    switch_thread_cond_wait(ols.cond, ols.cond_mutex);
-
-    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "and we're back from the wait conf:%s mid:%s/%d\n",
-                      member->conference->meeting_id, member->mname, member->id);
-
+            }
+            member->pin[0] = 0;
+            member->authenticate = 0;
+        } 
+        if (ols.stopping || ols.stopped) {
+            break;
+        }
+        switch_mutex_unlock(ols.cond_mutex);
+    }
     switch_channel_change_thread(ols.channel);
 
     conference_list_remove(member->conference, &ols);
@@ -7256,6 +7321,14 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             ols->ild->rx_time += now;
             if (now > ols->ild->max_time) {
                 ols->ild->max_time = now;
+            }
+
+
+            if (ols->member->authenticate == 1) {
+                switch_mutex_lock(ols->cond_mutex);
+                ols->member->authenticate = 2;
+                switch_mutex_unlock(ols->cond_mutex);
+                switch_thread_cond_signal(ols->cond);
             }
 
             if (ret == INPUT_LOOP_RET_YIELD) {
@@ -14039,7 +14112,7 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
         conference->stop_entry_tone_participants = stop_entry_tone_participants;
 
         conference->stopping = SWITCH_FALSE;
-
+        
         /* initialize the conference object with settings from the specified profile */
         conference->pool = pool;
         conference->profile_name = switch_core_strdup(conference->pool, cfg.profile ? switch_xml_attr_soft(cfg.profile, "name") : "none");
