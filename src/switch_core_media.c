@@ -6990,6 +6990,7 @@ SWITCH_DECLARE(void) switch_core_media_gen_local_sdp(switch_core_session_t *sess
                         switch_snprintf(buf + strlen(buf), SDPBUFLEN - strlen(buf), "e=%s\n", email);
                     }
                 }
+                switch_core_session_rwunlock(other_session);
             }
         }
     }
