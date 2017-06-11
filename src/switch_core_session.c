@@ -1725,7 +1725,7 @@ static void *SWITCH_THREAD_FUNC switch_core_session_thread(switch_thread_t *thre
 
 	switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Session %" SWITCH_SIZE_T_FMT " (%s) Locked, Waiting on external entities\n",
 					  session->id, switch_channel_get_name(session->channel));
-	switch_core_session_write_lock_timeout(session);
+	switch_core_session_write_lock(session);
 	switch_set_flag(session, SSF_DESTROYED);
 
 	if ((val = switch_channel_get_variable(session->channel, "memory_debug")) && switch_true(val)) {
