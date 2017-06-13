@@ -893,7 +893,9 @@ static switch_status_t conf_api_unlock_and_unmute(conference_member_t *member, s
 static int conference_list_add(conference_obj_t *conference, participant_thread_data_t *ol);
 static int conference_list_remove(conference_obj_t *conference, participant_thread_data_t *ol);
 static void conference_list_add_to_idx(conference_obj_t *conference, participant_thread_data_t *ol, int idx);
+#ifdef NOTIFY_MUTED
 static void notify_muted(conference_member_t *member);
+#endif
 static void launch_conference_record_thread(conference_obj_t *conference, char *path, switch_bool_t autorec);
 
 SWITCH_STANDARD_API(conf_api_main);
@@ -2137,14 +2139,12 @@ static void update_mute_state(conference_member_t *member, mute_event_t event)
                               "update_mute_state(UNMUTED,CN) -> (CN)\n");
             member->ms = MS_CN;
             switch_rtp_set_muted(member->channel, SWITCH_TRUE);
-            notify_muted(member);
             break;
         case ME_MUTE:
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
                               "update_mute_state(UNMUTED,MUTE) -> (MUTED)\n");
             member->ms = MS_MUTED;
             switch_rtp_set_muted(member->channel, SWITCH_TRUE);
-            notify_muted(member);
             break;
         default:
             break;
@@ -2165,7 +2165,6 @@ static void update_mute_state(conference_member_t *member, mute_event_t event)
                               "update_mute_state(MUTED,UNMUTE) -> (UNMUTED)\n");
             member->ms = MS_UNMUTED;
             switch_rtp_set_muted(member->channel, SWITCH_FALSE);
-            notify_muted(member);
             break;
         default:
             break;
@@ -2178,14 +2177,12 @@ static void update_mute_state(conference_member_t *member, mute_event_t event)
                               "update_mute_state(CN,PKTS) -> (UNMUTED)\n");
             member->ms = MS_UNMUTED;
             switch_rtp_set_muted(member->channel, SWITCH_FALSE);
-            notify_muted(member);
             break;
         case ME_UNMUTE:
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
                               "update_mute_state(CN,UNMUTE) -> (UNMUTING)\n");
             member->ms = MS_UNMUTING;
             switch_rtp_set_muted(member->channel, SWITCH_FALSE);
-            notify_muted(member);
             break;
         case ME_CN:
         case ME_MUTE:
@@ -2209,7 +2206,6 @@ static void update_mute_state(conference_member_t *member, mute_event_t event)
                               "update_mute_state(UNMUTING,MUTE) -> (MUTED)\n");
             member->ms = MS_MUTED;
             switch_rtp_set_muted(member->channel, SWITCH_TRUE);
-            notify_muted(member);
             break;
         default:
             break;
@@ -2245,11 +2241,7 @@ static switch_status_t conference_add_event_member_data(conference_member_t *mem
                                 switch_channel_test_flag(switch_core_session_get_channel(member->session), CF_VIDEO) ? "true" : "false" );
     }
 
-    if (switch_test_flag(member, MFLAG_CLIENT_SIDE_TONES)) {
-        muted = (member->ms == MS_MUTED || member->ms == MS_CN);
-    } else {
-        muted = switch_test_flag(member, MFLAG_CAN_SPEAK) ? SWITCH_FALSE : SWITCH_TRUE;
-    }
+    muted = switch_test_flag(member, MFLAG_CAN_SPEAK) ? SWITCH_FALSE : SWITCH_TRUE;
 
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Hear", "%s", switch_test_flag(member, MFLAG_CAN_HEAR) ? "true" : "false" );
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Speak", "%s", muted ? "false" : "true");
@@ -9466,16 +9458,13 @@ static void conference_list_count_only(conference_obj_t *conference, switch_stre
     stream->write_function(stream, "%d", conference->count);
 }
 
+#ifdef NOTIFY_MUTED
 static void notify_muted(conference_member_t *member)
 {
     switch_event_t *event;
 
     if (member == NULL)
         return;
-
-    if (!switch_test_flag(member, MFLAG_CLIENT_SIDE_TONES)) {
-        return;
-    }
 
     if (member->session) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "notify_muted member:%s/%d %d\n", member->mname, member->id, member->ms);
@@ -9496,6 +9485,7 @@ static void notify_muted(conference_member_t *member)
 
     return;
 }
+#endif
 
 static switch_status_t conf_api_sub_mute(conference_member_t *member, switch_stream_handle_t *stream, void *data)
 {
