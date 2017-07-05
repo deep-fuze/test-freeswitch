@@ -93,10 +93,10 @@ static unsigned char* cJSON_strdup(const unsigned char* str, const internal_hook
 {
     size_t len = 0;
     unsigned char *copy = NULL;
-	const unsigned char *s = str ? str : (unsigned char *)"";
+    const unsigned char *s = str ? str : (unsigned char *)"";
 
     len = strlen((const char*)s) + 1;
-    if (!(copy = (unsigned char*)hooks->allocate(len)))
+    if (!(copy = (unsigned char*)hooks->allocate(len+8)))
     {
         return NULL;
     }
@@ -143,6 +143,9 @@ static cJSON *cJSON_New_Item(const internal_hooks * const hooks)
     if (node)
     {
         memset(node, '\0', sizeof(cJSON));
+        node->magic_start = CJSON_MAGIC_START;
+        node->magic_end = CJSON_MAGIC_END;
+        node->valid = CJSON_VALID;
     }
 
     return node;
@@ -154,6 +157,24 @@ SWITCH_DECLARE(void) cJSON_Delete(cJSON *c)
     cJSON *next = NULL;
     while (c)
     {
+        /* check guards */
+        if (c->magic_start != CJSON_MAGIC_START) {
+          switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, 
+                            "cJSON_Delete: magic_start bad %" PRId64 "\n", c->magic_start);
+          break;
+        }
+        if (c->magic_end != CJSON_MAGIC_END) {
+          switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, 
+                            "cJSON_Delete: magic_end bad %" PRId64 "\n", c->magic_end);
+          break;
+        }
+        if (c->valid != CJSON_VALID) {
+          switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
+                            "cJSON_Delete: valid bad %" PRId64 "\n", c->valid);
+          break;
+        } else {
+          c->valid = 0;
+        }
         next = c->next;
         if (!(c->type & cJSON_IsReference) && c->child)
         {
@@ -860,7 +881,7 @@ static unsigned char *print(const cJSON * const item, cjbool format, const inter
     memset(buffer, 0, sizeof(buffer));
 
     /* create buffer */
-    buffer->buffer = (unsigned char*) hooks->allocate(256);
+    buffer->buffer = (unsigned char*) hooks->allocate(4096);
     if (buffer->buffer == NULL)
     {
         goto fail;

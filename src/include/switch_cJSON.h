@@ -51,9 +51,16 @@ extern "C"
 #define cJSON_IsReference 256
 #define cJSON_StringIsConst 512
 
+#define CJSON_MAGIC_START 0xF00757A7
+#define CJSON_MAGIC_END 0xF0073900
+
+#define CJSON_VALID 0x12345678
+
 /* The cJSON structure: */
 typedef struct cJSON
 {
+    uint64_t magic_start;
+
     /* next/prev allow you to walk array/object chains. Alternatively, use GetArraySize/GetArrayItem/GetObjectItem */
     struct cJSON *next;
     struct cJSON *prev;
@@ -72,6 +79,10 @@ typedef struct cJSON
 
     /* The item's name string, if this item is the child of, or is in the list of subitems of an object. */
     char *string;
+
+    uint64_t valid;
+
+    uint64_t magic_end;
 } cJSON;
 
 typedef struct cJSON_Hooks
