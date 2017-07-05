@@ -2794,7 +2794,7 @@ static int add_rx_congestion(switch_rtp_t *rtp_session, void *body, switch_rtcp_
     rx_congestion->muted = rtp_session->muted;
     rx_congestion->cn = switch_core_session_get_cn_state(rtp_session->session);
 
-    rx_congestion->lost_percent = htons(rtp_session->stats.jb_period_lost_percent);
+    rx_congestion->lost_percent = htons(rtp_session->stats.last_lost_percent);
 
     for (i = 0; i < APP_RX_NUM_STATS; i++) {
         int idx = rtp_session->stats.recv_rate_history_idx - (i+1);
@@ -9112,7 +9112,7 @@ SWITCH_DECLARE(void) switch_rtp_reset_rtp_stats(switch_channel_t *channel)
 
 #define rtp_stat_add_value(rtp_session, rtpstat, type_str, value, last_value) \
     { \
-		int statno = rtpstat-RTP_RECV_RATE;	\
+        int statno = rtpstat-RTP_RECV_RATE; \
         if (value != last_value || rtp_session->stats.len[statno] == RTP_STATS_STR_SIZE) { \
             if (rtp_session->stats.len[statno] < RTP_STATS_STR_SIZE) { \
                 strncat(rtp_session->stats.eos[statno], ":", rtp_session->stats.len[statno]); \
@@ -9138,6 +9138,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
     uint16_t local_send = 0, local_recv = 0;
     int rawframeswaiting = 0, waiting_times_ms[MAX_WAITING_TIME_TO_CHECK];
     int max_proc_time = 0;
+    short loss = 0;
 
 //  int pkts_in_buffer, max_pkts_in_buffer
 // void WebRtcNetEQ_GetProcessingActivity(void* inst, WebRtcNetEQ_ProcessingActivity* stat, int clear);
@@ -9155,6 +9156,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
         WebRtcNetEQ_GetJitterBufferSize(neteq_inst, &processing);
         if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
             jbuf = nwstats.currentBufferSize;
+            loss = nwstats.currentPacketLossRate;
             for (int i = 0; i < rawframeswaiting; i++) {
                 if (waiting_times_ms[i] > max_proc_time) {
                     max_proc_time = waiting_times_ms[i];
@@ -9194,6 +9196,15 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
             rtp_stat_add_value(rtp_session, RTP_PREF_JBUF, "%d", nwstats.preferredBufferSize, rtp_session->stats.last_pref_jbuf);
             rtp_stat_add_value(rtp_session, RTP_JBUF_PKTS, "%d", processing.pkts_in_buffer, rtp_session->stats.last_jbuf_pkts);
             rtp_stat_add_value(rtp_session, RTP_MAX_PROC_TIME, "%d", max_proc_time, rtp_session->stats.last_proc_time);
+            rtp_stat_add_value(rtp_session, RTP_PER_LOST, "%d", loss, rtp_session->stats.last_lost_percent);
+        }
+    }
+
+    if (jbuf == -1 || !neteq_inst) {
+        if (rtp_session->stats.inbound.lossrate) {
+            float loss;
+            loss = ((float)(int)(rtp_session->stats.inbound.lossrate*100)/100);
+            rtp_stat_add_value(rtp_session, RTP_PER_LOST, "%0.2f", loss, rtp_session->stats.last_lost_percent);
         }
     }
 
@@ -9226,12 +9237,6 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
 
     if (rtp_session->stats.inbound.flaws) {
         rtp_stat_add_value(rtp_session, RTP_FLAWS, "%0ld", rtp_session->stats.inbound.flaws, rtp_session->stats.last_flaws);
-    }
-
-    if (rtp_session->stats.inbound.lossrate) {
-        float loss;
-        loss = ((float)(int)(rtp_session->stats.inbound.lossrate*100)/100);
-        rtp_stat_add_value(rtp_session, RTP_PER_LOST, "%0.2f", loss, rtp_session->stats.last_lost_percent);
     }
 
     if (level_out == -1 && rtp_session->level_out > -1) {

@@ -276,6 +276,8 @@ libfreeswitch_la_SOURCES = \
 	src/switch_resample.c \
 	src/switch_regex.c \
 	src/switch_rtp.c \
+	src/cJSON.c \
+	src/cJSON_Utils.c \
 	src/switch_ivr_bridge.c \
 	src/switch_ivr_originate.c \
 	src/switch_ivr_async.c \

@@ -767,7 +767,7 @@ typedef struct {
     int last_active_speaker;
     int last_jitter;
     int last_cumulative_lost;
-    float last_lost_percent;
+    short last_lost_percent;
     float last_mos;
     float last_r;
     float last_variance;

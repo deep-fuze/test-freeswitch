@@ -3288,7 +3288,20 @@ static void check_ice(switch_media_handle_t *smh, switch_media_type_t type, sdp_
         }
 
         if (engine->ice_in.cands[engine->ice_in.chosen[1]][1].ready) {
-            if (engine->rtcp_mux > 0 && !strcmp(engine->ice_in.cands[engine->ice_in.chosen[1]][1].con_addr, engine->ice_in.cands[engine->ice_in.chosen[0]][0].con_addr)
+            switch_bool_t skip_rtcp = SWITCH_FALSE;
+
+            if (!engine->ice_in.cands[engine->ice_in.chosen[1]][1].con_addr ||
+                !engine->ice_in.cands[engine->ice_in.chosen[0]][0].con_addr) {
+                skip_rtcp = SWITCH_TRUE;
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(smh->session), SWITCH_LOG_WARNING,
+                                  "Unexpected null ice candidate string [0][0]=%s [1][1]=%s\n",
+                                  engine->ice_in.cands[engine->ice_in.chosen[0]][0].con_addr == NULL ? "null" : "ok",
+                                  engine->ice_in.cands[engine->ice_in.chosen[1]][1].con_addr == NULL ? "null" : "ok");
+            } else if (!strcmp(engine->ice_in.cands[engine->ice_in.chosen[1]][1].con_addr, engine->ice_in.cands[engine->ice_in.chosen[0]][0].con_addr)) {
+                skip_rtcp = SWITCH_TRUE;
+            }
+
+            if (engine->rtcp_mux > 0 && skip_rtcp
                 && engine->ice_in.cands[engine->ice_in.chosen[1]][1].con_port == engine->ice_in.cands[engine->ice_in.chosen[0]][0].con_port) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(smh->session), SWITCH_LOG_INFO, "Skipping %s RTCP ICE (Same as RTP)\n", type2str(type));
             } else {
@@ -5742,7 +5755,8 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_activate_rtp(switch_core_sessi
             }
 
             if (a_engine->ice_in.cands[a_engine->ice_in.chosen[1]][1].ready) {
-                if (a_engine->rtcp_mux > 0 && !strcmp(a_engine->ice_in.cands[a_engine->ice_in.chosen[1]][1].con_addr, a_engine->ice_in.cands[a_engine->ice_in.chosen[0]][0].con_addr)
+                if (a_engine->rtcp_mux > 0 &&
+                    !strcmp(a_engine->ice_in.cands[a_engine->ice_in.chosen[1]][1].con_addr, a_engine->ice_in.cands[a_engine->ice_in.chosen[0]][0].con_addr)
                     && a_engine->ice_in.cands[a_engine->ice_in.chosen[1]][1].con_port == a_engine->ice_in.cands[a_engine->ice_in.chosen[0]][0].con_port) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Skipping RTCP ICE (Same as RTP)\n");
                 } else {

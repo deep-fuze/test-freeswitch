@@ -56,6 +56,8 @@ switch_stfu.c
 switch_cpp.cpp
 g711.c
 switch_pcm.c
+cJSON.c
+cJSON_Utils.c
 ../libs/libteletone/src/libteletone_detect.c
 ../libs/libteletone/src/libteletone_generate.c
 

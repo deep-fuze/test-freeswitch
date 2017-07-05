@@ -43,6 +43,7 @@
 #include "switch_monitor.h"
 #include "conference_optimization.h"
 #include "conference_utils.h"
+#include <switch_cJSON.h>
 
 #define DEFAULT_AGC_LEVEL 1100
 #define CONFERENCE_UUID_VARIABLE "conference_uuid"
@@ -411,7 +412,6 @@ struct participant_thread_data {
     /* condition variable to synchronize "overflow" threads */
     switch_thread_cond_t *cond;
     switch_mutex_t *cond_mutex;
-
 };
 
 #define PROCESS_AVG_CNT 3
@@ -775,16 +775,15 @@ struct conference_member {
     uint16_t roll_no;
     uint16_t consecutive_active_slots;
     uint16_t consecutive_inactive_slots;
-    cJSON *json;
-    cJSON *status_field;
 
     uint32_t flush_len;
     uint32_t low_count;
 
 #define FUZE_PIN_LEN 4
+#define FUZE_PIN_LEN_FIELD 10
     /* Fuze */
     uint8_t muted_state;
-    char pin[FUZE_PIN_LEN+1];
+    char pin[FUZE_PIN_LEN_FIELD];
     switch_time_t last_pin_time;
     int authenticate;
 
@@ -2603,46 +2602,6 @@ static void send_conference_notify(conference_obj_t *conference, const char *sta
 
 }
 
-static void member_update_status_field(conference_member_t *member)
-{
-    char *str, *vstr = "", display[128] = "";
-
-    if (!member->conference->la) {
-        return;
-    }
-
-    switch_live_array_lock(member->conference->la);
-
-    if (!switch_test_flag(member, MFLAG_CAN_SPEAK)) {
-        if (switch_test_flag(member, MFLAG_USE_FAKE_MUTE)) {
-            str = "MUTE (FAKE)";
-        } else {
-            str = "MUTE";
-        }
-    } else if (switch_channel_test_flag(member->channel, CF_HOLD)) {
-        str = "HOLD";
-    } else if (member == member->conference->floor_holder) {
-        if (switch_test_flag(member, MFLAG_TALKING)) {
-            str = "TALKING (FLOOR)";
-        } else {
-            str = "FLOOR";
-        }
-    } else if (switch_test_flag(member, MFLAG_TALKING)) {
-        str = "TALKING";
-    } else {
-        str = "ACTIVE";
-    }
-
-    switch_snprintf(display, sizeof(display), "%s%s", str, vstr);
-
-
-    free(member->status_field->valuestring);
-    member->status_field->valuestring = strdup(display);
-
-    switch_live_array_add(member->conference->la, switch_core_session_get_uuid(member->session), -1, &member->json, SWITCH_FALSE);
-    switch_live_array_unlock(member->conference->la);
-}
-
 static void adv_la(conference_obj_t *conference, conference_member_t *member, switch_bool_t join)
 {
     if (conference && conference->la && member->session) {
@@ -3202,26 +3161,6 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     audio_out_mutex_unlock(member);
     audio_in_mutex_unlock(member);
 
-    if (conference->la && member->channel) {
-        member->json = cJSON_CreateArray();
-        cJSON_AddItemToArray(member->json, cJSON_CreateStringPrintf("%0.4d", member->id));
-        cJSON_AddItemToArray(member->json, cJSON_CreateString(switch_channel_get_variable(member->channel, "caller_id_number")));
-        cJSON_AddItemToArray(member->json, cJSON_CreateString(switch_channel_get_variable(member->channel, "caller_id_name")));
-
-        cJSON_AddItemToArray(member->json, cJSON_CreateStringPrintf("%s@%s",
-                                                                    switch_channel_get_variable(member->channel, "original_read_codec"),
-                                                                    switch_channel_get_variable(member->channel, "original_read_rate")
-                                                                    ));
-
-        member->status_field = cJSON_CreateString("");
-        cJSON_AddItemToArray(member->json, member->status_field);
-        member_update_status_field(member);
-        //switch_live_array_add_alias(conference->la, switch_core_session_get_uuid(member->session), "conference");
-        adv_la(conference, member, SWITCH_TRUE);
-        switch_live_array_add(conference->la, switch_core_session_get_uuid(member->session), -1, &member->json, SWITCH_FALSE);
-
-    }
-
     member->roll_no = conference->member_id_counter++;
     if (channel && switch_test_flag(conference, CFLAG_DEBUG_STATS_ACTIVE) &&
             conference->debug_stats_pool &&
@@ -3444,15 +3383,12 @@ static void conference_set_video_floor_holder(conference_obj_t *conference, conf
         //switch_channel_set_flag(member->channel, CF_VIDEO_PASSIVE);
         switch_core_session_refresh_video(member->session);
         conference->video_floor_holder = member;
-        member_update_status_field(member);
     } else {
         conference->video_floor_holder = NULL;
     }
 
     if (old_member) {
         old_id = old_member->id;
-        member_update_status_field(old_member);
-        //switch_channel_clear_flag(old_member->channel, CF_VIDEO_PASSIVE);
     }
 
     for (int i = 0; i < NUMBER_OF_MEMBER_LISTS; i++) {
@@ -3525,7 +3461,6 @@ static void conference_set_floor_holder(conference_obj_t *conference, conference
                           switch_channel_get_name(member->channel));
 
         conference->floor_holder = member;
-        member_update_status_field(member);
     } else {
         conference->floor_holder = NULL;
     }
@@ -3533,7 +3468,6 @@ static void conference_set_floor_holder(conference_obj_t *conference, conference
 
     if (old_member) {
         old_id = old_member->id;
-        member_update_status_field(old_member);
     }
 
     set_conference_state_unlocked(conference, CFLAG_FLOOR_CHANGE);
@@ -6176,7 +6110,7 @@ static void process_dtmf(conference_member_t *member)
                 int idx = strlen(member->pin); 
                 for (int i = 0; i < strlen(dtmf); i ++) {
                     if (dtmf[i] >= '0' && dtmf[i] <= '9') {
-                        if (idx > FUZE_PIN_LEN) {
+                        if (idx >= FUZE_PIN_LEN) {
                             memcpy(&member->pin[0], &member->pin[1], FUZE_PIN_LEN);
                             idx -= 1;
                         }
@@ -6189,6 +6123,7 @@ static void process_dtmf(conference_member_t *member)
                 }
             }
             if (strlen(member->pin) == FUZE_PIN_LEN) {
+				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "AUTHENTICATE %s!\n", member->pin);
                 /* authenticate */
                 member->authenticate = 1;
             }
@@ -6404,7 +6339,6 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
                 clear_member_state_locked(member, MFLAG_TALKING);
                 switch_set_flag(member, MFLAG_NOTIFY_ACTIVITY);
 
-                member_update_status_field(member);
                 check_agc_levels(member);
                 clear_avg(member);
                 member->score_iir = 0;
@@ -6560,7 +6494,6 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
                 if (++il->hangover_hits >= il->hangover) {
                     il->hangover_hits = il->hangunder_hits = 0;
                     clear_member_state_locked(member, MFLAG_TALKING);
-                    member_update_status_field(member);
                     check_agc_levels(member);
                     clear_avg(member);
                 }
@@ -9533,8 +9466,6 @@ static switch_status_t conf_api_sub_mute(conference_member_t *member, switch_str
         switch_event_fire(&event);
     }
 
-    member_update_status_field(member);
-
     return SWITCH_STATUS_SUCCESS;
 }
 
@@ -9641,8 +9572,6 @@ static switch_status_t conf_api_sub_unmute(conference_member_t *member, switch_s
         switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Action", "unmute-member");
         switch_event_fire(&event);
     }
-
-    member_update_status_field(member);
 
     return SWITCH_STATUS_SUCCESS;
 }
