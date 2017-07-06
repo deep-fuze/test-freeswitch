@@ -70,6 +70,7 @@ ConnectionImpl::ConnectionImpl(int connID)
     , bFallback_(false)
     , origType_(CT_INVALID)
     , pTransceiver_(NoTransceiver::GetInstance())
+    , connType_(CT_INVALID)
     , state_(0)
     , pObserver_(0)
     , removeBinding_(false)
@@ -201,6 +202,7 @@ bool ConnectionImpl::Start(ConnectionType eType, int mode)
     pTransceiver_ = ResourceMgr::GetInstance()->GetNewTransceiver(eType);
     if (pTransceiver_) {
         pTransceiver_->SetConnectionID(ID());
+        connType_ = pTransceiver_->ConnType();
         
         // if this is TcpTransceiver then set TcpTxrxState
         if (eType & CT_STREAM_TYPE) {
@@ -218,7 +220,7 @@ bool ConnectionImpl::Start(ConnectionType eType, int mode)
         sprintf(sendStat_.log_, "Con[b%d:c%d:%s] Tx rate: ", baseID_, ID(), name_);
         sprintf(recvStat_.log_, "Con[b%d:c%d:%s] Rx rate: ", baseID_, ID(), name_);
 
-        MLOG("Starting " << toStr(pTransceiver_->ConnType()));
+        MLOG("Starting " << toStr(connType_));
         
         // check if we are starting HTTP proxy traversal
         if ((state_type != TcpTxrxState::SETUP_HTTP) &&
@@ -521,7 +523,7 @@ void ConnectionImpl::SetWYSWYGMode()
     
     bWYSWYG_ = true;
     
-    if (pTransceiver_->ConnType() == CT_TCP) {
+    if (connType_ == CT_TCP) {
         if (TcpTransceiver* p_tcp =
                 dynamic_cast<TcpTransceiver*>(pTransceiver_)) {
             p_tcp->EnableTcpFramer();
@@ -621,7 +623,7 @@ bool ConnectionImpl::Send(Buffer::Ptr spBuffer)
     return pTransceiver_->Send(spBuffer);
 }
 
-bool ConnectionImpl::Send(const uint8_t* buf, size_t size)
+bool ConnectionImpl::Send(const uint8_t* buf, size_t size, uint16_t remotePort)
 {
     if (IsActive() == false) {
         int64_t curr = GetTimeMs();
@@ -633,18 +635,20 @@ bool ConnectionImpl::Send(const uint8_t* buf, size_t size)
     }
 
     MutexLock scoped(&transLock_);
-
-    return pTransceiver_->Send(buf, size);
+    if (!remotePort) return pTransceiver_->Send(buf, size);
+    Address remoteAddr = remote_;
+    remoteAddr.SetPort(remotePort);
+    return pTransceiver_->Send(buf, size, remoteAddr);
 }
-    
+
 bool ConnectionImpl::GetConnectedType(ConnectionType& rType)
 {
     if (IsActive() == false) {
         ELOG(GetStatusString());
         return false;
     }
-  
-    rType = pTransceiver_->ConnType();
+    
+    rType = connType_;
     
     return true;
 }
@@ -694,9 +698,7 @@ void ConnectionImpl::GetSendQInfo(size_t& rNum, uint32_t& rBufSize)
 {
     MutexLock scoped(&transLock_);
     
-    ConnectionType type = pTransceiver_->ConnType();
-    
-    if (type == CT_TCP || type == CT_TLS) {
+    if (connType_ == CT_TCP || connType_ == CT_TLS) {
         if (TcpTransceiver* p =
                 dynamic_cast<TcpTransceiver*>(pTransceiver_)) {
             p->GetSendQInfo(rNum, rBufSize);
@@ -736,9 +738,7 @@ uint32_t ConnectionImpl::GetSendRetryCount()
     
     MutexLock scoped(&transLock_);
     
-    ConnectionType type = pTransceiver_->ConnType();
-    
-    if (type == CT_TCP || type == CT_TLS) {
+    if (connType_ == CT_TCP || connType_ == CT_TLS) {
         if (TcpTransceiver* p =
             dynamic_cast<TcpTransceiver*>(pTransceiver_)) {
             retry = p->GetSendRetryCount();
@@ -781,6 +781,7 @@ bool ConnectionImpl::Initialize(ConnectionType  eType,
     pTransceiver_ = ResourceMgr::GetInstance()->GetNewTransceiver(eType);
     if (pTransceiver_) {
         pTransceiver_->SetConnectionID(ID());
+        connType_ = pTransceiver_->ConnType();
         
         if (eType == CT_TCP) {
             if (TcpTransceiver* p =
@@ -949,9 +950,7 @@ void ConnectionImpl::OnEvent(EventType eType, const char* pReason)
             }
         }
         
-        ConnectionType conn_type = pTransceiver_->ConnType();
-        
-        if (conn_type == CT_UDP) {
+        if (connType_ == CT_UDP) {
             // Usually UDP won't fail unless it is connected-udp
             // however, os firewall or anti-virus may still do
             // the un-thinkable thing.
@@ -962,7 +961,7 @@ void ConnectionImpl::OnEvent(EventType eType, const char* pReason)
                 }
             }
         }
-        else if (conn_type == CT_TCP) {
+        else if (connType_ == CT_TCP) {
             if (TcpTransceiver* p = dynamic_cast<TcpTransceiver*>(pTransceiver_)) {
                 // check whether we were doing setup or not
                 if (is_setup_state(p->GetStateType())) {
@@ -1142,7 +1141,7 @@ uint32_t ConnectionImpl::OnBytesRecv(uint32_t bytesRecv)
     AddSendStat(0, curr_time); // check send stat in case not active
     
     if (recvStat_.count_ == 1) {
-        if (pTransceiver_->ConnType() == CT_UDP) {
+        if (connType_ == CT_UDP) {
             OnEvent(ET_CONNECTED, "received first packet");
         }
     }
@@ -1320,10 +1319,9 @@ void ConnectionImpl::OnTransceiverTimeout()
             // filter this event for other service like screen sharing and vidyo
             if (origType_ == CT_UDP) {
                 // try the same transport type again if not udp
-                bool is_udp = (pTransceiver_->ConnType() == CT_UDP);
-                bool retry_same_type = (is_udp ? false : true);
+                bool retry_same_type = (connType_ == CT_UDP ? false : true);
                 if (Failover(retry_same_type)) {
-                    if (is_udp) {
+                    if (connType_ == CT_UDP) {
                         ClearStat();
                     }
                 }
@@ -1347,12 +1345,12 @@ bool ConnectionImpl::Failover(bool bRetrySameType)
     
     bool bResult = false;
 
-    ConnectionType     type = pTransceiver_->ConnType();
+    ConnectionType     type = connType_;
     TcpTxrxState::Type state_type = TcpTxrxState::SETUP_TLS;
-    string             event_str(toStr(type));
+    string             event_str(toStr(connType_));
     
     if (bRetrySameType) {
-        if ((type == CT_TCP) || (type == CT_TLS)) {
+        if ((connType_ == CT_TCP) || (connType_ == CT_TLS)) {
             if (TcpTransceiver* p
                     = dynamic_cast<TcpTransceiver*>(pTransceiver_)) {
                 state_type = p->GetSetupMethodType();
@@ -1366,13 +1364,13 @@ bool ConnectionImpl::Failover(bool bRetrySameType)
             origRemote_ = remote_;
         }
         
-        if (type == CT_UDP) {
+        if (connType_ == CT_UDP) {
             type = CT_TCP;
             state_type = TcpTxrxState::SETUP_TLS;
             remote_.SetPort(Server::PORT);
             MLOG("transition UDP -> TLS [" << toStr(state_type) << "]");
         }
-        else if ((type == CT_TCP) || (type == CT_TLS)) {
+        else if ((connType_ == CT_TCP) || (connType_ == CT_TLS)) {
             TcpTransceiver* p = dynamic_cast<TcpTransceiver*>(pTransceiver_);
             if (!p) {
                 ELOG("No TcpTransceiver");
@@ -1432,7 +1430,7 @@ bool ConnectionImpl::Failover(bool bRetrySameType)
                  " -> " << toStr(state_type));
         }
         else {
-            ELOG("can't failover connection type: " << toStr(type));
+            ELOG("can't failover connection type: " << toStr(connType_));
             return false;
         }
         
@@ -1567,10 +1565,11 @@ void ConnectionImpl::ReplaceTransceiver(Transceiver* p)
     }
     
     pTransceiver_ = p;
+    connType_     = pTransceiver_->ConnType();
 
     // if frame mode is on then enable it for new tcp transceiver
     if (bWYSWYG_) {
-        if (pTransceiver_->ConnType() == CT_TCP) {
+        if (connType_ == CT_TCP) {
             if (TcpTransceiver* p_tcp =
                 dynamic_cast<TcpTransceiver*>(pTransceiver_)) {
                 p_tcp->EnableTcpFramer();

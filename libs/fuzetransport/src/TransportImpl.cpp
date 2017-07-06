@@ -322,8 +322,10 @@ void TransportImpl::StoreDnsCache()
     for (auto& i : staleCache_) {
         for (auto& kv : i) {
             for (auto& j : kv.second) {
-                j->Serialize(store);
-                cache_cnt++;
+                if (j->voip_) {
+                    j->Serialize(store);
+                    cache_cnt++;
+                }
             }
         }
     }

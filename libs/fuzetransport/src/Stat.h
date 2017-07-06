@@ -55,6 +55,7 @@ struct Stat
     StatData  arrival_;     // jitter of receiving stat
     int64_t   lastArrival_; // timestamp of remote report
     int64_t   lastSent_;    // timestamp of our report
+    MutexLock lock_;        // when app uses direct send API
     
     ConnectionImpl* pConn_; // sendStat on sendQ Info
     

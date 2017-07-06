@@ -36,11 +36,13 @@ namespace dns {
         uint32_t  class_;
         uint32_t  ttl_;
         int64_t   expire_; // added to track time to be expired
+        bool      voip_;   // flag to indicate this is voip related
         
         bool operator==(const Record& rRhs);
         
         virtual void Serialize(std::ostringstream& rStr) = 0;
         
+        Record() : ttl_(5), voip_(false) {}
         virtual ~Record() {}
     };
     

@@ -54,7 +54,7 @@ public:
     virtual void SetRemoteAddressPerBuffer(bool enabled);
     virtual bool Start(ConnectionType eType, int mode = 0);
     virtual bool Send(Buffer::Ptr spBuffer);
-    virtual bool Send(const uint8_t* buf, size_t size);
+    virtual bool Send(const uint8_t* buf, size_t size, uint16_t remotePort = 0);
     virtual bool GetConnectedType(ConnectionType& rType);
     virtual bool GetLocalAddress(string& rIP, uint16_t& rPort);
     virtual bool GetRemoteAddress(string& rIP, uint16_t& rPort);
@@ -145,6 +145,7 @@ private:
     string                   domainRemote_;  // case where DNS is not allowed
     
     Transceiver*             pTransceiver_;
+    ConnectionType           connType_;
     MutexLock                transLock_;     // sync between app and transport threads
     
     uint16_t                 state_;         // connection state

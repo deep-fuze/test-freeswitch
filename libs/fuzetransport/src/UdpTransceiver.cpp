@@ -415,6 +415,22 @@ bool UdpTransceiver::Send(const uint8_t* buf, size_t size)
     return true;
 }
 
+bool UdpTransceiver::Send(const uint8_t* buf, size_t size, const fuze::Address& rRemote)
+{
+    if (IsActive() == false) {
+        ELOG(GetStatusString());
+        return false;
+    }
+
+    if ((socket_ == INVALID_SOCKET) || !pConn_) {
+        return false;
+    }
+
+    SendPayload((char*)buf, size, rRemote);
+
+    return true;
+}
+
 void UdpTransceiver::OnWriteEvent()
 {
     while (true) {

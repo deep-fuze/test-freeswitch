@@ -195,7 +195,7 @@ public:
     
     // There may be some delay to send data
     virtual bool Send(Buffer::Ptr spBuffer) = 0;
-    virtual bool Send(const uint8_t* buf, size_t size) = 0;
+    virtual bool Send(const uint8_t* buf, size_t size, uint16_t remotePort = 0) = 0;
     
     // Query the connection info
     virtual bool GetConnectedType(ConnectionType& rType) = 0;
@@ -350,6 +350,19 @@ public:
     // Set number of worker thread to use via Connection
     //
     //  input -1 will create as many as CPU cores are available
+    //
+    // Enabling this API won't allow multiple threads to be called into
+    // same transport callback. Multi-threading model on transport is
+    // different than raw thread pooling architecture. There will be a
+    // pool of threads but each connection of transport is assigned with
+    // a SINGLE worker thread. This guarantees same benefit as simplified
+    // single thread model, meaning you won't see two or more threads called
+    // back into same transport callback at the same time. There will be
+    // only single dedicated thread work for that callback and other
+    // connections will be handled by other work threads at the same time.
+    // This requires some synchronization on application code for some area
+    // where multiple threads can meet thru different connection callback.
+    // The efficiency can be monitored by seeing the queue size of worker
     //
     virtual void SetNumberOfThread(int numThreads = -1) = 0;
     

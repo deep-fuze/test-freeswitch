@@ -127,11 +127,33 @@ int Stat::AddBytes(uint32_t bytes, int64_t currTime)
     }
     
     if (diff > PERIOD) {
+        //
+        // When application is using direct send API, two threads will
+        // have race condition in this area.  If bytes variable is 0,
+        // that means it's backup call from the other stat logic that we
+        // can safely ignore it.
+        //
+        if (bytes) {
+            lock_.Lock();
+        }
+        else {
+            if (lock_.Trylock() == false) return -1;
+        }
+        
+        // evaulate again in case this was handled just by other thread
+        if (currTime - lastTime_ < PERIOD) {
+            lock_.Unlock();
+            return -1;
+        }
+        
         uint16_t rate = (uint16_t)(diff ? (bytes_*8)/(diff) : 0);
         
         local_.SetData(rate);
+
+        ConnectionType type = CT_UDP;
+        if (pConn_) pConn_->GetConnectedType(type);
         
-        if (pConn_) {
+        if (type != CT_UDP) {
             size_t   q_size = 0;
             uint32_t q_buf_size = 0;
             pConn_->GetSendQInfo(q_size, q_buf_size);
@@ -139,28 +161,31 @@ int Stat::AddBytes(uint32_t bytes, int64_t currTime)
             sendBuf_.SetData(q_buf_size);
             sendRetry_.SetData(pConn_->GetSendRetryCount());
         }
+
         
         if (local_.index_ >= DISPLAY_CNT) {
             std::ostringstream log;
             log << "local seq # " << local_.seq_-local_.index_
-                << " ~ " << local_.seq_-1;
+                << " ~ " << local_.seq_-1 << " (" << bytes2_ << "B, total "
+                << totalBytes_ << "B, cnt " << count_<< ")";
             
-            if (!local_.Display(log, log_, "Local  ")) {
-                log << " (" << bytes2_ << "B, total "
-                    << totalBytes_ << "B, cnt " << count_<< ")";
-            }
+            local_.Display(log, log_, "Local  ");
             bytes2_ = 0;
             
-            remote_.Display(log, log_, "Remote ");
-            arrival_.Display(log, log_, "Arrival ");
-            sendQ_.Display(log, log_, "Tx Queue #   ");
-            sendBuf_.Display(log, log_, "Tx Buf Size  ");
-            sendRetry_.Display(log, log_, "Tx Retry Cnt ");
+            if (type != CT_UDP) {
+                remote_.Display(log, log_, "Remote ");
+                arrival_.Display(log, log_, "Arrival ");
+                sendQ_.Display(log, log_, "Tx Queue #   ");
+                sendBuf_.Display(log, log_, "Tx Buf Size  ");
+                sendRetry_.Display(log, log_, "Tx Retry Cnt ");
+            }
             DEBUG_OUT(LEVEL_MSG, AREA_COM, log_ << log.str());
         }
         
         bytes_    = 0;
         lastTime_ = currTime;
+        
+        lock_.Unlock();
         
         return rate;
     }

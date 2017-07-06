@@ -22,6 +22,7 @@ public:
     virtual bool Start();
     virtual bool Send(Buffer::Ptr spBuffer);
     virtual bool Send(const uint8_t* buf, size_t size);
+    virtual bool Send(const uint8_t* buf, size_t size, const fuze::Address& rRemote);
     virtual void SetConnectionID(int connID);
     virtual ConnectionType ConnType();
 
