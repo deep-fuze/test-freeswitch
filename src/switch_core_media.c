@@ -3606,6 +3606,11 @@ SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *s
         }
     }
 
+    if (strstr(r_sdp, "a=sendrecv") != NULL) {
+        sendonly = 0;
+        recvonly = 0;
+    }
+
     if (sendonly != 1 && recvonly != 1) {
         switch_channel_set_variable(session->channel, "media_audio_mode", NULL);
     }

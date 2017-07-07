@@ -64,7 +64,7 @@ fuze_status_t fuze_curl_execute(switch_core_session_t *session, ivrc_profile_t *
 
     } else {
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: html request status_code: %s\n", out);
-	if (strcasecmp(out,"200")) {
+	if (strstr(out,"200") == NULL) {
 	    status = FUZE_STATUS_GENERR;
 	}
 	else {
@@ -93,7 +93,7 @@ fuze_status_t fuze_curl_execute(switch_core_session_t *session, ivrc_profile_t *
 	}
 	else {
 	    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: message code: %s\n", out);
-	    if (!strcasecmp(out,"200")) {
+	    if (strstr(out,"200") != NULL) {
 		item = cJSON_GetObjectItem(body, "message");
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: message response: %s\n", item ? item->valuestring : "none");
 
@@ -121,14 +121,14 @@ fuze_status_t fuze_curl_execute(switch_core_session_t *session, ivrc_profile_t *
 		    status = FUZE_STATUS_SUCCESS;
 		}
 	    }
-	    else if (!strcasecmp(out,"406")) {
+	    else if (strstr(out,"406")) {
 		status = FUZE_STATUS_TIMEOUT;
 	    }
-	    else if  (!strcasecmp(out,"405")) {
+	    else if  (strstr(out,"405")) {
 		status = FUZE_STATUS_RESTRICTED;
 	    }
-	    else if  (!strcasecmp(out,"403") || 
-		      !strcasecmp(out,"404")) {
+	    else if  (strstr(out,"403") || 
+		      strstr(out,"404")) {
 		status = FUZE_STATUS_NOTFOUND;
 	    }
 	    switch_safe_free(out);

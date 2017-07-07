@@ -119,10 +119,10 @@ fuze_status_t fuze_curl_execute(switch_core_session_t *session, conf_auth_profil
     if (!item || !(out = cJSON_Print(item))) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: html request status_code: none\n");
 	status = FUZE_STATUS_GENERR;
-
     } else {
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: html request status_code: %s\n", out);
-	if (strcasecmp(out,"200")) {
+	if (strstr(out,"200") == NULL) {
+	    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: html request status_code not 200!\n");
 	    status = FUZE_STATUS_GENERR;
 	}
 	else {
@@ -131,6 +131,8 @@ fuze_status_t fuze_curl_execute(switch_core_session_t *session, conf_auth_profil
 	    if (!item || item->type != cJSON_String || !item->valuestring) {
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: html request: no body");
 		status = FUZE_STATUS_GENERR;  
+	    } else {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: html request: body found\n");
 	    }
 	}
     }
@@ -142,9 +144,15 @@ fuze_status_t fuze_curl_execute(switch_core_session_t *session, conf_auth_profil
     }
     body = cJSON_Parse(item->valuestring);
 
+    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: html request: body=%s item->valuestring=%s\n", 
+		      body == NULL ? "null" : "ok", item->valuestring);
+
     if (body) {
 	item = cJSON_GetObjectItem(body, "code"); 
 	out = (item ? cJSON_Print(item) : NULL); 
+
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: html request: code=%s item->valuestring=%s\n",
+		      item == NULL ? "null" : "ok", out);
 
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "received body: %s\n", item->valuestring);
 
@@ -153,7 +161,7 @@ fuze_status_t fuze_curl_execute(switch_core_session_t *session, conf_auth_profil
 	}
 	else {
 	    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: message code: %s\n", out);
-	    if (!strcasecmp(out,"200")) {
+	    if (strstr(out,"200")) {
 		item = cJSON_GetObjectItem(body, "message");
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: message response: %s\n", item ? item->valuestring : "none");
 
@@ -181,14 +189,14 @@ fuze_status_t fuze_curl_execute(switch_core_session_t *session, conf_auth_profil
 		    status = FUZE_STATUS_SUCCESS;
 		}
 	    }
-	    else if (!strcasecmp(out,"406")) {
+	    else if (strstr(out,"406")) {
 		status = FUZE_STATUS_TIMEOUT;
 	    }
-	    else if  (!strcasecmp(out,"405")) {
+	    else if  (strstr(out,"405")) {
 		status = FUZE_STATUS_RESTRICTED;
 	    }
-	    else if  (!strcasecmp(out,"403") || 
-		      !strcasecmp(out,"404")) {
+	    else if  (strstr(out,"403") || 
+		      strstr(out,"404")) {
 		status = FUZE_STATUS_NOTFOUND;
 	    }
 	    switch_safe_free(out);
