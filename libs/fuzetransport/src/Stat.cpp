@@ -129,39 +129,32 @@ int Stat::AddBytes(uint32_t bytes, int64_t currTime)
     if (diff > PERIOD) {
         //
         // When application is using direct send API, two threads will
-        // have race condition in this area.  If bytes variable is 0,
-        // that means it's backup call from the other stat logic that we
-        // can safely ignore it.
+        // have race condition in this area. Let only one go thru this
         //
-        if (bytes) {
-            lock_.Lock();
-        }
-        else {
-            if (lock_.Trylock() == false) return -1;
-        }
-        
-        // evaulate again in case this was handled just by other thread
-        if (currTime - lastTime_ < PERIOD) {
-            lock_.Unlock();
-            return -1;
-        }
+        if (lock_.Trylock() == false) return -1;
         
         uint16_t rate = (uint16_t)(diff ? (bytes_*8)/(diff) : 0);
         
         local_.SetData(rate);
 
-        ConnectionType type = CT_UDP;
-        if (pConn_) pConn_->GetConnectedType(type);
+        bool tcp_based = false;
         
-        if (type != CT_UDP) {
+        if (pConn_) {
+            ConnectionType type = CT_UDP;
+            pConn_->GetConnectedType(type);
+            if (!(type & CT_DGRAM_TYPE)) {
+                tcp_based = true;
+            }
+        }
+        
+        if (tcp_based) {
             size_t   q_size = 0;
-            uint32_t q_buf_size = 0;
-            pConn_->GetSendQInfo(q_size, q_buf_size);
+            uint32_t q_buf_size = 0, q_retry = 0;
+            pConn_->GetSendQInfo2(q_size, q_buf_size, q_retry);
             sendQ_.SetData((uint16_t)q_size);
             sendBuf_.SetData(q_buf_size);
-            sendRetry_.SetData(pConn_->GetSendRetryCount());
+            sendRetry_.SetData(q_retry);
         }
-
         
         if (local_.index_ >= DISPLAY_CNT) {
             std::ostringstream log;
@@ -172,7 +165,7 @@ int Stat::AddBytes(uint32_t bytes, int64_t currTime)
             local_.Display(log, log_, "Local  ");
             bytes2_ = 0;
             
-            if (type != CT_UDP) {
+            if (tcp_based) {
                 remote_.Display(log, log_, "Remote ");
                 arrival_.Display(log, log_, "Arrival ");
                 sendQ_.Display(log, log_, "Tx Queue #   ");

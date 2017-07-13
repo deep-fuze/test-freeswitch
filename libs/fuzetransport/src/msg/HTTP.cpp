@@ -59,7 +59,7 @@ Buffer::Ptr HttpRequest::Serialize()
     sprintf(p_buf,
             "%s %s HTTP/1.%d\r\n"
             "%s"  // Host if 1.1
-            "User-Agent: Fuze\r\n"
+            "User-Agent: FuzeTransport\r\n"
             "Connection: Keep-Alive\r\n"
             "%s"  // Content-Length if body included
             "\r\n"

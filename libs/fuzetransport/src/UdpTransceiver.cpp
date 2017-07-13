@@ -61,6 +61,7 @@ UdpTransceiver::UdpTransceiver(int transID)
     , lastRecvCnt_(0)
     , remoteChangeCnt_(0)
     , reservedPort_(false)
+    , dropCnt_(0)
 {
     memset(pName_, 0, 16);
 }
@@ -145,6 +146,7 @@ void UdpTransceiver::Reset()
         remoteChangeCnt_ = 0;
         writeAdded_      = false;
         reservedPort_    = false;
+        dropCnt_         = 0;
         
         queue<Buffer::Ptr> empty;
         swap(sendQ_, empty);
@@ -376,6 +378,14 @@ bool UdpTransceiver::Send(Buffer::Ptr spBuffer)
     }
     
     MutexLock scoped(&qlock_);
+    
+    if (sendQ_.size() > Q_SIZE) {
+        if (!(dropCnt_++ % 100)) {
+            MLOG("packet dropped (cnt: " << dropCnt_ <<
+                 ") due to send queue limit (" << Q_SIZE << ")");
+        }
+        return false;
+    }
     
     sendQ_.push(spBuffer);
     

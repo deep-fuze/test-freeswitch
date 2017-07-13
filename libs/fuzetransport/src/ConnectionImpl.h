@@ -10,7 +10,7 @@
 #define __FuzeTransport__ConnectionImpl__
 
 #include <TransportImpl.h>
-#include <Transceiver.h>
+#include <TcpTransceiver.h>
 #include <Resource.h>
 #include <Thread.h>
 #include <atomic>
@@ -20,6 +20,7 @@
 namespace fuze {
 
 using std::queue;
+using std::atomic;
 using core::RawMemory;
     
 const uint16_t RTP_TIMEOUT  = 5000;  // 5 seconds
@@ -113,7 +114,7 @@ public:
     void OnMapReceived(Buffer::Ptr spMap);
     
     // Statistics
-    uint32_t GetSendRetryCount();
+    void GetSendQInfo2(size_t& rNum, uint32_t& rBufSize, uint32_t& rRetry);
     
     // callback from transceiver in case of connection timeout
     void OnTransceiverTimeout();
@@ -144,9 +145,8 @@ private:
     Address                  remote_;
     string                   domainRemote_;  // case where DNS is not allowed
     
-    Transceiver*             pTransceiver_;
+    atomic<Transceiver*>     pTransceiver_;
     ConnectionType           connType_;
-    MutexLock                transLock_;     // sync between app and transport threads
     
     uint16_t                 state_;         // connection state
     
@@ -169,6 +169,12 @@ private:
     
     bool                     bRemotePerBuf_;
     bool                     bReservePort_;
+
+private:
+    inline TcpTransceiver* GetTcpTransceiver()
+    {
+        return dynamic_cast<TcpTransceiver*>(pTransceiver_.load(std::memory_order_relaxed));
+    }
     
 private: // ICE-lite short-term credential
     string                   localUser_;

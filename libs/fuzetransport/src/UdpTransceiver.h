@@ -41,7 +41,8 @@ private:
     void OnWriteEvent();
     void OnTimeOutEvent();
     
-    
+    static const size_t Q_SIZE = 300;
+
     int                 connID_;
     ConnectionImpl*     pConn_;
     
@@ -72,7 +73,7 @@ private: // NAT adopatation logic
     Address             lastNewRemoteAddr_;
 
     char                pName_[16];
-    
+    uint32_t            dropCnt_;
 };
     
 } // namespace fuze
