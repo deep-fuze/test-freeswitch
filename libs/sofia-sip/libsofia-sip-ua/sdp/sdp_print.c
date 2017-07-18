@@ -656,18 +656,11 @@ static void print_media(sdp_printer_t *p,
 	(m->m_mode != (unsigned int)session_mode || p->pr_mode_always)) {
       switch (m->m_mode) {
       case sdp_inactive:
-	sdp_printf(p, "a=inactive" CRLF);
-	break;
       case sdp_sendonly:
-	sdp_printf(p, "a=sendonly" CRLF);
-	break;
       case sdp_recvonly:
-	sdp_printf(p, "a=recvonly" CRLF);
-	break;
       case sdp_sendrecv:
-	sdp_printf(p, "a=sendrecv" CRLF);
-	break;
       default:
+	sdp_printf(p, "a=sendrecv" CRLF);
 	break;
       }
     }

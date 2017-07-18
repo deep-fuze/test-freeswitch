@@ -1560,6 +1560,7 @@ sdp_attribute_t *sdp_attribute_find2(sdp_attribute_t const *a,
 /** Get session mode from attribute list. */
 sdp_mode_t sdp_attribute_mode(sdp_attribute_t const *a, sdp_mode_t defmode)
 {
+  return sdp_sendrecv;
   for (; a; a = a->a_next) {
     if (su_casematch(a->a_name, "sendrecv"))
       return sdp_sendrecv;
