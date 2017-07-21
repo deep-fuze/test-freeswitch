@@ -81,6 +81,8 @@ public:
     bool IsFallback();
     bool IsRemotePerBuffer() const { return bRemotePerBuf_; }
     
+    uint32_t GetPayloadType() const { return payloadType_; }
+    
     // Resource Interface
     virtual void Reset();
     

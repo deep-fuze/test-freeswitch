@@ -135,7 +135,9 @@ TransportImpl::TransportImpl()
     , loopexit_(false)
     , bServerMode_(false)
     , spProber_(new Prober)
-    , qIndex_(0)
+    , qFirstIndex_(0)
+    , qFirstIndexEnd_(0)
+    , qSecondIndex(0)
     , dscpAudio_(46)
     , dscpVideo_(34)
     , dscpSS_(34)
@@ -462,6 +464,9 @@ void TransportImpl::EnableServerMode(Mode mode)
 {
     bServerMode_ = true;
     
+    // assign one fourth of threads to sip signaling
+    qSecondIndex = qFirstIndexEnd_ = threadQ_.size() / 4;
+    
     if (mode == MODE_ONLY) {
         MLOG("Enabling Server mode only (not listening on 443)");
     }
@@ -499,6 +504,10 @@ void TransportImpl::SetNumberOfThread(int numThreads)
     }
 
     if (numThreads > 0) {
+        // assign one fourth (or half for client) of threads to sip signaling
+        int division = (bServerMode_ ? 4 : 2);
+        qSecondIndex = qFirstIndexEnd_ = numThreads / division;
+
         for (size_t i = threadQ_.size(); i < (size_t)numThreads; ++i) {
             AddWorkerThread(i);
         }
@@ -1413,26 +1422,29 @@ void TransportImpl::UnsetQoSTag(evutil_socket_t sock, unsigned long flowID)
 WorkerThread::Ptr TransportImpl::GetWorker(fuze::ConnectionImpl* pConn)
 {
     WorkerThread::Ptr sp;
+
+    //
+    // freeswitch uses 1 worker thread.
+    // sshub uses 1 worker thread (due to thread issue)
+    // media hub uses multiple threads per cores available
+    // client uses 2 threads (no server mode)
+    //
+    bool first_priority = pConn->IsPayloadType(Connection::SIP);
+    if (!first_priority && !bServerMode_ &&
+        pConn->IsPayloadType(Connection::AUDIO)) {
+        first_priority = true;
+    }
     
-    if (pConn->IsPayloadType(Connection::AUDIO)) {
-        sp = threadQ_[0];
-    }
-    else if (pConn->IsPayloadType(Connection::VIDEO)) {
-        sp = threadQ_[0];
-    }
-    else if (pConn->IsPayloadType(Connection::SS)) {
-        if (threadQ_.size() > 1) {
-            sp = threadQ_[1];
-        }
-        else {
-            sp = threadQ_[0];
+    if (first_priority) {
+        sp = threadQ_[qFirstIndex_++];
+        if (qFirstIndex_ >= qFirstIndexEnd_) {
+            qFirstIndex_ = 0;
         }
     }
     else {
-        sp = threadQ_[qIndex_++];
-        
-        if (qIndex_ == threadQ_.size()) {
-            qIndex_ = 0;
+        sp = threadQ_[qSecondIndex++];
+        if (qSecondIndex >= threadQ_.size()) {
+            qSecondIndex = qFirstIndexEnd_;
         }
     }
     

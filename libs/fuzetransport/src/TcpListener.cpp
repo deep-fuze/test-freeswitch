@@ -188,7 +188,7 @@ void TcpListener::HandleAccept(evutil_socket_t sock, short what)
             int base_id = pConn_->BaseID();
             if (TransportBaseImpl* p =
                     ResourceMgr::GetInstance()->GetBase(base_id)) {
-                p->AddNewConnection(new_fd);
+                p->AddNewConnection(new_fd, false, pConn_->GetPayloadType());
             }
             else {
                 ELOG("Failed to get base ID" << base_id);

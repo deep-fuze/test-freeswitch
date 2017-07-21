@@ -39,7 +39,9 @@ public:
     void RemoveConnection(int connID);
 
     // Add a new TCP connection into base for now
-    void AddNewConnection(evutil_socket_t newSock, bool overTLS = false);
+    void AddNewConnection(evutil_socket_t newSock,
+                          bool            overTLS     = false,
+                          uint32_t        payloadType = 0);
 
     TransportBase::Type GetBaseType();
     

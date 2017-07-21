@@ -151,12 +151,18 @@ void TransportBaseImpl::RemoveConnection(int connID)
     }
 }
 
-void TransportBaseImpl::AddNewConnection(int newSock, bool overTLS)
+void TransportBaseImpl::AddNewConnection(int newSock, bool overTLS, uint32_t payloadType)
 {
     if (Connection::Ptr sp_con = CreateConnection()) {
         // set the content of connection
         if (ConnectionImpl* p = dynamic_cast<ConnectionImpl*>(sp_con.get())) {
             p->SetBaseID(ID());
+            
+            // set payload type so that thread assignment is set accordingly
+            if (payloadType) {
+                p->SetPayloadType(payloadType);
+            }
+            
             if (p->Initialize(CT_TCP, newSock, overTLS)) {
                 uint64_t start_time = GetTimeMs();
                 

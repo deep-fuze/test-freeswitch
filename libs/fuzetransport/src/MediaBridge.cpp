@@ -19,7 +19,7 @@ MediaBridge::MediaBridge()
 {
     spBase_ = Transport::GetInstance()->CreateBase("MediaBridge");
     
-    spUdpServer_ = spBase_->CreateConnection("UdpServer");
+    spUdpServer_ = spBase_->CreateConnection("STUN-ECHO");
     spUdpServer_->RegisterObserver(this);
     spUdpServer_->SetLocalAddress("0.0.0.0", UDP_PORT);
     spUdpServer_->SetRemoteAddressPerBuffer(true);

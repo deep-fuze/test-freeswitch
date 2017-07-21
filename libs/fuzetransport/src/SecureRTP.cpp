@@ -14,7 +14,7 @@
 #define _LOG_(A,B) DEBUG_OUT(A, AREA_COM, __FUZE_FUNC__ << ": " << B)
 
 namespace fuze {
-    
+
 void fuze_srtp_init()
 {
 #ifndef FREE_SWITCH
@@ -33,21 +33,21 @@ char base64_encode_value(char value_in)
 int EncodeSrtpKeyBase64(const char* pData, uint32_t len, char* pBuf)
 {
     enum base64_encodestep { step_A, step_B, step_C };
-    
+
     struct base64_encodestate
     {
         base64_encodestep step;
         char              result;
         int               stepcount;
     } state = { step_A, 0, 0 };
-    
+
     const char* plainchar = pData;
     const char* const plaintextend = pData + len;
     char* codechar = pBuf;
-    
+
     char result = state.result;
     char fragment;
-    
+
     switch (state.step)
     {
         while (1)
@@ -83,7 +83,7 @@ int EncodeSrtpKeyBase64(const char* pData, uint32_t len, char* pBuf)
             *codechar++ = base64_encode_value(result);
             result  = (fragment & 0x03f) >> 0;
             *codechar++ = base64_encode_value(result);
-            
+
             ++(state.stepcount);
             if (state.stepcount == 18) {
                 *codechar++ = '\n';
@@ -91,7 +91,7 @@ int EncodeSrtpKeyBase64(const char* pData, uint32_t len, char* pBuf)
             }
         }
     }
-    
+
     /* control should not reach here */
     return codechar - pBuf;
 }
@@ -108,19 +108,19 @@ int base64_decode_value(char value_in)
 int DecodeSrtpKeyBase64(const char* pData, uint32_t len, char* pBuf)
 {
     enum base64_decodestep { step_a, step_b, step_c, step_d };
-    
+
     struct base64_decodestate
     {
         base64_decodestep step;
         char              plainchar;
     } state = { step_a, 0 };
-    
+
     const char* codechar = pData;
     char* plainchar = pBuf;
     char fragment;
-    
+
     *plainchar = state.plainchar;
-    
+
     switch (state.step)
     {
         while (1)
@@ -169,18 +169,18 @@ int DecodeSrtpKeyBase64(const char* pData, uint32_t len, char* pBuf)
             *plainchar++   |= (fragment & 0x03f);
         }
     }
-    
+
     /* control should not reach here */
     return plainchar - pBuf;
 }
-    
-    
+
+
 SecureRTP::Ptr SecureRTP::Create()
 {
     SecureRTP::Ptr sp_srtp(new SRTP);
     return sp_srtp;
 }
-    
+
 SecureRTP::KeyType GetSrtpKeyType(const char* type)
 {
     if (!type) {
@@ -191,12 +191,12 @@ SecureRTP::KeyType GetSrtpKeyType(const char* type)
         !strcmp(type, "SRTP_AES128_CM_SHA1_80")) {
         return SecureRTP::AES_CM_128_HMAC_SHA1_80;
     }
-    
+
     if (!strcmp(type, "AES_CM_128_HMAC_SHA1_32") ||
         !strcmp(type, "SRTP_AES128_CM_SHA1_32")) {
         return SecureRTP::AES_CM_128_HMAC_SHA1_32;
     }
-    
+
     return SecureRTP::AES_CM_128_NULL_AUTH;
 }
 
@@ -222,16 +222,16 @@ int SRTP::SrtpCtx::SetKey(KeyType type, uint8_t* key, uint32_t len)
         ELOG("Invalid SRTP key.");
         return -1;
     }
-    
+
     if (len > sizeof(key_)) {
         ELOG("SRTP Key length greater than " << sizeof(key_));
         return -1;
     }
-    
+
     key_type_ = type;
     memcpy(key_, key, len);
     key_len_ = len;
-    
+
     return 0;
 }
 
@@ -239,7 +239,7 @@ void SetRandomKey(uint8_t key[SRTP_MASTER_KEY_LEN])
 {
     // http://c-faq.com/lib/randrange.html
     static int divisor = RAND_MAX / 255 + 1;
-    
+
     for (size_t i = 0; i < SRTP_MASTER_KEY_LEN-1; ++i) {
         key[i] = rand()/divisor;
     }
@@ -256,7 +256,7 @@ SRTP::SRTP()
 {
     memset(send_policy_, 0, sizeof(srtp_policy_t));
     memset(recv_policy_, 0, sizeof(srtp_policy_t));
-    
+
     SetRandomKey(local_srtp_key_[0]);
     SetRandomKey(local_srtp_key_[1]);
 }
@@ -279,35 +279,35 @@ void SRTP::Reset()
         srtp_dealloc(recv_ctx_);
         recv_ctx_ = 0;
     }
-    
+
     if (send_policy_) {
         memset(send_policy_, 0, sizeof(srtp_policy_t));
     }
-    
+
     if (recv_policy_) {
         memset(recv_policy_, 0, sizeof(srtp_policy_t));
     }
-    
+
     send_local_ctx_.key_len_ = 0;
     recv_local_ctx_.key_len_ = 0;
-    
+
     has_new_send_key_ = false;
     has_new_recv_key_ = false;
 }
-    
+
 string SRTP::GetLocalKey(SecureRTP::KeyType type)
 {
     char b64_key[(SRTP_MASTER_KEY_LEN * 8 / 6) + 2];
-    
+
     int keylen = EncodeSrtpKeyBase64((char*)local_srtp_key_[type],
                                      sizeof(local_srtp_key_[type]), b64_key);
-    
+
     b64_key[keylen] = 0;
     char* p = strrchr((char *) b64_key, '=');
     while (p && *p && *p == '=') {
         *p-- = '\0';
     }
-    
+
     return b64_key;
 }
 
@@ -319,23 +319,23 @@ string SRTP::GetRemoteKey()
 void SRTP::SetRemoteKey(KeyType keyType, const string& rRemoteKey)
 {
     KeyType type = AES_CM_128_HMAC_SHA1_80;
-    
+
     if (keyType == SecureRTP::AES_CM_128_HMAC_SHA1_32) {
         type = AES_CM_128_HMAC_SHA1_32;
     }
-    
+
     SetSRTPKey(SEND, type, local_srtp_key_[type], sizeof(local_srtp_key_[type]));
-    
+
     // cache the key to check if there is a change
     remote_key = rRemoteKey;
-    
+
     //    DLOG("SRTP: Final Keys: Local=" << Hex(local_srtp_key_, SRTP_MASTER_KEY_LEN) <<
     //         " Remote=" << rRemoteKey);
-    
+
     uint8_t raw_key[SRTP_MASTER_KEY_LEN];
-    
+
     int keylen = DecodeSrtpKeyBase64(remote_key.c_str(), remote_key.size(), (char*)raw_key);
-    
+
     SetSRTPKey(RECV, type, raw_key, keylen);
 }
 
@@ -343,9 +343,9 @@ int SRTP::SetSRTPKey(Direction dir, KeyType type, uint8_t* key, uint32_t key_len
 {
     int ret;
     SrtpCtx *local_ctx;
-    
+
     MLOG((dir == RECV ? "RECV " : "SEND ") << GetSrtpKeyTypeStr(type));
-    
+
     switch (dir)
     {
     case RECV:
@@ -358,7 +358,7 @@ int SRTP::SetSRTPKey(Direction dir, KeyType type, uint8_t* key, uint32_t key_len
         assert(0);
         return -1;
     }
-    
+
     /*
      * Since the encrypt/decrypt are done in different thread context,
      * lets store the information and set the flag.
@@ -366,14 +366,14 @@ int SRTP::SetSRTPKey(Direction dir, KeyType type, uint8_t* key, uint32_t key_len
     if ((ret = local_ctx->SetKey(type, key, key_len))) {
         return ret;
     }
-    
+
     if (dir == SEND) {
         has_new_send_key_ = true;
     }
     else {
         has_new_recv_key_ = true;
     }
-    
+
     return 0;
 }
 
@@ -383,7 +383,7 @@ int SRTP::ApplySRTPKey(Direction dir)
     srtp_policy_t* policy = 0;
     srtp_ctx_t** ctx = 0;
     SrtpCtx* local_ctx = 0;
-    
+
     switch (dir)
     {
     case RECV:
@@ -406,12 +406,12 @@ int SRTP::ApplySRTPKey(Direction dir)
         assert(0);
         return -1;
     }
-    
+
     if (*ctx) {
         srtp_dealloc(*ctx);
         *ctx = NULL;
     }
-    
+
     switch (local_ctx->key_type_)
     {
     case AES_CM_128_HMAC_SHA1_80:
@@ -427,20 +427,20 @@ int SRTP::ApplySRTPKey(Direction dir)
         assert(0);
         return -1;
     }
-    
+
     policy->key             = local_ctx->key_;
     policy->rtp.sec_serv    = sec_serv_conf_and_auth;
     policy->allow_repeat_tx = 1;
     policy->window_size     = window_size_;
-    
+
     srtp_crypto_policy_set_rtcp_default(&policy->rtcp);
-    
+
     if ((ret = srtp_create(ctx, policy))) {
         *ctx = NULL;
         ELOG("SRTP: Error in srtp_create() for RECV side : " << ret);
         return ret;
     }
-    
+
     return 0;
 }
 
@@ -451,19 +451,24 @@ void SRTP::Encrypt(uint8_t* data, int* bytes_out)
         if (has_new_send_key_ == true) { //Double check to avoid race conditions.
             ApplySRTPKey(SEND);
             has_new_send_key_ = false;
-            
+
             if (!send_ctx_) {
                 ELOG("SRTP: no encrypt key has been created yet");
                 return;
             }
         }
     }
-    
+
     if (!data || !(*bytes_out) || !send_ctx_) {
         return;
     }
-    
-    if (int ret = srtp_protect(send_ctx_, data, bytes_out)) {
+
+    int ret = 0;
+    {
+        MutexLock scoped(&srtp_protect_lock_);
+        ret = srtp_protect(send_ctx_, data, bytes_out);
+    }
+    if (ret) {
         ELOG("SRTP: Error in srtp_protect() : " << ret);
         *bytes_out = 0;
     }
@@ -476,18 +481,18 @@ void SRTP::Decrypt(uint8_t* data, int* bytes_out)
         if (has_new_recv_key_ == true) { //Double check to avoid race conditions.
             ApplySRTPKey(RECV);
             has_new_recv_key_ = false;
-            
+
             if (!recv_ctx_) {
                 ELOG("SRTP: no encrypt key has been created yet");
                 return;
             }
         }
     }
-    
+
     if (!data || !(*bytes_out) || !recv_ctx_) {
         return;
     }
-    
+
     if (int ret = srtp_unprotect(recv_ctx_, data, bytes_out)) {
         ELOG("SRTP: Error in srtp_unprotect() : " << ret);
         *bytes_out = 0;
@@ -501,24 +506,29 @@ void SRTP::EncryptRTCP(uint8_t* data, int *bytes_out)
         if (has_new_send_key_ == true) { //Double check to avoid race conditions.
             ApplySRTPKey(SEND);
             has_new_send_key_ = false;
-            
+
             if (!send_ctx_) {
                 ELOG("SRTP: no encrypt key has been created yet");
                 return;
             }
         }
     }
-    
+
     if (!data || !(*bytes_out) || !send_ctx_) {
         return;
     }
-    
+
     //int orig_len = *bytes_out;
-    if (int ret = srtp_protect_rtcp(send_ctx_, data, bytes_out)) {
+    int ret = 0;
+    {
+        MutexLock scoped(&srtp_protect_lock_);
+        ret = srtp_protect_rtcp(send_ctx_, data, bytes_out);
+    }
+    if (ret) {
         ELOG("SRTCP: Error in srtp_protect_rtcp() : " << ret);
         *bytes_out = 0;
     }
-    
+
     //TLOG("SRTCP: encrypt: In=" << orig_len << " Out=" << *bytes_out);
 }
 
@@ -529,25 +539,25 @@ void SRTP::DecryptRTCP(uint8_t* data, int *bytes_out)
         if (has_new_recv_key_ == true) { //Double check to avoid race conditions.
             ApplySRTPKey(RECV);
             has_new_recv_key_ = false;
-            
+
             if (!recv_ctx_) {
                 ELOG("SRTP: no decrypt key has been created yet");
                 return;
             }
         }
     }
-    
+
     if (!data || !(*bytes_out) || !recv_ctx_) {
         return;
     }
-    
+
     //int orig_len = *bytes_out;
     if (int ret = srtp_unprotect_rtcp(recv_ctx_, data, bytes_out)) {
         ELOG("SRTCP: Error in srtcp_unprotect() : " << ret);
         *bytes_out = 0;
     }
-    
+
     //TLOG("SRTCP: decrypt: In=" << orig_len << " Out="  << *bytes_out);
 }
-    
+
 } // namespace fuze

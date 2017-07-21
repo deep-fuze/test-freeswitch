@@ -95,7 +95,8 @@ void ServerCore::SendHttpResponse(uint32_t code, const char* pReason)
     rsp.SetResponseLine(code, pReason);
     
     Buffer::Ptr sp_out = rsp.Serialize();
-    MLOG("sending response\n" << (char*)sp_out->getBuf());
+    MLOG("\n--------------------\nSEND:\n\n" <<
+         (char*)sp_out->getBuf() << "--------------------");
     
     if (spTlsCore_) {
         spTlsCore_->ProcessData(sp_out->getBuf(),

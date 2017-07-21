@@ -295,7 +295,9 @@ private: // DNS Cache
 private: // Thread workers
     
     vector<WorkerThread::Ptr> threadQ_;
-    size_t                    qIndex_;
+    size_t                    qFirstIndex_;
+    size_t                    qFirstIndexEnd_;
+    size_t                    qSecondIndex;
 
 private:
 
