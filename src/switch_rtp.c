@@ -9569,6 +9569,21 @@ SWITCH_DECLARE(void) switch_rtp_set_muted(switch_channel_t *channel, switch_bool
     rtp_session->muted = muted;
 }
 
+SWITCH_DECLARE(switch_bool_t) switch_rtp_get_muted(switch_channel_t *channel)
+{
+    switch_rtp_t *rtp_session;
+
+    if (!channel) { return SWITCH_FALSE; }
+
+    rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session) {
+        return SWITCH_FALSE;
+    }
+
+	return rtp_session->muted;
+}
+
 
 /* For Emacs:
  * Local Variables:
