@@ -268,8 +268,8 @@ if test "${enable_optimizer}" = "yes" ; then
 fi
 
 # set defaults for use on all platforms
-SWITCH_AM_CFLAGS="-I${switch_srcdir}/src/include -I${switch_builddir}/src/include -I${switch_srcdir}/libs/libteletone/src -I${switch_srcdir}/libs/webrtcneteq/src -I${switch_srcdir}/libs/fuzetransport -I${switch_srcdir}/libs/Libevent/include -I${switch_srcdir}/libs/fuzeprotobuf"
-SWITCH_AM_CXXFLAGS="-I${switch_srcdir}/src/include -I${switch_builddir}/src/include -I${switch_srcdir}/libs/libteletone/src -I${switch_srcdir}/libs/webrtcneteq/src -I${switch_srcdir}/libs/fuzetransport -I${switch_srcdir}/libs/Libevent/include -I${switch_srcdir}/libs/fuzeprotobuf"
+SWITCH_AM_CFLAGS="-I${switch_srcdir}/src/include -I${switch_builddir}/src/include -I${switch_srcdir}/libs/libteletone/src -I${switch_srcdir}/libs/webrtcneteq/src -I${switch_srcdir}/libs/fuzetransport -I${switch_srcdir}/libs/Libevent/include"
+SWITCH_AM_CXXFLAGS="-I${switch_srcdir}/src/include -I${switch_builddir}/src/include -I${switch_srcdir}/libs/libteletone/src -I${switch_srcdir}/libs/webrtcneteq/src -I${switch_srcdir}/libs/fuzetransport -I${switch_srcdir}/libs/Libevent/include"
 SWITCH_AM_LDFLAGS="-lm"
 
 #set SOLINK variable based on compiler and host
@@ -1660,7 +1660,6 @@ fi
 AC_CONFIG_SUBDIRS([libs/webrtcneteq])
 AC_CONFIG_SUBDIRS([libs/fuzetransport])
 AC_CONFIG_SUBDIRS([libs/Libevent])
-AC_CONFIG_SUBDIRS([libs/fuzeprotobuf])
 
 
 case $host in

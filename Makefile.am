@@ -118,7 +118,6 @@ CORE_CFLAGS += -I$(switch_builddir)/libs/tiff-4.0.2/libtiff -I$(switch_srcdir)/l
 CORE_CFLAGS += -I$(switch_srcdir)/libs/webrtcneteq/src
 CORE_CFLAGS += -I$(switch_srcdir)/libs/fuzetransport
 CORE_CFLAGS += -I$(switch_srcdir)/libs/Libevent/include
-CORE_CFLAGS += -I$(switch_srcdir)/libs/fuzeprotobuf
 
 APR_LIBS   = $(AM_LIBAPU_LIBS) $(AM_LIBAPR_LIBS)
 CORE_LIBS=
@@ -135,7 +134,6 @@ endif
 
 CORE_LIBS += libs/webrtcneteq/libwebrtcneteq.la libs/spandsp/src/libspandsp.la libs/opus-1.1-p2/libopus.la 
 CORE_LIBS += libs/fuzetransport/libfuzetransport.la libs/Libevent/libevent.la libs/Libevent/libevent_pthreads.la
-CORE_LIBS += libs/fuzeprotobuf/libfuzeprotobuf.la
 
 if ENABLE_SRTP
 CORE_CFLAGS += -DENABLE_SRTP
@@ -166,7 +164,7 @@ CORE_LIBS+=libfreeswitch_spandsp.la
 lib_LTLIBRARIES	         = libfreeswitch.la
 libfreeswitch_la_CFLAGS  = $(CORE_CFLAGS) $(SQLITE_CFLAGS) $(CURL_CFLAGS) $(PCRE_CFLAGS) $(SPEEX_CFLAGS) $(LIBEDIT_CFLAGS) $(openssl_CFLAGS) $(AM_CFLAGS)
 libfreeswitch_la_LDFLAGS = -version-info 1:0:0 $(AM_LDFLAGS) $(PLATFORM_CORE_LDFLAGS) -no-undefined
-libfreeswitch_la_LIBADD  = $(CORE_LIBS) $(APR_LIBS) $(SQLITE_LIBS) $(CURL_LIBS) $(PCRE_LIBS) $(SPEEX_LIBS) $(LIBEDIT_LIBS) $(openssl_LIBS) $(PLATFORM_CORE_LIBS) -lprotobuf -lcares
+libfreeswitch_la_LIBADD  = $(CORE_LIBS) $(APR_LIBS) $(SQLITE_LIBS) $(CURL_LIBS) $(PCRE_LIBS) $(SPEEX_LIBS) $(LIBEDIT_LIBS) $(openssl_LIBS) $(PLATFORM_CORE_LIBS) -lcares
 libfreeswitch_la_DEPENDENCIES = $(BUILT_SOURCES)
 
 if HAVE_ODBC
@@ -521,11 +519,6 @@ libs/fuzetransport/libfuzetransport.la: libs/Libevent/libevent.la libs/fuzetrans
 	@cd libs/fuzetransport && $(MAKE)
 	@$(TOUCH_TARGET)
 
-libs/fuzeprotobuf/libfuzeprotobuf.la: libs/fuzeprotobuf
-	touch src/include/switch.h
-	@cd libs/fuzeprotobuf && $(MAKE)
-	@$(TOUCH_TARGET)
-
 ##
 ## helper targets
 ##
@@ -614,7 +607,6 @@ depsclean: clean
 	cd libs/fuzetransport && $(MAKE) distclean
 	cd libs/Libevent && $(MAKE) distclean
 	cd libs/webrtcneteq && $(MAKE) distclean
-	cd libs/fuzeprotobuf && $(MAKE) distclean	
 
 core-clean: clean_core
 

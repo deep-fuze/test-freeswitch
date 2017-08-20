@@ -191,6 +191,7 @@ struct switch_channel {
 	uint8_t next_stat_index;
 	switch_event_t *call_event; // holder for periodic event publishing - the event is not published right away
 	int call_events_count; // how many events are currently in the *periodic event
+	switch_time_t last_event_push;
 };
 
 static void process_device_hup(switch_channel_t *channel);
@@ -459,6 +460,8 @@ SWITCH_DECLARE(switch_status_t) switch_channel_alloc(switch_channel_t **channel,
 	(*channel)->name = "";
 	(*channel)->direction = (*channel)->logical_direction = direction;
 	switch_channel_set_variable(*channel, "direction", switch_channel_direction(*channel) == SWITCH_CALL_DIRECTION_OUTBOUND ? "outbound" : "inbound");
+
+	(*channel)->last_event_push = switch_time_now();
 
 	return SWITCH_STATUS_SUCCESS;
 }
@@ -5411,10 +5414,11 @@ SWITCH_DECLARE(void) switch_channel_publish_call_events(switch_channel_t *channe
 	int cur_idx;
 	const char *key, *value;
 	char buff[256] = "";
+	switch_time_t now;
 
 	#define MAX_NUMBER_OF_EVENTS 50
 	#define SWITCH_CHANNEL_CALL_EVENT "channel::call_event"
-
+	#define MAX_INTER_STATS_PUBLISH_TIME 60*1000*1000
 	
 
 	if (flush) // use case when we are done with the channel and need to make sure we publish what we have without new stats
@@ -5458,8 +5462,11 @@ SWITCH_DECLARE(void) switch_channel_publish_call_events(switch_channel_t *channe
 	}
 	channel->call_events_count++;
 
-	if (force || channel->call_events_count == MAX_NUMBER_OF_EVENTS) {
-		switch_channel_fire_call_event(channel);		
+	now = switch_time_now();
+
+	if ((now - channel->last_event_push) > MAX_INTER_STATS_PUBLISH_TIME || force || channel->call_events_count == MAX_NUMBER_OF_EVENTS) {
+		switch_channel_fire_call_event(channel);
+		channel->last_event_push = now;
 	}
 }
 

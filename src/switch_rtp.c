@@ -53,7 +53,6 @@
 #include <srtp_priv.h>
 #include <switch_ssl.h>
 #include "include/Transport_c.h"
-#include "include/ProtoBufIf.h"
 #include "interface/webrtc_neteq_if.h"
 #include "g711.h"
 
@@ -2794,7 +2793,11 @@ static int add_rx_congestion(switch_rtp_t *rtp_session, void *body, switch_rtcp_
     rx_congestion->muted = rtp_session->muted;
     rx_congestion->cn = switch_core_session_get_cn_state(rtp_session->session);
 
-    rx_congestion->lost_percent = htons(rtp_session->stats.last_lost_percent);
+	if (rtp_session->stats.last_lost_percent > 0) {
+		rx_congestion->lost_percent = htons(rtp_session->stats.last_lost_percent);
+	} else {
+		rx_congestion->lost_percent = 0;
+	}
 
     for (i = 0; i < APP_RX_NUM_STATS; i++) {
         int idx = rtp_session->stats.recv_rate_history_idx - (i+1);
@@ -8518,6 +8521,8 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 
         }
         
+		send_msg->header.ssrc = htonl(rtp_session->ssrc);
+
         if (rtp_sendto(rtp_session, rtp_session->sock_output, rtp_session->remote_addr, 0, (void *) send_msg, &bytes) != SWITCH_STATUS_SUCCESS) {
             if (rtp_session->rtp_send_fail_count == 0) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "rtp_sendto of seq=%u %zu bytes failed START\n", rtp_session->seq, bytes);
@@ -9202,9 +9207,9 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
 
     if (jbuf == -1 || !neteq_inst) {
         if (rtp_session->stats.inbound.lossrate) {
-            float loss;
-            loss = ((float)(int)(rtp_session->stats.inbound.lossrate*100)/100);
-            rtp_stat_add_value(rtp_session, RTP_PER_LOST, "%0.2f", loss, rtp_session->stats.last_lost_percent);
+            short loss;
+            loss = ((short)(rtp_session->stats.inbound.lossrate*100)/100);
+            rtp_stat_add_value(rtp_session, RTP_PER_LOST, "%d", loss, rtp_session->stats.last_lost_percent);
         }
     }
 
