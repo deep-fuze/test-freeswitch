@@ -2793,11 +2793,15 @@ static int add_rx_congestion(switch_rtp_t *rtp_session, void *body, switch_rtcp_
     rx_congestion->muted = rtp_session->muted;
     rx_congestion->cn = switch_core_session_get_cn_state(rtp_session->session);
 
-	if (rtp_session->stats.last_lost_percent > 0) {
-		rx_congestion->lost_percent = htons(rtp_session->stats.last_lost_percent);
-	} else {
-		rx_congestion->lost_percent = 0;
-	}
+    if (rtp_session->stats.last_lost_percent > 0) {
+        rx_congestion->lost_percent = htons(rtp_session->stats.last_lost_percent);
+    } else {
+        rx_congestion->lost_percent = 0;
+    }
+
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+                      "RTCP app specific lost=%u%% jitter=%ums\n",
+                      rtp_session->stats.last_lost_percent, rtp_session->stats.last_jitter);
 
     for (i = 0; i < APP_RX_NUM_STATS; i++) {
         int idx = rtp_session->stats.recv_rate_history_idx - (i+1);
@@ -3522,15 +3526,16 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_set_local_address(switch_rtp_t *rtp_s
 
         if (rtp_session->is_ivr == SWITCH_TRUE && !rtp_session->is_bridge) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is IVR -> BRIDGE\n");
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s ivr -> bridge (%u) seq=%u\n",
-                              rtp_session->rtp_conn_name, rtp_session->write_count, rtp_session->seq);
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s ivr -> bridge (%u) seq=%u ssrc(%8x) remote_ssrc(%8x)\n",
+                              rtp_session->rtp_conn_name, rtp_session->write_count, rtp_session->seq, rtp_session->ssrc, rtp_session->remote_ssrc);
             rtp_session->write_count = 0;
             rtp_session->is_bridge = SWITCH_TRUE;
             rtp_session->anchor_base_ts = rtp_session->anchor_next_seq;
             rtp_session->anchor_base_seq = rtp_session->anchor_next_seq;
         }
         if (!rtp_session->is_bridge) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is BRIDGE\n");;
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is BRIDGE ssrc(%8x) remote_ssrc(%8x)\n",
+                              rtp_session->ssrc, rtp_session->remote_ssrc);
             rtp_session->is_bridge = SWITCH_TRUE;
         }
 
@@ -4441,6 +4446,8 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_change_interval(switch_rtp_t *rtp_ses
 
 SWITCH_DECLARE(switch_status_t) switch_rtp_set_ssrc(switch_rtp_t *rtp_session, uint32_t ssrc)
 {
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+                      "New ssrc %8x -> %8x\n", rtp_session->ssrc, ssrc);
     rtp_session->ssrc = ssrc;
     rtp_session->send_msg.header.ssrc = htonl(rtp_session->ssrc);
 
@@ -4449,6 +4456,9 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_set_ssrc(switch_rtp_t *rtp_session, u
 
 SWITCH_DECLARE(switch_status_t) switch_rtp_set_remote_ssrc(switch_rtp_t *rtp_session, uint32_t ssrc)
 {
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+                      "New remote ssrc %8x -> %8x\n", rtp_session->ssrc, ssrc);
+
     rtp_session->remote_ssrc = ssrc;
 
     return SWITCH_STATUS_SUCCESS;
@@ -6972,7 +6982,13 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
 
                                     if (rtp_session->rtcp_recv_msg_p->header.type == 206) {
                                         rtcp_ext_msg_t *extp = (rtcp_ext_msg_t *) rtp_session->rtcp_recv_msg_p;
-                                        extp->header.recv_ssrc = htonl(other_rtp_session->stats.rtcp.peer_ssrc);
+                                        extp->header.recv_ssrc = htonl(other_rtp_session->ssrc);
+                                    }
+                                    if (rtp_session->rtcp_recv_msg_p->header.type == 200) {
+                                        struct switch_rtcp_senderinfo *sr = (struct switch_rtcp_senderinfo*) other_rtp_session->rtcp_send_msg.body;
+                                        struct switch_rtcp_report *rep = &sr->reports;
+                                        sr->ssrc = htonl(other_rtp_session->ssrc);
+                                        rep->sr_source.ssrc1 = htonl(other_rtp_session->stats.rtcp.peer_ssrc);
                                     }
 
 
@@ -7015,11 +7031,11 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                                         
                                     }
 #endif
-                                    
+
                                     if (rtcp_sendto(other_rtp_session, other_rtp_session->rtcp_sock_output, other_rtp_session->rtcp_remote_addr, 0,
                                                              (const char*)&other_rtp_session->rtcp_send_msg, &rtcp_bytes ) != SWITCH_STATUS_SUCCESS) {
                                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_DEBUG,"RTCP packet not written\n");
-                                    } 
+                                    }
                                 }
                                 switch_core_session_rwunlock(other_session);
                             }
@@ -8377,6 +8393,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 
                 send_msg->header.seq = htons(bseq);
                 send_msg->header.ts = htonl(bts);
+                send_msg->header.ssrc = htonl(rtp_session->ssrc);
 
                 rtp_session->last_bridge_seq[0] = bseq;
                 rtp_session->last_write_ts = bts;
@@ -8521,7 +8538,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 
         }
         
-		send_msg->header.ssrc = htonl(rtp_session->ssrc);
+        send_msg->header.ssrc = htonl(rtp_session->ssrc);
 
         if (rtp_sendto(rtp_session, rtp_session->sock_output, rtp_session->remote_addr, 0, (void *) send_msg, &bytes) != SWITCH_STATUS_SUCCESS) {
             if (rtp_session->rtp_send_fail_count == 0) {
