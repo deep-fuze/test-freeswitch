@@ -2799,9 +2799,11 @@ static int add_rx_congestion(switch_rtp_t *rtp_session, void *body, switch_rtcp_
         rx_congestion->lost_percent = 0;
     }
 
+#if 0
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
                       "RTCP app specific lost=%u%% jitter=%ums\n",
                       rtp_session->stats.last_lost_percent, rtp_session->stats.last_jitter);
+#endif
 
     for (i = 0; i < APP_RX_NUM_STATS; i++) {
         int idx = rtp_session->stats.recv_rate_history_idx - (i+1);
@@ -9178,7 +9180,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
         WebRtcNetEQ_GetJitterBufferSize(neteq_inst, &processing);
         if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
             jbuf = nwstats.currentBufferSize;
-            loss = nwstats.currentPacketLossRate;
+            loss = (short)(((float)nwstats.currentPacketLossRate/16384.0)*100);
             for (int i = 0; i < rawframeswaiting; i++) {
                 if (waiting_times_ms[i] > max_proc_time) {
                     max_proc_time = waiting_times_ms[i];
