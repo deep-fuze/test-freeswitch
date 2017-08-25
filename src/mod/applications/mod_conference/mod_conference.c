@@ -6123,7 +6123,7 @@ static void process_dtmf(conference_member_t *member)
                 }
             }
             if (strlen(member->pin) == FUZE_PIN_LEN) {
-				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "AUTHENTICATE %s!\n", member->pin);
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "AUTHENTICATE %s!\n", member->pin);
                 /* authenticate */
                 member->authenticate = 1;
             }
@@ -6996,11 +6996,18 @@ static void start_conference_loops(conference_member_t *member)
         if (member->authenticate != 0) {
             /* set pin */
             if (authenticate(member->session, &member->auth_profile, member->conference->meeting_id, member->pin, SWITCH_FALSE) == FUZE_STATUS_SUCCESS) {
+                switch_event_t *event;
                 switch_set_flag(member, MFLAG_MOD);
                 if (member->conference->ack_sound) {
                     conference_member_play_file(member, member->conference->ack_sound, CONF_DEFAULT_LEADIN, 1);
                 }
                 conference_add_moderator(member->conference, member);
+                if (!switch_channel_test_app_flag_key("conf_silent", ols.channel, CONF_SILENT_REQ) &&
+                    switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, CONF_EVENT_MAINT) == SWITCH_STATUS_SUCCESS) {
+                    conference_add_event_member_data(member, event);
+                    switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Action", "update-member");
+                    switch_event_fire(&event);
+                }
             } else {
                 if (member->conference->bad_pin_sound) {
                     conference_member_play_file(member, member->conference->bad_pin_sound, CONF_DEFAULT_LEADIN, 1);
