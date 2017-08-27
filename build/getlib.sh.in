@@ -14,9 +14,31 @@ elif [ -f "$CURL" ]; then
   DOWNLOAD_CMD="$CURL -O"
 fi
 
-if [ -n "`echo $1 | grep '://'`" ]; then
+if [ -z $DOWNLOAD_CMD ]; then
+  echo "no download command!"
+  DOWNLOAD_CMD=`which wget`
+  echo "download command: " $DOWNLOAD_CMD
+fi
+
+if [ -z $ZCAT ] || [ ! -f "$ZCAT" ]; then
+  echo "no zcat command!"
+  ZCAT=`which zcat`
+  echo "zcat command: " $ZCAT
+fi
+
+if [ -z $TAR ] || [ ! -f "$TAR" ]; then
+  echo "no tar command!"
+  TAR=`which tar`
+  echo "tar command: " $TAR
+fi
+
+if [ $# -eq 2 ]; then
+  echo "two arguments base:" $1 " tarfile: " $2
   base=$1/
   tarfile=$2
+elif [ -n "`echo $1 | grep '://'`" ]; then
+  base=""
+  tarfile=$1
 else
   base=http://files.freeswitch.org/downloads/libs/
   tarfile=$1
@@ -33,6 +55,8 @@ esac
 if [ ! -d $tarfile ]; then
   if [ ! -f $tarfile ]; then
     rm -fr $uncompressed
+    DOWNLOAD_CMD=/usr/bin/wget
+    echo "CMD: " $DOWNLOAD_CMD "FILE:" $base$tarfile
     $DOWNLOAD_CMD $base$tarfile
     if [ ! -f $tarfile ]; then
       echo cannot find $tarfile

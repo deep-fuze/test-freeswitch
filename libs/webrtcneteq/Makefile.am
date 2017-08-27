@@ -4,7 +4,7 @@ AUTOMAKE_OPTIONS = gnu
 PREFIX=$(prefix)
 NAME = webrtcneteq
 
-AM_CFLAGS    = $(new_AM_CFLAGS) -I./src -I../spandsp/src -I../opus-1.1-p2/include
+AM_CFLAGS    = $(new_AM_CFLAGS) -I./src -I../spandsp/src -I../opus-1.2.1/include
 AM_CPPFLAGS  = $(AM_CFLAGS)
 AM_LDFLAGS   = $(new_AM_LDFLAGS) -L.
 

@@ -1,6 +1,6 @@
 include $(top_srcdir)/build/modmake.rulesam
 MODNAME=mod_opus
-OPUS=opus-1.1-p2
+OPUS=opus-1.2.1
 OPUS_DIR=$(switch_srcdir)/libs/$(OPUS)
 OPUS_BUILDDIR=$(switch_builddir)/libs/$(OPUS)
 OPUS_LA=$(OPUS_BUILDDIR)/.libs/libopus.la

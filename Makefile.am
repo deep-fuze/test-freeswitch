@@ -132,7 +132,7 @@ else
 CORE_LIBS +=  libs/apr-util/libaprutil-1.la
 endif
 
-CORE_LIBS += libs/webrtcneteq/libwebrtcneteq.la libs/spandsp/src/libspandsp.la libs/opus-1.1-p2/libopus.la 
+CORE_LIBS += libs/webrtcneteq/libwebrtcneteq.la libs/spandsp/src/libspandsp.la libs/opus-1.2.1/libopus.la 
 CORE_LIBS += libs/fuzetransport/libfuzetransport.la libs/Libevent/libevent.la libs/Libevent/libevent_pthreads.la
 
 if ENABLE_SRTP
