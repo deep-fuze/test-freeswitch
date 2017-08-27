@@ -266,9 +266,10 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
 		int complexity = 5 /*opus_prefs.complexity*/;
 		int err;
 		int samplerate = opus_codec_settings.samplerate ? opus_codec_settings.samplerate : codec->implementation->actual_samples_per_second;
-        
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Create OPUS encoder: bps=%d vbr=%d complexity=%d samplerate=%d\n",
-						  bitrate_bps, use_vbr, complexity, samplerate);
+        int inbandfec = 1;
+
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Create OPUS encoder: bps=%d vbr=%d complexity=%d samplerate=%d inbandfec=%d\n",
+						  bitrate_bps, use_vbr, complexity, samplerate, inbandfec);
 
 		context->encoder_object = opus_encoder_create(samplerate,
 													  codec->implementation->number_of_channels,
@@ -295,8 +296,8 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
 			opus_encoder_ctl(context->encoder_object, OPUS_SET_COMPLEXITY(complexity));
         }
 
-		if (opus_codec_settings.useinbandfec) {
-			opus_encoder_ctl(context->encoder_object, OPUS_SET_INBAND_FEC(opus_codec_settings.useinbandfec));
+		if (inbandfec) {
+			opus_encoder_ctl(context->encoder_object, OPUS_SET_INBAND_FEC(inbandfec));
 		}
         
 		if (opus_codec_settings.usedtx) {
