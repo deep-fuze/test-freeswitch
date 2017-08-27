@@ -122,8 +122,9 @@ typedef struct conf_member_encoder_optimization {
     uint64_t ivr_copy_cnt;
 } conf_member_encoder_optimization_t;
 
-#define N_CWC 4
-#define ENC_FRAME_DATA (640)
+/* 711a, 711u, 722, opus */
+#define N_CWC 6
+#define ENC_FRAME_DATA (960)
 
 /* This is a conference object.
  * Each conference has one of these

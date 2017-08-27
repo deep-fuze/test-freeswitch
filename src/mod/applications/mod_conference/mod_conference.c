@@ -686,7 +686,7 @@ typedef struct conference_obj {
     uint16_t stop_entry_tone_participants;
 
     uint32_t participants_per_thread[N_CWC];
-    uint32_t g711acnt, g711ucnt, g722cnt;
+    uint32_t g711acnt, g711ucnt, g722cnt, opuscnt;
     int lineno;
 } conference_obj_t;
 
@@ -835,6 +835,9 @@ struct conference_member {
     int16_t max_out_level;
     int16_t max_input_level;
 
+    switch_bool_t individual_codec;
+    switch_bool_t skip_accumulation;
+    switch_bool_t variable_encoded_length;
     conf_auth_profile_t auth_profile;
 };
 
@@ -2745,12 +2748,25 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     member->authenticate = 0;
     if (!switch_test_flag(member,MFLAG_NOCHANNEL)){
 
+        /* Does any of this need to change for OPUS? */
         /* get a pointer to the codec implementation */
         impl = member->orig_read_impl;
 
         member->ianacode = impl.ianacode;
         member->codec_id = impl.codec_id;
         member->impl_id = impl.impl_id;
+
+        if (strstr(impl.iananame, "opus")) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, " codec == OPUS codec_id=%d impl_id=%d ianacode=%d\n",
+                              impl.codec_id, impl.impl_id, impl.ianacode);
+            member->individual_codec = SWITCH_TRUE;
+            member->skip_accumulation = SWITCH_TRUE;
+            member->variable_encoded_length = SWITCH_TRUE;
+        } else {
+            member->individual_codec = SWITCH_FALSE;
+            member->skip_accumulation = SWITCH_FALSE;
+            member->variable_encoded_length = SWITCH_FALSE;
+        }
 
         /* Check to see if this codec already exists for this conference */
         for (new_write_codec = conference->ceo.cwc[0]; new_write_codec; new_write_codec = new_write_codec->next) {
@@ -2915,7 +2931,11 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
 
         if (switch_channel_get_variable(channel, "fuze_app")) {
             member->fuze_app = SWITCH_TRUE;
-            member->frame_max_on_mute = 8;
+            if (!member->skip_accumulation) {
+                member->frame_max_on_mute = 8;
+            } else {
+                member->frame_max_on_mute = 1;
+            }
         } else {
             member->fuze_app = SWITCH_TRUE;
             member->frame_max_on_mute = 1;
@@ -3188,7 +3208,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     
 static void conference_reconcile_member_lists(conference_obj_t *conference) {
     conference_member_t *member = NULL, *last = NULL;
-    uint32_t g722cnt = 0, g711ucnt = 0, g711acnt = 0, othercnt = 0;
+    uint32_t g722cnt = 0, g711ucnt = 0, g711acnt = 0, othercnt = 0, opuscnt = 0;
     int count;
 
     conference_mutex_lock(conference);
@@ -3308,6 +3328,8 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
                 g711ucnt += 1;
             } else if (member->ianacode == 8) {
                 g711acnt += 1;
+            } else if (member->ianacode >95) {
+                opuscnt += 1;
             } else {
                 othercnt += 1;
             }
@@ -3315,25 +3337,28 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
     }
 
     if ((conference->g711ucnt != g711ucnt) || (conference->g711acnt != g711acnt) ||
-        (conference->g722cnt != g722cnt)) {
+        (conference->g722cnt != g722cnt) || (conference->opuscnt != opuscnt)) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
-                          "Conference (%s) listener counts changed 0:%u -> %u 8:%u -> %u 9:%u -> %u othercnt:%u\n",
+                          "Conference (%s) listener counts changed 0:%u -> %u 8:%u -> %u 9:%u -> %u opus:%u -> %u othercnt:%u\n",
                           conference->meeting_id, conference->g711ucnt, g711ucnt, conference->g711acnt, g711acnt,
-                          conference->g722cnt, g722cnt, othercnt);
+                          conference->g722cnt, g722cnt, conference->opuscnt, opuscnt, othercnt);
     }
 
     conference->g711acnt = g711acnt;
     conference->g711ucnt = g711ucnt;
     conference->g722cnt = g722cnt;
+    conference->opuscnt = opuscnt;
 
     ceo_set_listener_count(&conference->ceo, 9, g722cnt);
     ceo_set_listener_count(&conference->ceo, 0, g711ucnt);
     ceo_set_listener_count(&conference->ceo, 8, g711acnt);
+    ceo_set_listener_count(&conference->ceo, 99, opuscnt);
 
     if (othercnt > 0) {
         ceo_set_listener_count_incr(&conference->ceo, 9, 1);
         ceo_set_listener_count_incr(&conference->ceo, 0, 1);
         ceo_set_listener_count_incr(&conference->ceo, 8, 1);
+        ceo_set_listener_count_incr(&conference->ceo, 95, 1);
     }
 
     switch_mutex_unlock(conference->member_mutex);
@@ -4689,7 +4714,9 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                                                         switch_test_flag(omember, MFLAG_USE_FAKE_MUTE) &&
                                                         !switch_core_session_get_cn_state(omember->session)));
 
-            individual_mix = (!omember->fnode && one_of_active) || (conference->is_recording && omember->rec);
+            individual_mix = (!omember->fnode && one_of_active) || 
+                (conference->is_recording && omember->rec) ||
+                omember->individual_codec;
 
             if (!individual_mix) {
                 continue;
@@ -6891,7 +6918,7 @@ void init_participant_output(participant_thread_data_t *ol, conference_member_t 
 
     ol->tid = tid;
     ol->oldtid = tid;
-    ol->individual = SWITCH_FALSE;
+    ol->individual = SWITCH_FALSE || member->individual_codec;
 
     ol->rx_time = 0;
 
@@ -7747,7 +7774,7 @@ switch_status_t accumulate_and_send(participant_thread_data_t *ol, switch_frame_
     }
 
     if (send) {
-        if (to_frame->datalen < 160) {
+        if (to_frame->datalen < 160 && !member->variable_encoded_length) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "member %d sending frame w/ %d bytes (from frame %d bytes) eq:%d cnt:%d max:%d\n",
                               member->id, to_frame->datalen, from_frame->datalen, equal, ol->frame_cnt, frame_max);
         }
@@ -7905,7 +7932,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "FLUSHING\n");
         set_member_state_locked(member, MFLAG_FLUSH_BUFFER);
         path = PARTICIPANT_OUTPUT_PATH_FLUSH;
-    } else if (mux_used >= ols->bytes && member->one_of_active) {
+    } else if (mux_used >= ols->bytes && (member->one_of_active || member->individual_codec)) {
         switch_frame_t *frame = NULL;
         
         path = PARTICIPANT_OUTPUT_PATH_ACTIVE;
@@ -8022,7 +8049,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             *time_since_last_send =(sent_time - member->out_last_sent);
         }
         member->out_last_sent = sent_time;
-    } else if (mux_used < ols->bytes && member->one_of_active) {
+    } else if (mux_used < ols->bytes && (member->one_of_active || member->individual_codec)) {
         path = PARTICIPANT_OUTPUT_ACTIVE_BUT_NO_DATA;
         ret = OUTPUT_LOOP_OK_NO_FRAME;
     } else if (!member->one_of_active) {
@@ -8126,7 +8153,11 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             path == PARTICIPANT_OUTPUT_ACTIVE_BUT_NO_DATA) {
             ret = OUTPUT_LOOP_OK_NOT_SENT;
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "adjusting timestamp by 160!\n");
-            switch_rtp_update_ts(member->channel, 160);
+            if (!member->individual_codec) {
+                switch_rtp_update_ts(member->channel);
+            } else {
+                switch_rtp_update_ts(member->channel);
+            }
             member->data_sent += 160;
         }
     }
@@ -9866,6 +9897,8 @@ static void conference_thread_print(switch_stream_handle_t *stream, char *delim,
                                     codec = "g711a";
                                 } else if (olp->member->ianacode == 9) {
                                     codec = "g722 ";
+                                } else if (olp->member->ianacode > 95) {
+                                    codec = "opus ";
                                 } else {
                                     codec = "other";
                                 }
@@ -12620,7 +12653,7 @@ static int setup_media(conference_member_t *member, conference_obj_t *conference
                           read_impl.actual_samples_per_second, read_impl.microseconds_per_packet / 1000);
 
     } else {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_DEBUG, "Raw Codec Activation Failed L16@%uhz 1 channel %dms\n",
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "Raw Codec Activation Failed L16@%uhz 1 channel %dms\n",
                           read_impl.actual_samples_per_second, read_impl.microseconds_per_packet / 1000);
 
         goto done;
@@ -12631,6 +12664,11 @@ static int setup_media(conference_member_t *member, conference_obj_t *conference
         member->frame = switch_core_alloc(member->pool, member->frame_size);
         member->mux_frame = switch_core_alloc(member->pool, member->frame_size);
     }
+
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "read_resampler asps=%u cr=%u DBLOCK_SIZE=%u DBUFFER_SIZE=%u DBUFFER_MAX=%u member->frame_size=%u\n",
+                      read_impl.actual_samples_per_second, conference->rate,
+                      CONF_DBLOCK_SIZE, CONF_DBUFFER_SIZE, CONF_DBUFFER_MAX,
+                      member->frame_size);
 
     if (read_impl.actual_samples_per_second != conference->rate) {
         if (switch_resample_create(&member->read_resampler,

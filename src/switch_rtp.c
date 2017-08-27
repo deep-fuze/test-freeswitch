@@ -476,6 +476,7 @@ struct switch_rtp {
 
     switch_bool_t use_next_ts;
     uint32_t next_ts;
+    uint32_t ts_multiplier;
 
 #ifdef ENABLE_ZRTP
     zrtp_session_t *zrtp_session;
@@ -4397,6 +4398,9 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_crypto_key(switch_rtp_t *rtp_sess
 
 SWITCH_DECLARE(switch_status_t) switch_rtp_set_interval(switch_rtp_t *rtp_session, uint32_t ms_per_packet, uint32_t samples_per_interval)
 {
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+                      "Set ms_per_packet=%u samples_per_interval=%u\n", ms_per_packet, samples_per_interval);
+
     rtp_session->ms_per_packet = ms_per_packet;
     rtp_session->samples_per_interval = rtp_session->conf_samples_per_interval = samples_per_interval;
     rtp_session->missed_count = 0;
@@ -7798,9 +7802,12 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_zerocopy_read_frame(switch_rtp_t *rtp
     }
 
     /* fuze: optional 10 bytes at end of packet for srtp? */
+    /* opus ? */
     if (frame->payload == 9 || frame->payload == 8 || frame->payload == 0) {
         int frames = bytes / 80;
         bytes = frames * 80;
+    } else if (frame->payload > 95) {
+        /* opus */
     }
 
     if (!rtp_session->use_webrtc_neteq) {
@@ -7872,6 +7879,11 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
     uint8_t m = 0;
     switch_bool_t bpath = SWITCH_FALSE;
     uint32_t adjust_ts_step = (datalen < 80) ? 160 : datalen;
+
+    // codec == opus
+    if (rtp_session->samples_per_interval != 160) {
+        adjust_ts_step = rtp_session->samples_per_interval;
+    }
 
     rtp_session->total_sent += 1;
     rtp_session->total_bytes_sent += datalen;
@@ -9414,7 +9426,7 @@ SWITCH_DECLARE(void) switch_rtp_set_been_active_talker(switch_rtp_t *rtp_session
     }
 }
 
-SWITCH_DECLARE(void) switch_rtp_update_ts(switch_channel_t *channel, int increment) {
+SWITCH_DECLARE(void) switch_rtp_update_ts(switch_channel_t *channel) {
     switch_rtp_t *rtp_session;
 
     if (!channel) { return;}
@@ -9426,10 +9438,9 @@ SWITCH_DECLARE(void) switch_rtp_update_ts(switch_channel_t *channel, int increme
     }
 
     if (rtp_session->use_next_ts) {
-        rtp_session->next_ts += increment;
+        rtp_session->next_ts += rtp_session->samples_per_interval;
     }
 }
-
 
 SWITCH_DECLARE(void) switch_bridge_channel_get_ts_and_seq(switch_channel_t *chana, switch_channel_t *chanb) {
     switch_rtp_t *rtp_session_a, *rtp_session_b;
@@ -9581,9 +9592,8 @@ SWITCH_DECLARE(switch_bool_t) switch_rtp_get_muted(switch_channel_t *channel)
         return SWITCH_FALSE;
     }
 
-	return rtp_session->muted;
+    return rtp_session->muted;
 }
-
 
 /* For Emacs:
  * Local Variables:
