@@ -2759,7 +2759,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
         if (strstr(impl.iananame, "opus")) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, " codec == OPUS codec_id=%d impl_id=%d ianacode=%d\n",
                               impl.codec_id, impl.impl_id, impl.ianacode);
-            member->individual_codec = SWITCH_TRUE;
+            member->individual_codec = SWITCH_FALSE;
             member->skip_accumulation = SWITCH_TRUE;
             member->variable_encoded_length = SWITCH_TRUE;
         } else {
