@@ -9326,7 +9326,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
                             delta += abs(rtp_session->stats.recv_rate_history[idx] - 68);
                         }
                         delta = delta / (float)RTP_STATS_RATE_HISTORY_BAD;
-                        if ((delta > 5 || jbuf > 750)) {
+                        if (((delta > 5 && rtp_session->samples_per_second == 16000) || jbuf > 750)) {
                             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "Transition to bad rx congestion state: delta:%f\n",
                                               delta);
                             rtp_session->send_rtcp |=  (SWITCH_RTCP_NORMAL | SWITCH_RTCP_RX_CONGESTION);
@@ -9339,7 +9339,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
                             delta += abs(rtp_session->stats.recv_rate_history[idx] - 68);
                         }
                         delta = delta / (float)RTP_STATS_RATE_HISTORY_GOOD;
-                        if (delta < 2 && jbuf < 500) {
+                        if ((delta < 2 && rtp_session->samples_per_second == 16000) && jbuf < 500) {
                             delta = 0;
                             rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
                             rtp_session->send_rtcp |=  (SWITCH_RTCP_NORMAL | SWITCH_RTCP_RX_CONGESTION);
