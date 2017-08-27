@@ -261,12 +261,15 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
     
 	if (encoding) {
 		/* come up with a way to specify these */
-		int bitrate_bps = opus_prefs.bitrate;
+		int bitrate_bps = 32000 /*opus_prefs.bitrate*/;
 		int use_vbr = opus_prefs.use_vbr;
-		int complexity = opus_prefs.complexity;
+		int complexity = 5 /*opus_prefs.complexity*/;
 		int err;
 		int samplerate = opus_codec_settings.samplerate ? opus_codec_settings.samplerate : codec->implementation->actual_samples_per_second;
         
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Create OPUS encoder: bps=%d vbr=%d complexity=%d samplerate=%d\n",
+						  bitrate_bps, use_vbr, complexity, samplerate);
+
 		context->encoder_object = opus_encoder_create(samplerate,
 													  codec->implementation->number_of_channels,
 													  OPUS_APPLICATION_VOIP, &err);
