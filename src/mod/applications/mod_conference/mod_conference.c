@@ -3352,13 +3352,13 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
     ceo_set_listener_count(&conference->ceo, 9, g722cnt);
     ceo_set_listener_count(&conference->ceo, 0, g711ucnt);
     ceo_set_listener_count(&conference->ceo, 8, g711acnt);
-    ceo_set_listener_count(&conference->ceo, 99, opuscnt);
+    ceo_set_listener_count(&conference->ceo, 116, opuscnt);
 
     if (othercnt > 0) {
         ceo_set_listener_count_incr(&conference->ceo, 9, 1);
         ceo_set_listener_count_incr(&conference->ceo, 0, 1);
         ceo_set_listener_count_incr(&conference->ceo, 8, 1);
-        ceo_set_listener_count_incr(&conference->ceo, 95, 1);
+        ceo_set_listener_count_incr(&conference->ceo, 116, 1);
     }
 
     switch_mutex_unlock(conference->member_mutex);
