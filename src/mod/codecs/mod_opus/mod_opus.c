@@ -56,7 +56,7 @@ typedef struct opus_codec_settings opus_codec_settings_t;
 static opus_codec_settings_t default_codec_settings = {
 	/*.useinbandfec */ 1,
 	/*.usedtx */ 1,
-	/*.maxaveragebitrate */ 30000,
+	/*.maxaveragebitrate */ 16000,
 	/*.stereo*/ 0,
 	/*.cbr*/ 0,
 	/*.sprop_maxcapturerate*/ 0,
@@ -261,7 +261,7 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
     
 	if (encoding) {
 		/* come up with a way to specify these */
-		int bitrate_bps = 32000 /*opus_prefs.bitrate*/;
+		int bitrate_bps = 16000 /*opus_prefs.bitrate*/;
 		int use_vbr = opus_prefs.use_vbr;
 		int complexity = 5 /*opus_prefs.complexity*/;
 		int err;
