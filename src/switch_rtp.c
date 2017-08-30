@@ -3519,7 +3519,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_set_local_address(switch_rtp_t *rtp_s
 
         switch_socket_create_pollset(&rtp_session->read_pollfd, rtp_session->sock_input, SWITCH_POLLIN | SWITCH_POLLERR, rtp_session->pool);
     } else {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "Enabling RTP socket using fuze transport.\n");
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "Enabling RTP socket using fuze transport.\n");
         if (!(rtp_session->rtp_conn = fuze_transport_tbase_create_connection(tbase, CONN_UDP, 0, rtp_session->use_webrtc_neteq))) {
             *err = "Error on creating connection.";
             goto done;
@@ -3527,15 +3527,6 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_set_local_address(switch_rtp_t *rtp_s
         sprintf(rtp_session->rtp_conn_name, "BRTP%04x", rtp_session->id);
         fuze_transport_set_connection_name(rtp_session->rtp_conn, rtp_session->rtp_conn_name);
 
-        if (rtp_session->is_ivr == SWITCH_TRUE && !rtp_session->is_bridge) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is IVR -> BRIDGE\n");
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s ivr -> bridge (%u) seq=%u ssrc(%8x) remote_ssrc(%8x)\n",
-                              rtp_session->rtp_conn_name, rtp_session->write_count, rtp_session->seq, rtp_session->ssrc, rtp_session->remote_ssrc);
-            rtp_session->write_count = 0;
-            rtp_session->is_bridge = SWITCH_TRUE;
-            rtp_session->anchor_base_ts = rtp_session->anchor_next_seq;
-            rtp_session->anchor_base_seq = rtp_session->anchor_next_seq;
-        }
         if (!rtp_session->is_bridge) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is BRIDGE ssrc(%8x) remote_ssrc(%8x)\n",
                               rtp_session->ssrc, rtp_session->remote_ssrc);
@@ -8294,22 +8285,26 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 
             /* this is the case where we are an IVR session and we're just generating our own sequence numbers */
             if (rtp_session->is_ivr == SWITCH_FALSE) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is IVR\n");
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is IVR (not bridge!)\n");
                 rtp_session->is_ivr = SWITCH_TRUE;
                 rtp_session->write_count = 0;
                 rtp_session->last_ivr_send_time = now;
+
+                // we're either an "IVR" or a "Bridge" ... not both
+                // the flow works as follows: IVR -> Bridge
+                rtp_session->is_bridge = SWITCH_FALSE;
             }
 
             diff = (now - rtp_session->last_ivr_send_time)/1000;
 
             if (diff > 500) {
                 uint32_t old_ts = ntohl(send_msg->header.ts);
-                uint32_t new_ts = old_ts + ((diff/20)-1) * adjust_ts_step;
+                uint32_t new_ts = old_ts + ((diff/20) - 2) * adjust_ts_step;
                 send_msg->header.ts = htonl(new_ts);
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "timestamp adjustment of %u after %ums gap %u -> %u\n",
                                   diff*8, diff, old_ts, ntohl(send_msg->header.ts));
                 send_msg->header.m = 1;
-                rtp_session->next_ts = new_ts;
+                rtp_session->next_ts = new_ts + adjust_ts_step;
             }
 
             rtp_session->last_ivr_send_time = now;
@@ -8329,13 +8324,16 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 
             if (rtp_session->is_ivr == SWITCH_TRUE && !rtp_session->is_bridge) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is IVR -> BRIDGE\n");
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s ivr -> bridge (%u) seq=%u bpath=%d x=%d\n",
-                                  rtp_session->rtp_conn_name, rtp_session->write_count, rtp_session->seq, bpath, send_msg->header.x);
-                // rtp_session->is_ivr = SWITCH_FALSE; REMEMBER THAT WE WERE AN IVR SESSION
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s ivr -> bridge (%u) seq=%u ts_base(%u) seq_base(%u) bpath=%d x=%d\n",
+                                  rtp_session->rtp_conn_name, rtp_session->write_count, rtp_session->seq, rtp_session->anchor_next_ts, rtp_session->anchor_next_seq, bpath, send_msg->header.x);
                 rtp_session->write_count = 0;
                 rtp_session->is_bridge = SWITCH_TRUE;
-                rtp_session->anchor_base_ts = rtp_session->anchor_next_seq;
-                rtp_session->anchor_base_seq = rtp_session->anchor_next_seq;
+
+                // anchor_next_seq is the first sequence number that we receive from the far end when transitioning from ivr to bridging
+                // it is substracted from future sequence numbers to continue incrementing the existing sequence number count by 1.
+                // the timestamp works the same way.
+                rtp_session->anchor_base_ts = adjust_ts_step - rtp_session->anchor_next_ts;
+                rtp_session->anchor_base_seq = 1 - rtp_session->anchor_next_seq;
             }
             if (!rtp_session->is_bridge) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "session is BRIDGE\n");;
@@ -8354,10 +8352,6 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 rtp_session->seq += 1;
             } else if ((rtp_session->last_bridge_seq[0] + 1) != seq_no_from_rtp) {
                 out_of_order = SWITCH_TRUE;
-            }
-
-            if (rtp_session->write_count == 0) {
-                rtp_session->base_seq = seq_no_from_rtp;
             }
 
             if (out_of_order && *flags & SFF_TIMEOUT) {
@@ -8398,8 +8392,12 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 uint32_t bts;
 
                 if (rtp_session->anchor_next_set) {
-                    bseq = rtp_session->anchor_next_seq + rtp_session->anchor_base_seq;
-                    bts = rtp_session->anchor_next_ts + rtp_session->anchor_base_ts;
+
+                    // the next sequence number is the last sequence number of the ivr session (rtp_session->seq)
+                    //   minus the first sequence number of the anchored session (anchor_base_seq)  [this is a plus here as anchor_base_seq is negative]
+                    //   plus the current anchor session sequence number
+                    bseq = rtp_session->seq + rtp_session->anchor_next_seq + rtp_session->anchor_base_seq;
+                    bts = rtp_session->next_ts + rtp_session->anchor_next_ts + rtp_session->anchor_base_ts;
                 } else {
                     bseq = rtp_session->seq;
                     bts = ntohl(send_msg->header.ts);
@@ -8417,7 +8415,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             if (rtp_session->write_count == 0) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s wr=%u seq=%u base=%u from_rtp=%u new=%u\n",
                                   rtp_session->rtp_conn_name, rtp_session->write_count, rtp_session->seq,
-                                  rtp_session->base_seq, seq_no_from_rtp, new_seq_no);
+                                  rtp_session->anchor_base_seq, seq_no_from_rtp, new_seq_no);
             }
 
             rtp_session->write_count += 1;
@@ -9452,15 +9450,6 @@ SWITCH_DECLARE(void) switch_bridge_channel_get_ts_and_seq(switch_channel_t *chan
 
     if (!rtp_session_a || !rtp_session_b) {
         return;
-    }
-
-    if (rtp_session_b->anchor_next_seq != rtp_session_b->last_bridge_seq[0]) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session_a->session), SWITCH_LOG_WARNING,
-                          "missed a send seq=%u ts=%u\n", rtp_session_b->anchor_next_seq, rtp_session_b->anchor_next_ts);
-    }
-    if ((rtp_session_b->anchor_next_seq+1) != (rtp_session_a->last_seq)) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session_a->session), SWITCH_LOG_WARNING,
-                          "missed a send prev seq=%u curr seq=%u base=%u\n", rtp_session_b->anchor_next_seq, rtp_session_a->last_seq, rtp_session_b->anchor_base_seq);
     }
 
     rtp_session_b->anchor_next_ts = rtp_session_a->last_ts;
