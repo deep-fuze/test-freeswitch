@@ -4083,6 +4083,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             !switch_test_flag(imember, MFLAG_TALKING))
             continue;
 
+        if (is_muted(imember)) {
+            continue;
+        }
+
         for (i = 0; i < MAX_ACTIVE_TALKERS; ++i) {
             if (temp_active_talkers[i] == NULL) {
                 temp_active_talkers[i] = imember;
@@ -4630,24 +4634,31 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
     for (omember = conference->member_lists[eMemberListTypes_Speakers]; omember && !exclusive_play; omember = omember->next) {
         conference->member_loop_count++;
 
-        if (!(switch_test_flag(omember, MFLAG_RUNNING) && switch_test_flag(omember, MFLAG_HAS_AUDIO)))
-            continue;
-
-        /* Encoder Optimization: condition of !can_speak was added to this condition but I think that this
-         * isn't necessary */
-        if (omember->one_of_active == SWITCH_FALSE)
-            continue;
-        
-        /* changed this to continue if "can't speak and not fake mute" */
-        if (!switch_test_flag(omember, MFLAG_CAN_SPEAK) && !switch_test_flag(omember, MFLAG_USE_FAKE_MUTE))
-            continue;
-
-        if (is_muted(omember)) {
+        if (!(switch_test_flag(omember, MFLAG_RUNNING) && switch_test_flag(omember, MFLAG_HAS_AUDIO))) {
             continue;
         }
 
-        if (switch_test_flag(omember, MFLAG_USE_FAKE_MUTE) && switch_core_session_get_cn_state(omember->session))
+        /* Encoder Optimization: condition of !can_speak was added to this condition but I think that this
+         * isn't necessary */
+        if (omember->one_of_active == SWITCH_FALSE) {
             continue;
+        }
+        
+        /* changed this to continue if "can't speak and not fake mute" */
+        if (!switch_test_flag(omember, MFLAG_CAN_SPEAK) && !switch_test_flag(omember, MFLAG_USE_FAKE_MUTE)) {
+            continue;
+        }
+
+        if (is_muted(omember)) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(omember->session), SWITCH_LOG_ERROR, 
+                              "is_muted = TRUE but also one_of_active = TRUE!  setting to false\n");
+            omember->one_of_active = SWITCH_FALSE;
+            continue;
+        }
+
+        if (switch_test_flag(omember, MFLAG_USE_FAKE_MUTE) && switch_core_session_get_cn_state(omember->session)) {
+            continue;
+        }
 
         /* Fuze: Ok we finally made it down here so copy this speakers audio in */
         bptr = (int16_t *) omember->frame;
@@ -7230,6 +7241,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                 uint64_t data_time;
                 uint64_t time_in_meeting;
                 if (ols->stopping) { continue; }
+                if (ols->member->variable_encoded_length) { continue; }
 
                 time_in_meeting = (switch_time_now() - ols->member->time_of_first_packet)/1000;
                 data_time = (ols->member->data_sent/8);
@@ -8153,11 +8165,7 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
             path == PARTICIPANT_OUTPUT_ACTIVE_BUT_NO_DATA) {
             ret = OUTPUT_LOOP_OK_NOT_SENT;
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_WARNING, "adjusting timestamp by 160!\n");
-            if (!member->individual_codec) {
-                switch_rtp_update_ts(member->channel);
-            } else {
-                switch_rtp_update_ts(member->channel);
-            }
+            switch_rtp_update_ts(member->channel);
             member->data_sent += 160;
         }
     }

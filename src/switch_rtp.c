@@ -62,6 +62,8 @@
  */
 #define LOG_OUT_FREQUENCY 3000
 
+#define OPUS_CN_PKT_SIZE 20
+
 #define FIR_COUNTDOWN 50
 #define JITTER_LEAD_FRAMES 10
 #define READ_INC(rtp_session) switch_mutex_lock(rtp_session->read_mutex); rtp_session->reading++
@@ -7376,10 +7378,14 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
     timer_check:
 
 
-        if (rtp_session->recv_msg.header.pt && (rtp_session->recv_msg.header.pt == rtp_session->cng_pt || rtp_session->recv_msg.header.pt == 13)) {
+        /*
+         * bytes <= OPUS_CN_PKT_SIZE && rtp_session->recv_msg.header.pt > 95 is for opus CN packets
+         */
+        if (rtp_session->recv_msg.header.pt && (rtp_session->recv_msg.header.pt == rtp_session->cng_pt || rtp_session->recv_msg.header.pt == 13 ||
+                                                (bytes <= OPUS_CN_PKT_SIZE && rtp_session->recv_msg.header.pt > 95))) {
             if (rtp_session->cng_pt) {
                 rtp_session->recv_msg.header.pt = (uint32_t) rtp_session->cng_pt;
-            } else {
+            } else if (rtp_session->recv_msg.header.pt == rtp_session->cng_pt) {
                 rtp_session->recv_msg.header.pt = (uint32_t) 13;
             }
             *flags |= SFF_CNG;
@@ -7492,7 +7498,11 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
     if (switch_rtp_ready(rtp_session)) {
         *payload_type = (switch_payload_t) rtp_session->recv_msg.header.pt;
 
-        if (*payload_type == SWITCH_RTP_CNG_PAYLOAD) {
+        /*
+         * opus: bytes <= OPUS_CN_PKT_SIZE
+         */
+        if (*payload_type == SWITCH_RTP_CNG_PAYLOAD ||
+            (bytes <= OPUS_CN_PKT_SIZE && rtp_session->recv_msg.header.pt > 95)) {
             *flags |= SFF_CNG;
         }
 
