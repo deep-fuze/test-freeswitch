@@ -8316,6 +8316,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 
             send_msg->header.seq = htons(++rtp_session->seq);
             rtp_session->write_count += 1;
+            rtp_session->last_bridge_seq[0] = rtp_session->seq;
         } else {
             /* we're in bridging/ivr mode and sequence numbers need to be set from the input sequence numbers */
             uint16_t new_seq_no = rtp_session->seq;
@@ -8401,6 +8402,13 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 } else {
                     bseq = rtp_session->seq;
                     bts = ntohl(send_msg->header.ts);
+                }
+
+                if (rtp_session->last_bridge_seq[0] == bseq) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "hmm same sequence number as last packet %d sad times!\n",
+                                      bseq);
+                    rtp_session->seq += 1;
+                    bseq += 1;
                 }
 
                 send_msg->header.seq = htons(bseq);
