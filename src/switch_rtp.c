@@ -536,6 +536,7 @@ struct switch_rtp {
 
     switch_bool_t active;
     switch_bool_t muted;
+    int ignore_loss_after_muted;
 
     uint32_t low_level_duration;
     switch_time_t low_level_start;
@@ -2796,7 +2797,7 @@ static int add_rx_congestion(switch_rtp_t *rtp_session, void *body, switch_rtcp_
     rx_congestion->muted = rtp_session->muted;
     rx_congestion->cn = switch_core_session_get_cn_state(rtp_session->session);
 
-    if (rtp_session->stats.last_lost_percent > 0) {
+    if (rtp_session->stats.last_lost_percent > 0 && rtp_session->ignore_loss_after_muted <= 0) {
         rx_congestion->lost_percent = htons(rtp_session->stats.last_lost_percent);
     } else {
         rx_congestion->lost_percent = 0;
@@ -8392,6 +8393,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                     rtp_session->level_out = max;
                 }
                 if (rtp_session->muted) {
+                    rtp_session->ignore_loss_after_muted = 60;
                     rtp_session->muted = SWITCH_FALSE;
                 }
             }
@@ -9208,7 +9210,12 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
         WebRtcNetEQ_GetJitterBufferSize(neteq_inst, &processing);
         if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
             jbuf = nwstats.currentBufferSize;
-            loss = (short)(((float)nwstats.currentPacketLossRate/16384.0)*100);
+
+            /* ignore loss after muted periods */
+            if (rtp_session->ignore_loss_after_muted <= 0) {
+                loss = (short)(((float)nwstats.currentPacketLossRate/16384.0)*100);
+            }
+
             for (int i = 0; i < rawframeswaiting; i++) {
                 if (waiting_times_ms[i] > max_proc_time) {
                     max_proc_time = waiting_times_ms[i];
@@ -9584,6 +9591,10 @@ SWITCH_DECLARE(void) switch_rtp_set_muted(switch_channel_t *channel, switch_bool
         return;
     }
 
+    /* ignore loss for 60s after muted */
+    if (rtp_session->muted && !muted) {
+        rtp_session->ignore_loss_after_muted = 60;
+    }
     rtp_session->muted = muted;
 }
 

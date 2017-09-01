@@ -825,6 +825,7 @@ struct conference_member {
 
     switch_bool_t in_cn;
     mute_state_t ms;
+    mute_state_t ms_cnt;
     mute_event_t me;
 
     switch_time_t audio_in_mutex_time;
@@ -2124,6 +2125,8 @@ switch_bool_t is_muted(conference_member_t *member) {
     }
 }
 
+#define MS_CNT_THRESHOLD 5
+
 static void update_mute_state(conference_member_t *member, mute_event_t event)
 {
 
@@ -2135,11 +2138,17 @@ static void update_mute_state(conference_member_t *member, mute_event_t event)
         switch (event) {
         case ME_PKTS:
         case ME_UNMUTE:
+            member->ms_cnt = 0;
             break;
         case ME_CN:
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
-                              "update_mute_state(UNMUTED,CN) -> (CN)\n");
-            member->ms = MS_CN;
+            if (member->ms_cnt > MS_CNT_THRESHOLD) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                                  "update_mute_state(UNMUTED,CN) -> (CN)\n");
+                member->ms_cnt = 0;
+                member->ms = MS_CN;
+            } else {
+                member->ms_cnt += 1;
+            }
             switch_rtp_set_muted(member->channel, SWITCH_TRUE);
             break;
         case ME_MUTE:
@@ -2155,12 +2164,18 @@ static void update_mute_state(conference_member_t *member, mute_event_t event)
     case MS_MUTED:
         switch (event) {
         case ME_PKTS:
+            member->ms_cnt = 0;
         case ME_MUTE:
             break;
         case ME_CN:
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
-                              "update_mute_state(MUTED,CN) -> (CN)\n");
-            member->ms = MS_CN;
+            if (member->ms_cnt > MS_CNT_THRESHOLD) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                                  "update_mute_state(MUTED,CN) -> (CN)\n");
+                member->ms = MS_CN;
+                member->ms_cnt = 0;
+            } else {
+                member->ms_cnt += 1;
+            }
             break;
         case ME_UNMUTE:
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
@@ -2178,6 +2193,7 @@ static void update_mute_state(conference_member_t *member, mute_event_t event)
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
                               "update_mute_state(CN,PKTS) -> (UNMUTED)\n");
             member->ms = MS_UNMUTED;
+            member->ms_cnt = 0;
             switch_rtp_set_muted(member->channel, SWITCH_FALSE);
             break;
         case ME_UNMUTE:
@@ -2734,6 +2750,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     member->was_active = SWITCH_FALSE;
     member->in_cn = SWITCH_FALSE;
     member->ms = MS_UNMUTED;
+    member->ms_cnt = 0;
     member->max_out_level = 0;
     member->max_input_level = 0;
 

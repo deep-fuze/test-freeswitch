@@ -303,6 +303,8 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
 		if (opus_codec_settings.usedtx) {
 			opus_encoder_ctl(context->encoder_object, OPUS_SET_DTX(opus_codec_settings.usedtx));
 		}
+
+		opus_encoder_ctl(context->encoder_object, OPUS_SET_PACKET_LOSS_PERC(5));
 	}
 	
 	if (decoding) {
@@ -320,7 +322,6 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
             
 			return SWITCH_STATUS_GENERR;
 		}
-        
 	}
     
 	codec->private_info = context;
