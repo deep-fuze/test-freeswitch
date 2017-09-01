@@ -1669,6 +1669,8 @@ SWITCH_DECLARE(switch_status_t) switch_core_codec_decode(switch_codec_t *codec,
                                                          uint32_t encoded_rate,
                                                          void *decoded_data, uint32_t *decoded_data_len, uint32_t *decoded_rate, unsigned int *flag);
 
+SWITCH_DECLARE(switch_status_t) switch_core_ctl(switch_codec_t *codec, uint32_t flag, void* data);
+
 /*! 
   \brief Destroy an initalized codec handle
   \param codec the codec handle to destroy

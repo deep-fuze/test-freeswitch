@@ -840,6 +840,7 @@ struct conference_member {
     switch_bool_t skip_accumulation;
     switch_bool_t variable_encoded_length;
     conf_auth_profile_t auth_profile;
+    int16_t loss;
 };
 
 typedef enum {
@@ -3222,7 +3223,56 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
 
     return status;
 }
-    
+
+#if 0
+static void conference_opus_loss_adjust(conference_obj_t *conference) {
+    conference_member_t *member = NULL;
+
+    conference_mutex_lock(conference);
+    switch_mutex_lock(conference->member_mutex);
+
+    for (int i = 0; i < eMemberListTypes_Recorders; i++) {
+        int16_t maxloss = 0, loss;
+        for (member = conference->member_lists[i]; member; member = member->next) {
+            if (switch_test_flag(member, MFLAG_NOCHANNEL) || !switch_test_flag(member, MFLAG_RUNNING)) {
+                continue;
+            }
+            if (member->ianacode < 95) {
+                continue;
+            }
+
+            if (member->one_of_active) {
+                loss = switch_rtp_get_lost_percent(member->channel);
+                if (loss != member->loss) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                                      "Setting loss for opus member %d to %d%%\n", member->id, loss);
+                    if (switch_core_codec_ready(&member->write_codec)) {
+                        switch_core_ctl(&member->write_codec, 1, &loss);
+                    }
+                    member->loss = loss;
+                }
+            } else {
+                loss = switch_rtp_get_lost_percent(member->channel);
+                if (loss != member->loss) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                                      "Setting loss for opus member %d to %d%%\n", member->id, loss);
+                    if (switch_core_codec_ready(&member->write_codec)) {
+                        switch_core_ctl(&member->write_codec, 1, &loss);
+                    }
+                    member->loss = loss;
+                }
+                if (loss > maxloss) {
+                    maxloss = loss;
+                }
+            }
+        }
+    }
+
+    switch_mutex_unlock(conference->member_mutex);
+    conference_mutex_unlock(conference);
+}
+#endif
+
 static void conference_reconcile_member_lists(conference_obj_t *conference) {
     conference_member_t *member = NULL, *last = NULL;
     uint32_t g722cnt = 0, g711ucnt = 0, g711acnt = 0, othercnt = 0, opuscnt = 0;
@@ -3332,11 +3382,24 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
     }
 
     for (int i = 0; i < eMemberListTypes_Recorders; i++) {
+        int16_t maxloss = 0;
         for (member = conference->member_lists[i]; member; member = member->next) {
             if (switch_test_flag(member, MFLAG_NOCHANNEL) || !switch_test_flag(member, MFLAG_RUNNING)) {
                 continue;
             }
             if (member->one_of_active) {
+                if (member->ianacode > 95) {
+                    int16_t loss;
+                    loss = switch_rtp_get_lost_percent(member->channel);
+                    if (loss != member->loss) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                                          "Setting loss for opus member %d to %d%%\n", member->id, loss);
+                        if (switch_core_codec_ready(&member->write_codec)) {
+                            switch_core_ctl(&member->write_codec, 1, &loss);
+                        }
+                        member->loss = loss;
+                    }
+                }
                 continue;
             }
             if (member->ianacode == 9) {
@@ -3345,8 +3408,21 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
                 g711ucnt += 1;
             } else if (member->ianacode == 8) {
                 g711acnt += 1;
-            } else if (member->ianacode >95) {
+            } else if (member->ianacode > 95) {
+                int16_t loss = 0;
                 opuscnt += 1;
+                loss = switch_rtp_get_lost_percent(member->channel);
+                if (loss != member->loss) {
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                                      "Setting loss for opus member %d to %d%%\n", member->id, loss);
+                    if (switch_core_codec_ready(&member->write_codec)) {
+                        switch_core_ctl(&member->write_codec, 1, &loss);
+                    }
+                    member->loss = loss;
+                }
+                if (loss > maxloss) {
+                    maxloss = loss;
+                }
             } else {
                 othercnt += 1;
             }

@@ -545,6 +545,7 @@ struct switch_rtp {
     int32_t level_in;
 
     switch_time_t last_rtcp_send;
+    int16_t remote_lost;
 };
 
 struct switch_rtcp_report_block {
@@ -7684,6 +7685,12 @@ SWITCH_DECLARE(switch_status_t) switch_rtcp_zerocopy_read_frame(switch_rtp_t *rt
             frame->reports[i].jitter = ntohl(report->jitter);
             frame->reports[i].lsr = ntohl(report->lsr);
             frame->reports[i].dlsr = ntohl(report->dlsr);
+
+            //rtp_session->remote_lost = (int16_t)(((float)frame->reports[i].fraction)/2.56);
+
+            //switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "LOST %u %f %d %8x\n",
+            //                frame->reports[i].fraction, ((float)frame->reports[i].fraction)/256.0, rtp_session->remote_lost, ntohl(rb[1]));
+
             if (i >= MAX_REPORT_BLOCKS) {
                 break;
             }
@@ -9611,6 +9618,20 @@ SWITCH_DECLARE(switch_bool_t) switch_rtp_get_muted(switch_channel_t *channel)
     }
 
     return rtp_session->muted;
+}
+
+SWITCH_DECLARE(int16_t) switch_rtp_get_lost_percent(switch_channel_t *channel)
+{
+    switch_rtp_t *rtp_session;
+
+    if (!channel) { return 0; }
+
+    rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session) {
+        return 0;
+    }
+    return rtp_session->remote_lost;
 }
 
 /* For Emacs:

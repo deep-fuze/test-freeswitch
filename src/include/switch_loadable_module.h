@@ -457,6 +457,13 @@ SWITCH_DECLARE(uint32_t) switch_core_codec_next_id(void);
 	return 0;
 }
 
+static inline void switch_core_codec_add_ctl_implementation(switch_codec_interface_t *codec_interface,
+                                                            switch_core_codec_ctl_func_t ctl) {
+    if (codec_interface) {
+        codec_interface->implementations->ctl = ctl;
+    }
+}
+
 static inline void switch_core_codec_add_implementation(switch_memory_pool_t *pool, switch_codec_interface_t *codec_interface,
 														/*! enumeration defining the type of the codec */
 														const switch_codec_type_t codec_type,
@@ -521,6 +528,7 @@ static inline void switch_core_codec_add_implementation(switch_memory_pool_t *po
 		impl->impl_id = switch_core_codec_next_id();
 		impl->decoder = NULL;
 		impl->timestamp_multiplier = 1;
+		impl->ctl = NULL;
 		codec_interface->implementations = impl;
 	} else {
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Rejected codec name: %s rate: %u ptime: %d\n",

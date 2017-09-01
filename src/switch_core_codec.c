@@ -745,6 +745,18 @@ SWITCH_DECLARE(switch_status_t) switch_core_codec_encode(switch_codec_t *codec,
 
 }
 
+SWITCH_DECLARE(switch_status_t) switch_core_ctl(switch_codec_t *codec, uint32_t flag, void* data)
+{
+    switch_status_t status;
+
+    switch_assert(codec != NULL);
+    if (codec->mutex) switch_mutex_lock(codec->mutex);
+    status = codec->implementation->ctl(codec, flag, data);
+    if (codec->mutex) switch_mutex_unlock(codec->mutex);
+
+    return status;
+}
+
 SWITCH_DECLARE(switch_status_t) switch_core_codec_decode(switch_codec_t *codec,
 														 switch_codec_t *other_codec,
 														 void *encoded_data,

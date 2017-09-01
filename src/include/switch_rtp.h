@@ -546,6 +546,7 @@ SWITCH_DECLARE(void) switch_bridge_channel_get_ts_and_seq(switch_channel_t *chan
 SWITCH_DECLARE(void) switch_rtp_set_muted(switch_channel_t *channel, switch_bool_t muted);
 SWITCH_DECLARE(switch_bool_t) switch_rtp_get_muted(switch_channel_t *channel);
 SWITCH_DECLARE(void) switch_rtp_set_active(switch_channel_t *channel, switch_bool_t active);
+SWITCH_DECLARE(int16_t) switch_rtp_get_lost_percent(switch_channel_t *channel);
 
 /*!
   \}

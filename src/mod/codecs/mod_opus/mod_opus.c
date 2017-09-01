@@ -375,6 +375,29 @@ static switch_status_t switch_opus_encode(switch_codec_t *codec,
 	return SWITCH_STATUS_GENERR;
 }
 
+static switch_status_t switch_opus_ctl(switch_codec_t *codec,
+                                       uint32_t flag,
+                                       void *data)
+{
+    struct opus_context *context = codec->private_info;
+
+    if (!context) {
+        return SWITCH_STATUS_FALSE;
+    }
+
+    if (flag == 1) {
+        int16_t *loss = (int16_t *)data;
+        if (*loss < 5) {
+            *loss = 5;
+        } else if (*loss > 30) {
+            *loss = 30;
+        }
+        opus_encoder_ctl(context->encoder_object, OPUS_SET_PACKET_LOSS_PERC(*loss));
+    }
+
+    return SWITCH_STATUS_SUCCESS;
+}
+
 static switch_status_t switch_opus_decode(switch_codec_t *codec,
 										  switch_codec_t *other_codec,
 										  void *encoded_data,
@@ -401,13 +424,13 @@ static switch_status_t switch_opus_decode(switch_codec_t *codec,
 
 static void* switch_opus_decoder(switch_codec_t *codec)
 {
-        struct opus_context *context;
+	struct opus_context *context;
 
 	if (!codec)
 		return NULL;
 	context = codec->private_info;
 
-        return (context ? context->decoder_object : NULL);
+	return (context ? context->decoder_object : NULL);
 }
 
 /*
@@ -556,6 +579,8 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_opus_load)
 										switch_opus_destroy);   /* deinitalize a codec handle using this implementation */
 
 		switch_core_codec_implementation_set_decoder(codec_interface, switch_opus_decoder);
+
+		switch_core_codec_add_ctl_implementation(codec_interface, switch_opus_ctl);
 
 		/*
 		* For opus, the rtp timestamp is based on assumption that 48K samples per second

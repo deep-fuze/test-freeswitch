@@ -2278,6 +2278,10 @@ typedef switch_bool_t (*switch_media_bug_callback_t) (switch_media_bug_t *, void
 typedef switch_bool_t (*switch_tone_detect_callback_t) (switch_core_session_t *, const char *, const char *);
 typedef struct switch_xml_binding switch_xml_binding_t;
 
+typedef switch_status_t (*switch_core_codec_ctl_func_t) (switch_codec_t *codec,
+                                                         uint32_t flag,
+                                                         void *data);
+
 typedef switch_status_t (*switch_core_codec_encode_func_t) (switch_codec_t *codec,
                                                             switch_codec_t *other_codec,
                                                             void *decoded_data,
