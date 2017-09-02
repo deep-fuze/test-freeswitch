@@ -179,7 +179,7 @@ static switch_status_t switch_opus_fmtp_parse(const char *fmtp, switch_codec_fmt
                                     
 								default:
 									/* this should never happen but 20000 is common among all rates */
-									codec_settings->maxaveragebitrate = 20000;
+									codec_settings->maxaveragebitrate = 16000;
 									break;
 							}
                             

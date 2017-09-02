@@ -4054,7 +4054,7 @@ SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *s
                     }
 
                     if (match && bit_rate && map_bit_rate && map_bit_rate != bit_rate && strcasecmp(map->rm_encoding, "ilbc") &&
-                        strcasecmp(map->rm_encoding, "isac")) {
+                        strcasecmp(map->rm_encoding, "isac") && strcasecmp(map->rm_encoding, "opus")) {
                         /* if a bit rate is specified and doesn't match, this is not a codec match, except for ILBC */
                         match = 0;
                     }
