@@ -389,8 +389,8 @@ static switch_status_t switch_opus_ctl(switch_codec_t *codec,
         int16_t *loss = (int16_t *)data;
         if (*loss < 5) {
             *loss = 5;
-        } else if (*loss > 30) {
-            *loss = 30;
+        } else if (*loss > 50) {
+            *loss = 50;
         }
         opus_encoder_ctl(context->encoder_object, OPUS_SET_PACKET_LOSS_PERC(*loss));
     }
@@ -533,6 +533,8 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_opus_load)
 									switch_opus_destroy);  /* deinitalize a codec handle using this implementation */
 
 		switch_core_codec_implementation_set_decoder(codec_interface, switch_opus_decoder);
+
+        switch_core_codec_add_ctl_implementation(codec_interface, switch_opus_ctl);
 
 		/*
 		* For opus, the rtp timestamp is based on assumption that 48K samples per second

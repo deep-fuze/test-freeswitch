@@ -7679,17 +7679,18 @@ SWITCH_DECLARE(switch_status_t) switch_rtcp_zerocopy_read_frame(switch_rtp_t *rt
         for (i = 0; i < (int)rtp_session->rtcp_recv_msg_p->header.count && i < MAX_REPORT_BLOCKS ; i++) {
             struct switch_rtcp_report_block* report = (struct switch_rtcp_report_block*) (rtp_session->rtcp_recv_msg_p->body + (sizeof(struct switch_rtcp_sr_head) + (i * sizeof(struct switch_rtcp_report_block))));
             frame->reports[i].ssrc = ntohl(report->ssrc);
-            frame->reports[i].fraction = (uint8_t)ntohl(report->fraction);
+            frame->reports[i].fraction = report->fraction;
             frame->reports[i].lost = ntohl(report->lost);
             frame->reports[i].highest_sequence_number_received = ntohl(report->highest_sequence_number_received);
             frame->reports[i].jitter = ntohl(report->jitter);
             frame->reports[i].lsr = ntohl(report->lsr);
             frame->reports[i].dlsr = ntohl(report->dlsr);
 
-            //rtp_session->remote_lost = (int16_t)(((float)frame->reports[i].fraction)/2.56);
+            rtp_session->remote_lost = (int16_t)(((float)report->fraction)/2.56);
 
-            //switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "LOST %u %f %d %8x\n",
-            //                frame->reports[i].fraction, ((float)frame->reports[i].fraction)/256.0, rtp_session->remote_lost, ntohl(rb[1]));
+            if (rtp_session->remote_lost > 5) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "LOST %d\n", rtp_session->remote_lost);
+            }
 
             if (i >= MAX_REPORT_BLOCKS) {
                 break;
