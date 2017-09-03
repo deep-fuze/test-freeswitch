@@ -36,7 +36,9 @@
 #include <switch.h>
 #include "private/switch_core_pvt.h"
 #include "interface/webrtc_neteq_if.h"
+#if OLD_WEBRTC
 #include "interface/webrtc_neteq_internal.h"
+#endif
 
 SWITCH_DECLARE(switch_status_t) switch_core_session_write_video_frame(switch_core_session_t *session, switch_frame_t *frame, switch_io_flag_t flags,
                                                                       int stream_id)
@@ -184,27 +186,7 @@ static void resampler_create(uint32_t from_rate, uint32_t to_rate, void *pool, v
 
 static uint16_t purge_jitterbuffer(switch_core_session_t *session, switch_frame_t **frame)
 {
-    WebRtcNetEQ_ProcessingActivity stat;
-    uint16_t lost_count = 0;
-
-    WebRtcNetEQ_GetJitterBufferSize(switch_core_get_neteq_inst(session), &stat);
-    session->suppress_lost = true;
-
-    for (int i = stat.pkts_in_buffer; i > 0; i--) {
-        WebRtcNetEQ_Extract(session->neteq_inst,
-                            session->raw_read_frame.data,
-                            &session->raw_read_frame.datalen,
-                            &lost_count,
-                            &session->total_decoded,
-                            session->suppress_lost);
-    }
-
-#if 1
-    if (stat.pkts_in_buffer) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
-                          "purge_jitterbuffer: packets=%d\n", stat.pkts_in_buffer);
-    }
-#endif
+	WebRtcNetEQ_Purge(switch_core_get_neteq_inst(session));
 
     (*frame)->datalen = 0;
     (*frame)->flags = 0;
@@ -212,7 +194,7 @@ static uint16_t purge_jitterbuffer(switch_core_session_t *session, switch_frame_
         (*frame)->flags |= SFF_RTP_EVENT;
     }
 
-    return lost_count;
+    return 0;
 }
 
 SWITCH_DECLARE(uint32_t) switch_core_session_get_low_energy(switch_core_session_t *session) {
@@ -319,8 +301,9 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
                 }
             }
         } else {
-            WebRtcNetEQ_ProcessingActivity processing;
-            WebRtcNetEQ_GetJitterBufferSize(neteq_inst, &processing);
+			int current_num_packets = 0, max_num_packets = 0;
+			WebRtcNetEQ_status_t ret;
+			ret = WebRtcNetEQ_CurrentPacketBufferStatistics(neteq_inst, &current_num_packets, &max_num_packets);
 
             if (flags & SWITCH_IO_FLAG_CANT_SPEAK || session->audio_level_low_count >= 50) {
                 if (session->paused_threshold > PAUSE_THRESHOLD) {
@@ -328,7 +311,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_jitterb
                         session->paused = SWITCH_TRUE;
                     }
                 } else {
-                    if (processing.pkts_in_buffer == 0) {
+                    if (ret == WebRtcNetEQ_SUCCESS && current_num_packets == 0) {
                         session->paused_threshold += 1;
                     }
                 }
@@ -643,10 +626,11 @@ read_again:
                 } else if (++session->total_reads % session->rtcp_interval == 0) {
                     uint32_t val;
                     if (session->neteq_inst) {
-                        WebRtcNetEQ_NetworkStatistics nwstats;
+						NetEqNetworkStatistics nwstats;
                         void *neteq_internal = switch_core_get_neteq_inst(session);
-                        if (neteq_internal && WebRtcNetEQ_GetNetworkStatistics(neteq_internal, &nwstats) == 0) {
-                            val = nwstats.currentBufferSize;
+
+						if (neteq_internal && WebRtcNetEQ_GetNetworkStatistics(neteq_internal, &nwstats) == 0) {
+                            val = nwstats.current_buffer_size_ms;
                             switch_core_ioctl_stats(session, SET_JB_SIZE, &val);
                         }
                     }
@@ -735,12 +719,12 @@ read_again:
                             
                             if ((read_time - session->period_start) >= FUZE_TIMER_MISS_INTERVAL) {
                                 if (session->pkt_errors > 5) {
-                                    WebRtcNetEQ_ProcessingActivity stat;
-                                    WebRtcNetEQ_GetProcessingActivity(switch_core_get_neteq_inst(session), &stat, 0);
+									int current_num_packets = 0, max_num_packets = 0;
+									WebRtcNetEQ_CurrentPacketBufferStatistics(switch_core_get_neteq_inst(session), &current_num_packets, &max_num_packets);
                                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
                                                       "Packet Errors: %d/%lld ssrc=%#x cur-jb-size=%d max-jb-size=%d.\n",
                                                       session->pkt_errors, (long long)(read_time - session->period_start),
-                                                      (*frame)->ssrc, stat.pkts_in_buffer, stat.max_pkts_in_buffer);
+                                                      (*frame)->ssrc, current_num_packets, max_num_packets);
                                 }
                                 session->pkt_errors = 0;
                                 session->period_start = read_time;
@@ -777,7 +761,7 @@ read_again:
                     
                     if (!(flags & SWITCH_IO_FLAG_CANT_SPEAK) && session->audio_level_low_count < 50) {
                         if (wasskipping) {
-                            WebRtcNetEQ_NetworkStatistics nwstats;
+							NetEqNetworkStatistics nwstats;
                             void *neteq_internal = switch_core_get_neteq_inst(session);
                             if (neteq_internal) {
                                 WebRtcNetEQ_GetNetworkStatistics(neteq_internal, &nwstats);
@@ -786,7 +770,7 @@ read_again:
                             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
                                               "get_frame stats: read/skip=%d/%d insert/skip=%d/%d jbsize=%dms jfpref=%d peaks=%d\n",
                                               session->read, session->skip_read, session->insert, session->skip_insert,
-                                              nwstats.currentBufferSize, nwstats.preferredBufferSize, nwstats.jitterPeaksFound);
+											  nwstats.current_buffer_size_ms, nwstats.preferred_buffer_size_ms, nwstats.jitter_peaks_found);
                             read_frame->m = 1;
                         }
 
@@ -1319,10 +1303,10 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
                 } else if (++session->total_reads % session->rtcp_interval == 0) {
                     int val;
                     if (session->neteq_inst) {
-                        WebRtcNetEQ_NetworkStatistics nwstats;
+						NetEqNetworkStatistics nwstats;
                         void *neteq_internal = switch_core_get_neteq_inst(session);
                         if (neteq_internal && WebRtcNetEQ_GetNetworkStatistics(neteq_internal, &nwstats) == 0) {
-                            val = nwstats.currentBufferSize;
+                            val = nwstats.current_buffer_size_ms;
                             switch_core_ioctl_stats(session, SET_JB_SIZE, &val);
                         }
                     }
@@ -1414,12 +1398,12 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
                                 
                                 if ((read_time - session->period_start) >= FUZE_TIMER_MISS_INTERVAL) {
                                     if (session->pkt_errors > 5) {
-                                        WebRtcNetEQ_ProcessingActivity stat;
-                                        WebRtcNetEQ_GetProcessingActivity(switch_core_get_neteq_inst(session), &stat, 0);
+										int current_num_packets = 0, max_num_packets = 0;
+										WebRtcNetEQ_CurrentPacketBufferStatistics(switch_core_get_neteq_inst(session), &current_num_packets, &max_num_packets);
                                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, 
                                                           "Packet Errors: %d/%lld ssrc=%#x cur-jb-size=%d max-jb-size=%d.\n",
                                                           session->pkt_errors, (long long)(read_time - session->period_start),
-                                                          (*frame)->ssrc, stat.pkts_in_buffer, stat.max_pkts_in_buffer);
+                                                          (*frame)->ssrc, current_num_packets, max_num_packets);
                                     }
                                     session->pkt_errors = 0;
                                     session->period_start = read_time;
@@ -1474,7 +1458,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
 
                         if (!(flags & SWITCH_IO_FLAG_CANT_SPEAK) && session->audio_level_low_count < 50) {
                             if (wasskipping) {
-                                WebRtcNetEQ_NetworkStatistics nwstats;
+								NetEqNetworkStatistics nwstats;
                                 void *neteq_internal = switch_core_get_neteq_inst(session);
                                 if (neteq_internal) {
                                     WebRtcNetEQ_GetNetworkStatistics(neteq_internal, &nwstats);
@@ -1483,7 +1467,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
                                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
                                                   "get_frame stats: read/skip=%d/%d insert/skip=%d/%d jbsize=%dms jfpref=%d peaks=%d\n",
                                                   session->read, session->skip_read, session->insert, session->skip_insert,
-                                                  nwstats.currentBufferSize, nwstats.preferredBufferSize, nwstats.jitterPeaksFound);
+												  nwstats.current_buffer_size_ms, nwstats.preferred_buffer_size_ms,nwstats.jitter_peaks_found);
                                 read_frame->m = 1;
                             }
                             if (WebRtcNetEQ_Insert(session->neteq_inst, read_frame->data,
@@ -1566,9 +1550,9 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
 
                     if (!read_frame->datalen) {
                         if (!session->zero_read_count) {
-                            WebRtcNetEQ_ProcessingActivity stat;
-                            WebRtcNetEQ_GetProcessingActivity(switch_core_get_neteq_inst(session), &stat, 0);
-                            session->jb_size_before_zero = stat.pkts_in_buffer;
+							int current_num_packets = 0, max_num_packets = 0;
+							WebRtcNetEQ_CurrentPacketBufferStatistics(switch_core_get_neteq_inst(session), &current_num_packets, &max_num_packets);
+                            session->jb_size_before_zero = current_num_packets;
                         }
                         session->zero_read_count++;
                     }

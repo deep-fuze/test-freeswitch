@@ -29,6 +29,8 @@ AM_LIBAPU_LIBS := $(subst $(switch_builddir)/,,$(shell ./libs/apr-util/apu-1-con
 endif
 
 AM_CFLAGS   = $(SWITCH_AM_CFLAGS) $(SWITCH_ANSI_CFLAGS) 
+AM_CFLAGS  += -Wno-error=pedantic
+
 AM_CPPFLAGS = $(SWITCH_AM_CXXFLAGS) -I$(switch_srcdir)/libs/sofia-sip/libsofia-sip-ua/sdp -I$(switch_srcdir)/libs/sofia-sip/libsofia-sip-ua/su -I$(switch_builddir)/libs/sofia-sip/libsofia-sip-ua/su
 AM_LDFLAGS  = $(SWITCH_AM_LDFLAGS) $(AM_LIBAPR_LDFLAGS) $(AM_LIBAPU_LDFLAGS)
 
@@ -132,12 +134,19 @@ else
 CORE_LIBS +=  libs/apr-util/libaprutil-1.la
 endif
 
+WEBRTC_LIB_DIR = libs/webrtcneteq/lib/x64/Debug
+#WEBRTC_LIBS = -lboringssl -lfield_trial_default -lprotobuf_full -lprotoc_lib -lwebrtc -lcpu_features_linux -lmetrics_default -lprotobuf_lite -lsystem_wrappers
+
 CORE_LIBS += libs/webrtcneteq/libwebrtcneteq.la libs/spandsp/src/libspandsp.la libs/opus-1.2.1/libopus.la 
 CORE_LIBS += libs/fuzetransport/libfuzetransport.la libs/Libevent/libevent.la libs/Libevent/libevent_pthreads.la
+CORE_LIBS += $(WEBRTC_LIB_DIR)/libwebrtc.a $(WEBRTC_LIB_DIR)/libboringssl.a $(WEBRTC_LIB_DIR)/libfield_trial_default.a \
+	$(WEBRTC_LIB_DIR)/libmetrics_default.a $(WEBRTC_LIB_DIR)/libcpu_features_linux.a \
+	$(WEBRTC_LIB_DIR)/libprotoc_lib.a $(WEBRTC_LIB_DIR)/libprotobuf_full.a \
+	$(WEBRTC_LIB_DIR)/libprotobuf_lite.a $(WEBRTC_LIB_DIR)/libsystem_wrappers.a
 
 if ENABLE_SRTP
 CORE_CFLAGS += -DENABLE_SRTP
-CORE_LIBS += libs/srtp/libsrtp.la
+#CORE_LIBS += libs/srtp/libsrtp.la
 endif
 
 MOD_LINK      = $(switch_srcdir)/libfreeswitch.la
@@ -165,7 +174,7 @@ lib_LTLIBRARIES	         = libfreeswitch.la
 libfreeswitch_la_CFLAGS  = $(CORE_CFLAGS) $(SQLITE_CFLAGS) $(CURL_CFLAGS) $(PCRE_CFLAGS) $(SPEEX_CFLAGS) $(LIBEDIT_CFLAGS) $(openssl_CFLAGS) $(AM_CFLAGS)
 libfreeswitch_la_LDFLAGS = -version-info 1:0:0 $(AM_LDFLAGS) $(PLATFORM_CORE_LDFLAGS) -no-undefined
 libfreeswitch_la_LIBADD  = $(CORE_LIBS) $(APR_LIBS) $(SQLITE_LIBS) $(CURL_LIBS) $(PCRE_LIBS) $(SPEEX_LIBS) $(LIBEDIT_LIBS) $(openssl_LIBS) $(PLATFORM_CORE_LIBS) -lcares
-libfreeswitch_la_DEPENDENCIES = $(BUILT_SOURCES)
+libfreeswitch_la_DEPENDENCIES = $(BUILT_SOURCES) $(CORE_LIBS)
 
 if HAVE_ODBC
 libfreeswitch_la_LDFLAGS += $(ODBC_LIB_FLAGS)
@@ -774,3 +783,4 @@ support:
 	@cp support-d/.screenrc ~
 	@cp support-d/.bashrc ~
 	@test -f ~/.cc-mode-installed || sh support-d/install-cc-mode.sh && touch ~/.cc-mode-installed
+

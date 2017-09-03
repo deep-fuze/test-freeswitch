@@ -22,10 +22,12 @@
 #else
 #include <srtp.h>
 #endif
+#if 0
 #define srtp_crypto_policy_set_aes_cm_128_hmac_sha1_80 crypto_policy_set_aes_cm_128_hmac_sha1_80
 #define srtp_crypto_policy_set_aes_cm_128_hmac_sha1_32 crypto_policy_set_aes_cm_128_hmac_sha1_32
 #define srtp_crypto_policy_set_aes_cm_128_null_auth crypto_policy_set_aes_cm_128_null_auth
 #define srtp_crypto_policy_set_rtcp_default crypto_policy_set_rtcp_default
+#endif
 #endif
 
 namespace fuze {

@@ -35,7 +35,6 @@
  */
 #include "mod_sofia.h"
 #include <switch_stun.h>
-#include "interface/webrtc_neteq_internal.h"
 #include "include/Transport_c.h"
 
 switch_cache_db_handle_t *_sofia_glue_get_db_handle(sofia_profile_t *profile, const char *file, const char *func, int line);

@@ -1,7 +1,19 @@
 #ifndef __WEBRTC_NETEQ_H__
 #define __WEBRTC_NETEQ_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#if OLD_WEBRTC
 #include "interface/webrtc_neteq_internal.h"
+#else
+#include "include/webrtc/typedefs.h"
+/* from: src/interface/webrtc_neteq_if.h */
+typedef void (*resampler_create_cb_t) (uint32_t from_rate, uint32_t to_rate, void *pool, void **resampler);
+typedef uint32_t (*resample_cb_t) (void *resampler, int16_t *src, uint32_t src_len, int16_t *dst);
+#endif
+
 
 typedef void* (*app_memory_alloc_t) (void *pool, uint32_t size);
 
@@ -33,5 +45,42 @@ typedef void (*log_cb_fp)(int16_t level, const char * format, ...);
 
 extern log_cb_fp app_log_cb;
 void WebRtcNetEQ_RegisterLogCB(log_cb_fp log_cb);
+
+WebRtcNetEQ_status_t WebRtcNetEQ_Purge(void *inst);
+WebRtcNetEQ_status_t WebRtcNetEQ_CurrentPacketBufferStatistics(void *inst, int* current_num_packets, int* max_num_packets);
+
+typedef struct {
+  uint16_t current_buffer_size_ms;  // Current jitter buffer size in ms.                                                                                                            
+  uint16_t preferred_buffer_size_ms;  // Target buffer size in ms.                                                                                                                  
+  uint16_t jitter_peaks_found;  // 1 if adding extra delay due to peaky                                                                                                             
+                                // jitter; 0 otherwise.                                                                                                                             
+  uint16_t packet_loss_rate;  // Loss rate (network + late) in Q14.                                                                                                                 
+  uint16_t packet_discard_rate;  // Late loss rate in Q14.                                                                                                                          
+  uint16_t expand_rate;  // Fraction (of original stream) of synthesized                                                                                                            
+                         // audio inserted through expansion (in Q14).                                                                                                              
+  uint16_t speech_expand_rate;  // Fraction (of original stream) of synthesized                                                                                                     
+                                // speech inserted through expansion (in Q14).                                                                                                      
+  uint16_t preemptive_rate;  // Fraction of data inserted through pre-emptive                                                                                                       
+                             // expansion (in Q14).                                                                                                                                 
+  uint16_t accelerate_rate;  // Fraction of data removed through acceleration                                                                                                       
+                             // (in Q14).                                                                                                                                           
+  uint16_t secondary_decoded_rate;  // Fraction of data coming from secondary                                                                                                       
+                                    // decoding (in Q14).                                                                                                                           
+  int32_t clockdrift_ppm;  // Average clock-drift in parts-per-million                                                                                                              
+                           // (positive or negative).                                                                                                                               
+  size_t added_zero_samples;  // Number of zero samples added in "off" mode.                                                                                                        
+  // Statistics for packet waiting times, i.e., the time between a packet                                                                                                           
+  // arrives until it is decoded.                                                                                                                                                   
+  int mean_waiting_time_ms;
+  int median_waiting_time_ms;
+  int min_waiting_time_ms;
+  int max_waiting_time_ms;
+} NetEqNetworkStatistics;
+
+WebRtcNetEQ_status_t WebRtcNetEQ_GetNetworkStatistics(void *inst, NetEqNetworkStatistics *ret_stats);
+
+#ifdef __cplusplus
+} //  extern "C" {
+#endif
 
 #endif

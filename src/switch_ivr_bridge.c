@@ -31,7 +31,6 @@
 
 #include <switch.h>
 #include "interface/webrtc_neteq_if.h"
-#include "interface/webrtc_neteq_internal.h"
 #include "switch_monitor.h"
 
 #define DEFAULT_LEAD_FRAMES 10
@@ -753,10 +752,10 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
                     void *neteq_inst = switch_core_get_neteq_inst(session_a);
                     switch_rtp_update_rtp_stats(chan_a, -1, -1, -1);
                     if (neteq_inst) {
-                        WebRtcNetEQ_NetworkStatistics nwstats;
-                        if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
-                            if (nwstats.currentBufferSize > RTP_EVENT_JB_SIZE_THRESHOLD_MS) {
-                                int val = nwstats.currentBufferSize;
+                        NetEqNetworkStatistics nwstats;
+						if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
+							if (nwstats.current_buffer_size_ms > RTP_EVENT_JB_SIZE_THRESHOLD_MS) {
+								int val = nwstats.current_buffer_size_ms;
                                 switch_core_ioctl_stats(session_a, SET_JB_SIZE, &val);
                                 switch_core_ioctl_stats(session_a, SET_EVENT_LONG_JB, NULL);
                             }

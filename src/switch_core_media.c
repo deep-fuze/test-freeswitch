@@ -39,8 +39,11 @@
 #include <sofia-sip/sdp.h>
 #include <sofia-sip/su.h>
 
+#if 0
 #include "interface/webrtc_neteq_internal.h"
-
+#else
+#include "interface/webrtc_neteq_if.h"
+#endif
 
 static switch_t38_options_t * switch_core_media_process_udptl(switch_core_session_t *session, sdp_session_t *sdp, sdp_media_t *m);
 static void switch_core_media_find_zrtp_hash(switch_core_session_t *session, sdp_session_t *sdp);
@@ -1435,24 +1438,29 @@ static void set_stats(switch_core_session_t *session, switch_media_type_t type, 
         add_stat_double(stats->inbound.mos, "in_mos");
 
         if (switch_rtp_get_webrtc_neteq(engine->rtp_session)) {
-            WebRtcNetEQ_ProcessingActivity stat;
             void *neteq_inst = switch_core_get_neteq_inst(session);
             if (neteq_inst) {
-                WebRtcNetEQ_NetworkStatistics nwstats;
-                WebRtcNetEQ_GetProcessingActivity(neteq_inst, &stat, 0);
+                NetEqNetworkStatistics nwstats;
+				int current_num_packets = 0, max_num_packets = 0;
 
-                add_signed_stat(stat.total_lost_count, "in_skip_packet_count");
-                add_stat(WebRtcNetEQ_MaxBufLen(neteq_inst), "jb_max_qlen");
-                add_signed_stat(stat.accelerate_normal_samples, "neteq_acceleate_samples");
-                add_signed_stat(stat.expand_normal_samples, "neteq_expand_samples");
-                add_signed_stat(stat.preemptive_expand_normal_samples, "neteq_preemptive_expand_samples");
-                add_signed_stat(stat.merge_expand_normal_samples, "neteq_merge_expand_samples");
-                add_signed_stat(stat.total_insert_errors, "neteq_total_insert_errors");
-                add_signed_stat(stat.total_extract_errors, "neteq_total_extract_errors");
+				WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats);
+				WebRtcNetEQ_CurrentPacketBufferStatistics(neteq_inst, &current_num_packets, &max_num_packets);
 
-                if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
-                    add_stat(nwstats.currentBufferSize, "cur_jb_size");
-                }
+				/* TODO: add more stats? */
+
+                //add_signed_stat(nwstats.total_lost_count, "in_skip_packet_count");
+                //add_stat(WebRtcNetEQ_MaxBufLen(neteq_inst), "jb_max_qlen");
+                //add_signed_stat(nwstat.accelerate_rate/256.0, "neteq_acceleate_samples");
+                //add_signed_stat(stat.expand_normal_samples, "neteq_expand_samples");
+                //add_signed_stat(stat.preemptive_expand_normal_samples, "neteq_preemptive_expand_samples");
+                //add_signed_stat(stat.merge_expand_normal_samples, "neteq_merge_expand_samples");
+                //add_signed_stat(stat.total_insert_errors, "neteq_total_insert_errors");
+                //add_signed_stat(stat.total_extract_errors, "neteq_total_extract_errors");
+
+				add_stat(nwstats.current_buffer_size_ms, "cur_jb_size");
+				add_stat(current_num_packets, "current_num_packets");
+				add_stat(max_num_packets, "max_num_packets");
+
             } else  {
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "NULL neteq_inst.\n");
             }
@@ -1672,6 +1680,8 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
         if ((event_trigger == SWITCH_TRUE) && (event & RTP_EVENT_HIGH_CONSECUTIVE_PACKET_LOSS))
             switch_core_media_set_rtp_event(session, RTP_EVENT_HIGH_CONSECUTIVE_PACKET_LOSS, type);
         if (switch_rtp_get_webrtc_neteq(engine->rtp_session)) {
+#if 0
+			/* TODO: add something in here? */
             WebRtcNetEQ_ProcessingActivity neteq_stats;
             void *neteq_inst = switch_core_get_neteq_inst(session);
             if (neteq_inst) {
@@ -1680,6 +1690,7 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
             } else {
                 snprintf(value, sizeof(value), "%d", stats->cumulative_lost);
             }
+#endif
             set_periodic_stats_value(session, RTP_SKIP_COUNT, value, type);
         } else {
             snprintf(value, sizeof(value), "%d", stats->last_period_skip_packet);

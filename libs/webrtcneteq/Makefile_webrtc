@@ -1,0 +1,19 @@
+BASE=../..
+switch_srcdir := $(CURDIR)/../..
+switch_builddir := $(CURDIR)/../..
+GETLIB=cd $(switch_srcdir)/libs && $(SHELL) $(switch_builddir)/build/getlib.sh.in
+
+WEBRTC=webrtc-18252-6294a7e-linux-x64.tar.gz
+WEBRTC_DIR=$(switch_srcdir)/libs/webrtcneteq
+WEBRTC_BUILDDIR=$(switch_builddir)/libs/webrtcneteq/src
+
+$(WEBRTC_DIR)/$(WEBRTC):
+	/usr/bin/wget https://github.com/sourcey/webrtc-precompiled-builds/raw/master/webrtc-18252-6294a7e-linux-x64.tar.gz
+	/bin/tar xvf webrtc-18252-6294a7e-linux-x64.tar.gz
+	#	$(GETLIB) webrtc-18252-6294a7e-linux-x64.tar.gz
+
+$(WEBRTC_DIR)/installed_webrtc: $(WEBRTC_DIR)/$(WEBRTC)
+	cd $(WEBRTC_DIR) && mv $(WEBRTC_DIR)/include $(WEBRTC_BUILDDIR)/
+	touch $(WEBRTC_DIR)/installed_webrtc
+
+all: $(WEBRTC_DIR)/installed_webrtc

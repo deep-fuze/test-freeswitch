@@ -577,7 +577,7 @@ void DtlsCore::InitDtlsCertificate(SSL_CTX*& rpCtx, bool bServer)
     // rpCtx could be set if some other thread accessed right before
     if (!rpCtx) {
         SSL_CTX* p_ctx = SSL_CTX_new(bServer ?
-#ifndef FREE_SWITCH
+#ifndef OPAL
                                      DTLS_server_method() :
                                      DTLS_client_method());
 #else
