@@ -56,6 +56,7 @@
 //#include "include/third_party/libsrtp/crypto/include/crypto_kernel.h"
 //#include "include/third_party/libsrtp/include/srtp_priv.h"
 //#include "include/third_party/libsrtp/include/rtp.h"
+#include "openssl/rand.h"
 #include <srtp_priv.h>
 #include <switch_ssl.h>
 #include "include/Transport_c.h"

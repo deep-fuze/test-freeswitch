@@ -272,8 +272,9 @@ SWITCH_DECLARE(int) switch_core_gen_certs(const char *prefix)
 		}
 	}
 
+#ifndef HAVE_BORINGSSL
 	CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
-		
+#endif
 	//bio_err=BIO_new_fp(stderr, BIO_NOCLOSE);
 		
 	mkcert(&x509, &pkey, 1024, 0, 36500);
