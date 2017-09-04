@@ -153,37 +153,6 @@ static void* memory_alloc_cb(void *pool, uint32_t size)
        return switch_core_alloc((switch_memory_pool_t *) pool, size);
 }
         
-static uint32_t freeswitch_resample
-        (void *resampler, int16_t *src, uint32_t src_len, int16_t *dst)
-{
-    switch_audio_resampler_t *read_resampler = (switch_audio_resampler_t *) resampler;
-    uint32_t dst_len;
-
-    if (!resampler) {
-        memcpy(dst, src, src_len * 2);
-        return src_len;
-    }
-    
-    switch_resample_process(read_resampler, src, src_len);
-    dst_len = read_resampler->to_len * 2;
-    memcpy(dst, read_resampler->to, dst_len);
-
-    return read_resampler->to_len;
-}
-
-static void resampler_create(uint32_t from_rate, uint32_t to_rate, void *pool, void **resampler)
-{
-    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, 
-                    "WebrtcNeteq: Creating resampler from=%u to=%u.\n",
-                    from_rate, to_rate);
-    if (switch_resample_create((switch_audio_resampler_t **) resampler, from_rate, to_rate, 
-            SWITCH_RECOMMENDED_BUFFER_SIZE, SWITCH_RESAMPLE_QUALITY, 1) != SWITCH_STATUS_SUCCESS) {
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error in creating resampler. from_rate=%u to_rate=%u.\n", from_rate, to_rate);
-        *resampler = NULL;
-        return;
-    }
-}
-
 static uint16_t purge_jitterbuffer(switch_core_session_t *session, switch_frame_t **frame)
 {
 	WebRtcNetEQ_Purge(switch_core_get_neteq_inst(session));
@@ -686,21 +655,14 @@ read_again:
                      * neteq_inst to fetch stats at the end. By this time codec could have been
                      * destroyed.
                      */
-                    session->neteq_resampler = NULL;
                     if (WebRtcNetEQ_Init_inst(&session->neteq_inst, memory_alloc_cb, session->pool,
-                                              codec->implementation->decoder(codec),
                                               codec->implementation->actual_samples_per_second,
                                               read_frame->payload, codec->implementation->iananame,
-                                              codec->implementation->microseconds_per_packet / 1000,
-                                              (void **) (&session->neteq_resampler),
-                                              resampler_create, freeswitch_resample) != WebRtcNetEQ_SUCCESS) {
+                                              codec->implementation->microseconds_per_packet / 1000) != WebRtcNetEQ_SUCCESS) {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                           "ERROR: WebRtcNetEQ_Init_inst() for codec=%s:%d.\n",
                                           codec->implementation->iananame, codec->implementation->ianacode);
                         *frame = NULL;
-                        if (session->neteq_resampler) {
-                            switch_resample_destroy(&session->neteq_resampler);
-                        }
                         goto done;
                     } else {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
@@ -1367,22 +1329,15 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
                          * Lets pass the session->pool instead of codec's one because we will access
                          * neteq_inst to fetch stats at the end. By this time codec could have been 
                          * destroyed.
-                         */
-                        session->neteq_resampler = NULL;
+						 */
                         if (WebRtcNetEQ_Init_inst(&session->neteq_inst, memory_alloc_cb, session->pool,
-                                                  codec->implementation->decoder(codec),
                                                   codec->implementation->actual_samples_per_second,
                                                   read_frame->payload, codec->implementation->iananame,
-                                                  codec->implementation->microseconds_per_packet / 1000,
-                                                  (void **) (&session->neteq_resampler),
-                                                  resampler_create, freeswitch_resample) != WebRtcNetEQ_SUCCESS) {
+                                                  codec->implementation->microseconds_per_packet / 1000) != WebRtcNetEQ_SUCCESS) {
                             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                               "ERROR: WebRtcNetEQ_Init_inst() for codec=%s:%d.\n",
                                               codec->implementation->iananame, codec->implementation->ianacode);
                             *frame = NULL;
-                            if (session->neteq_resampler) {
-                                switch_resample_destroy(&session->neteq_resampler);
-                            }
                             goto done;
                         }
                     }

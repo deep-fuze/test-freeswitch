@@ -4,7 +4,7 @@ AUTOMAKE_OPTIONS = gnu subdir-objects
 PREFIX=$(prefix)
 NAME = webrtcneteq
 
-WEBRTC_LIB_DIR = lib/x64/Debug
+WEBRTC_LIB_DIR = lib/x64/Release
 WEBRTC_LIBS = 
 #-lwebrtc
 #-lboringssl -lfield_trial_default -lprotobuf_full -lprotoc_lib -lwebrtc -lcpu_features_linux -lmetrics_default -lprotobuf_lite -lsystem_wrappers

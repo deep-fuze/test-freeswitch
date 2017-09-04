@@ -134,7 +134,7 @@ else
 CORE_LIBS +=  libs/apr-util/libaprutil-1.la
 endif
 
-WEBRTC_LIB_DIR = libs/webrtcneteq/lib/x64/Debug
+WEBRTC_LIB_DIR = libs/webrtcneteq/lib/x64/Release
 #WEBRTC_LIBS = -lboringssl -lfield_trial_default -lprotobuf_full -lprotoc_lib -lwebrtc -lcpu_features_linux -lmetrics_default -lprotobuf_lite -lsystem_wrappers
 
 CORE_LIBS += libs/webrtcneteq/libwebrtcneteq.la libs/spandsp/src/libspandsp.la libs/opus-1.2.1/libopus.la 

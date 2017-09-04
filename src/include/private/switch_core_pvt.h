@@ -182,7 +182,6 @@ struct switch_core_session {
         int (*log_check) (const char *key);
 
         void *neteq_inst;
-        switch_audio_resampler_t *neteq_resampler;
         uint32_t last_rtp_seq;
         int zero_read_count;
         int jb_size_before_zero;

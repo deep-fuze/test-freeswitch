@@ -1346,10 +1346,6 @@ SWITCH_DECLARE(void) switch_core_session_reset(switch_core_session_t *session, s
 	switch_clear_flag(session, SSF_WARN_TRANSCODE);
 	switch_ivr_deactivate_unicast(session);
 	switch_channel_clear_flag(channel, CF_BREAK);
-
-	if (session->neteq_resampler) {
-		switch_resample_destroy(&session->neteq_resampler);
-	}
 }
 
 
@@ -3138,7 +3134,7 @@ SWITCH_DECLARE(int) switch_core_log_check(switch_core_session_t *session, const 
 
 SWITCH_DECLARE(void *) switch_core_get_neteq_inst(switch_core_session_t *session)
 {
-	return session ? WebRtcNetEQ_Inst(session->neteq_inst) : NULL;
+	return session ? session->neteq_inst : NULL;
 }
 
 SWITCH_DECLARE(switch_status_t) switch_core_register_api(switch_memory_pool_t *pool)

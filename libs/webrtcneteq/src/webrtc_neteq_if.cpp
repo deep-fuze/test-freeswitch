@@ -42,15 +42,14 @@ typedef struct {
   uint16_t ts_increment;
   uint16_t samples_per_10ms;
   webrtc::NetEq::Config config;
+  bool receiving;
 } neteq_inst_t;
 
 /*
  * Create the jitter buffer
  */
 WebRtcNetEQ_status_t WebRtcNetEQ_Init_inst(void **inst, app_memory_alloc_t alloc_cb, void *mempool, 
-					   void *decoder, uint32_t rate, uint32_t payload, 
-					   const char *codecname, uint16_t packet_ms, void **resampler,
-					   resampler_create_cb_t resampler_create_cb, resample_cb_t resample_cb)
+					   uint32_t rate, uint32_t payload, const char *codecname, uint16_t packet_ms)
 {
   neteq_inst_t *neteq_inst;
 
@@ -114,6 +113,7 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Init_inst(void **inst, app_memory_alloc_t alloc
   neteq_inst->local_seqno = neteq_inst->last_rd_seqno = 0;
   neteq_inst->pkt_ms = packet_ms;
   neteq_inst->rate = rate;
+  neteq_inst->receiving = false;
   if (payload == 9) {
     neteq_inst->ts_increment = neteq_inst->pkt_ms * 8;
     neteq_inst->samples_per_10ms = 160;
@@ -147,7 +147,7 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Insert(void *inst, int8_t *payload, uint32_t pa
   
   struct timespec spec;
   uint32_t now_in_ms, time_ms;
-  int ret;
+  int ret = 0;
 
   header.markerBit = marker;
   header.payloadType = payload_type;
@@ -167,14 +167,21 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Insert(void *inst, int8_t *payload, uint32_t pa
   time_ms = (spec.tv_sec) * 1000 + (spec.tv_nsec) / 1000000 ;
   now_in_ms = (time_ms & kMaskTimestamp) * (neteq_inst->ts_increment / 10);
 
-  ret = neteq->InsertPacket(header, rtc::ArrayView<const uint8_t>((const uint8_t*)payload,payload_len), now_in_ms);
+  if (payload_len <= (neteq_inst->samples_per_10ms*8)) {
+    ret = neteq->InsertPacket(header, rtc::ArrayView<const uint8_t>((const uint8_t*)payload, payload_len), now_in_ms);
+  } else {
+    app_log_cb(3, "WebRtcNetEQ_Insert Error payload len too long %d\n", payload_len);
+  }
 
   if (ret != 0) {
     int errorCode = neteq->LastError();
     app_log_cb(3, "WebRtcNetEQ_Insert Error bad insert code: %d ret:%d\n", errorCode, ret);
-  } else {
+  }
+#ifdef DEBUG
+  else {
     app_log_cb(1, "WebRtcNetEQ_Inserted: inserted packet pt:%d seq:%u bytes:%d \n", payload_type, seqno, payload_len);
   }
+#endif
 
   return CONVERT_STATUS(ret);
 }
@@ -221,15 +228,10 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Extract(void *inst, int8_t *pcm_data, uint32_t 
 
     if (ret == 0) {
       if (!muted) {
-	// opus:
-	// audio_frame.samples_per_channel_ = 480
-	// audio_frame.sample_rate_hz_ = 48000
-	// audio_frame.num_channels_ = 1
-	// audio_frame.speech_type_ = 0
-	// audio_frame.vad_activity_ = 2
 	const int8_t *data = (int8_t *)audio_frame.data();
 	if (audio_frame.sample_rate_hz_ == neteq_inst->rate) {
 	  memcpy(pcm_data, data, audio_frame.samples_per_channel_*2);
+	  neteq_inst->receiving = true;
 	} else {
 	  app_log_cb(2, "WebRtcNetEQ_Extract extract s/c=%lld r=%d (actual %d) nc=%lld t=%d va=%d\n",
 		     audio_frame.samples_per_channel_, audio_frame.sample_rate_hz_, neteq_inst->rate,
@@ -267,12 +269,6 @@ log_cb_fp app_log_cb = NULL;
 void WebRtcNetEQ_RegisterLogCB(log_cb_fp log_cb)
 {
   app_log_cb = log_cb;
-}
-
-void *WebRtcNetEQ_Inst(void *inst)
-{
-  neteq_inst_t *neteq_inst = (neteq_inst_t *)inst;
-  return (neteq_inst) ? neteq_inst->main_inst : NULL;
 }
 
 int WebRtcNetEQ_PlayoutPause(void *inst, int on)
@@ -317,7 +313,9 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Purge(void *inst)
     return WebRtcNetEQ_ERROR;
   }
 
+  app_log_cb(1, "WebRtcNetEQ_Purge before FlushBuffers\n");
   neteq->FlushBuffers();
+  app_log_cb(1, "WebRtcNetEQ_Purge after FlushBuffers\n");
 
   return CONVERT_STATUS(0);
 }
@@ -338,9 +336,12 @@ WebRtcNetEQ_status_t WebRtcNetEQ_CurrentPacketBufferStatistics(void *inst, int* 
     return WebRtcNetEQ_ERROR;
   }
 
-#if 0
-  neteq->PacketBufferStatistics(current_num_packets, max_num_packets);
-#endif
+  *current_num_packets = 0;
+  *max_num_packets = 0;
+
+  if (neteq_inst->receiving) {
+    neteq->PacketBufferStatistics(current_num_packets, max_num_packets);
+  }
 
   return CONVERT_STATUS(0);
 }
@@ -362,17 +363,34 @@ WebRtcNetEQ_status_t WebRtcNetEQ_GetNetworkStatistics(void *inst, NetEqNetworkSt
   }
 
   webrtc::NetEqNetworkStatistics stats;
-  int ret;
+  int ret = 0;
 
-#if 0
-  ret = neteq->NetworkStatistics(&stats);
-  if (!ret) {
-    memcpy(ret_stats, &stats, sizeof(NetEqNetworkStatistics));
+  if (neteq_inst->receiving) {
+    ret = neteq->NetworkStatistics(&stats);
+    if (!ret) {
+      memcpy(ret_stats, &stats, sizeof(NetEqNetworkStatistics));
+    }
   }
-#endif
 
   return CONVERT_STATUS(ret);
 }
 
+void WebRtcNetEQ_Destroy(void *inst)
+{
+  neteq_inst_t *neteq_inst = (neteq_inst_t *)inst;
 
+  if (inst == NULL) {
+    app_log_cb(3, "WebRtcNetEQ_Destroy Error inst == %d\n", 0);
+    return;
+  }
 
+  webrtc::NetEq *neteq = (webrtc::NetEq *)neteq_inst->main_inst;
+
+  if (neteq == NULL) {
+    app_log_cb(3, "WebRtcNetEQ_Destroy Error neteq == %d\n", 0);
+    return;
+  }
+
+  delete neteq;
+  delete neteq_inst;
+}
