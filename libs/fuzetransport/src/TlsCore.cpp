@@ -497,6 +497,8 @@ uint32_t TlsCore::ProcessData(uint8_t* pData, uint32_t dataLen, ProcessType type
             uint8_t* p_buf    = sp_output->getBuf();
             uint32_t buf_size = sp_output->size()-1;
             
+#define BIO_get_flags(b) BIO_test_flags(b, ~(0x0))
+
             int read = BIO_read(p_out_bio, p_buf, buf_size);
             if (read < 0) {
                 if (!BIO_should_retry(p_out_bio)) {
@@ -691,8 +693,8 @@ bool DtlsCore::ClientHelloVerified()
         return true;
     }
 #else
-    if (pSSL_->d1->listen == 0 &&
-        pSSL_->state == SSL3_ST_SW_SRVR_HELLO_A) {
+    if (
+        SSL_get_state(pSSL_) == SSL3_ST_SW_SRVR_HELLO_A) {
         return true;
     }
 #endif
@@ -702,7 +704,7 @@ bool DtlsCore::ClientHelloVerified()
 const char* DtlsCore::GetSelectSrtpProfile()
 {
     const char* p_name = "";
-    if (SRTP_PROTECTION_PROFILE* p = SSL_get_selected_srtp_profile(pSSL_)) {
+    if (const SRTP_PROTECTION_PROFILE* p = SSL_get_selected_srtp_profile(pSSL_)) {
         p_name = p->name;
     }
         

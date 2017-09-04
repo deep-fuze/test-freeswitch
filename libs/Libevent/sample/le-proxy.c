@@ -28,6 +28,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
+#include <openssl/evp.h>
 
 static struct event_base *base;
 static struct sockaddr_storage listen_on_addr;
@@ -256,7 +257,7 @@ main(int argc, char **argv)
 		SSL_library_init();
 		ERR_load_crypto_strings();
 		SSL_load_error_strings();
-		OpenSSL_add_all_algorithms();
+		// OpenSSL_add_all_algorithms();
 		r = RAND_poll();
 		if (r == 0) {
 			fprintf(stderr, "RAND_poll() failed.\n");

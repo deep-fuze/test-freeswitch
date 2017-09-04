@@ -86,6 +86,8 @@ VERSION_INFO = 3:0:0
 # is user-visible, and so we can pretty much guarantee that release
 # series won't be binary-compatible.
 
+DEFAULT_INCLUDES=-I../webrtcneteq/src/include/third_party/boringssl/src/include -I. -I../../webrtcneteq/src/include/third_party/boringssl/src/include
+
 if INSTALL_LIBEVENT
 dist_bin_SCRIPTS = event_rpcgen.py
 endif
@@ -218,7 +220,7 @@ NO_UNDEFINED =
 MAYBE_CORE =
 endif
 
-GENERIC_LDFLAGS = -version-info $(VERSION_INFO) $(RELEASE) $(NO_UNDEFINED)
+GENERIC_LDFLAGS = -version-info $(VERSION_INFO) $(RELEASE) $(NO_UNDEFINED) -L../webrtcneteq/lib/x64/Release -lboringssl -lwebrtc
 
 libevent_la_SOURCES = $(CORE_SRC) $(EXTRAS_SRC)
 libevent_la_LIBADD = @LTLIBOBJS@ $(SYS_LIBS)
@@ -241,7 +243,7 @@ libevent_extra_la_LDFLAGS = $(GENERIC_LDFLAGS)
 if OPENSSL
 libevent_openssl_la_SOURCES = bufferevent_openssl.c
 libevent_openssl_la_LIBADD = $(MAYBE_CORE) $(OPENSSL_LIBS)
-libevent_openssl_la_LDFLAGS = $(GENERIC_LDFLAGS)
+libevent_openssl_la_LDFLAGS = $(GENERIC_LDFLAGS) -L../webrtcneteq/lib/x64/Release -lboringssl
 libevent_openssl_la_CPPFLAGS = $(AM_CPPFLAGS) $(OPENSSL_INCS)
 endif
 

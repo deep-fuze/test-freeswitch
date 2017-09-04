@@ -6,9 +6,11 @@ NAME = fuzetransport
 
 AM_CFLAGS    = -std=c++0x $(new_AM_CFLAGS) -Wno-deprecated -I./src -I./src/core -I./src/polling -I./src/msg -I./include -I../Libevent/include -I../srtp/include -I../srtp/crypto/include
 AM_CPPFLAGS  = $(AM_CFLAGS)
-AM_LDFLAGS   = $(new_AM_LDFLAGS) -L.
+AM_LDFLAGS   = $(new_AM_LDFLAGS) -L. -L../webrtcneteq/lib/x64/Release -lboringssl -lwebrtc
 
 DEFS = @DEFS@ -DSTD_SHARED_PTR -DNO_FUZECORE -DFREE_SWITCH
+
+DEFAULT_INCLUDES=-I../webrtcneteq/src/include/third_party/boringssl/src/include -I.
 
 lib_LTLIBRARIES = libfuzetransport.la 
 libfuzetransport_la_SOURCES = src/core/Log.cpp \

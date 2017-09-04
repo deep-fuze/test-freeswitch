@@ -36,6 +36,8 @@ AM_LDFLAGS  = $(SWITCH_AM_LDFLAGS) $(AM_LIBAPR_LDFLAGS) $(AM_LIBAPU_LDFLAGS)
 
 DEFAULT_SOUNDS=en-us-callie-8000
 
+DEFAULT_INCLUDES=-I$(switch_srcdir)/libs/webrtcneteq/src/include/third_party/boringssl/src/include -I. -I$(switch_srcdir)/src/include
+
 .INTERMEDIATE: -ldl -liconv -lpthread
 
 .DEFAULT: $(switch_builddir)/modules.conf src/mod/modules.inc
