@@ -1241,7 +1241,7 @@ void ConnectionImpl::OnStatReceived(Buffer::Ptr spStat)
     if (r_data.seq_ != seq) {
         WLOG("Stat Sequence mismatch - expected " <<
              r_data.seq_ << ", received: " << seq);
-        r_data.seq_ = seq;
+        r_data.seq_ = seq+1;
     }
     
     // measure the time of jitter

@@ -293,11 +293,12 @@ int GetIPType(const char* pIP)
     addrinfo* p_res = 0;
 
     int ret = getaddrinfo(pIP, 0, &hint, &p_res);
-    if (ret) {
-        return AF_INET;
-    }
     
-    return p_res->ai_family;
+    int type = (ret ? AF_INET : p_res->ai_family);
+    
+    if (p_res) freeaddrinfo(p_res);
+
+    return type;
 }
 
 uint32_t GetIPNumber(const char* pIP)
@@ -347,10 +348,6 @@ vector<string> GetAddrInfo(const string& rAddress)
                         }
                     }
                 }
-            }
-            
-            if (ai) {
-                freeaddrinfo(ai);
             }
         }
         else {
@@ -403,6 +400,8 @@ vector<string> GetAddrInfo(const string& rAddress)
             }
 #endif
         }
+        
+        if (ai) freeaddrinfo(ai);
     }
     
     return result;
@@ -491,6 +490,8 @@ string IPv4toIPv6(const string& rIPv4)
     else {
         _ELOG_("failed " << gai_strerror(err));
     }
+    
+    if (p_res) freeaddrinfo(p_res);
 #endif
     
     return ipv6;

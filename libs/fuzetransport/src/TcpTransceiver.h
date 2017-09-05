@@ -151,6 +151,9 @@ private:
     TlsCore::Ptr       spTlsCore_;  // stucture to handle TLS connection
     ConnectInfo::Ptr   spConnect_;  // shared_ptr of HTTP connect stuff
     
+    bool               bTypeCheck_;
+    bool               bRealTime_;
+    
 private: // TCP frame mode
     static const uint32_t MAX_MTU_SIZE = 18000; // only when DataOverTls
                                                 // TLS can't exceed 18432B

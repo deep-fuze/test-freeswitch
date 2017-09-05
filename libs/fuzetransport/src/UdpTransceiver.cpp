@@ -71,7 +71,7 @@ void UdpTransceiver::Reset()
     // Workaround the thread race condition between app and libevent
     // until we implement UDP sendQ_
     MutexLock scoped(&qlock_);
-    
+
     if (IsActive()) {
         MLOG("ACTIVE -> ZOMBIE");
         SetZombie();
@@ -90,9 +90,9 @@ void UdpTransceiver::Reset()
             event_free(pWriteEvent_);
         }
         pWriteEvent_ = 0;
-        
+
         if (socket_ != INVALID_SOCKET) {
-            
+
             if (TransportImpl* p = TransportImpl::GetInstance()) {
                 if (flowID_ != 0) {
                     p->UnsetQoSTag(socket_, flowID_);
@@ -112,7 +112,7 @@ void UdpTransceiver::Reset()
                     uint16_t local_port = addr.Port();
                     MLOG("socket interrogation result: " << addr.IPString() <<
                          ":" << local_port);
-                    
+
                     if (evutil_closesocket(socket_) == 0) {
                         MLOG("socket is closed - reserving the port again"
                              " so that it is not used.");
@@ -134,7 +134,7 @@ void UdpTransceiver::Reset()
                 }
             }
         }
-        
+
         socket_ = INVALID_SOCKET;
 
         connectedUdp_    = false;
@@ -147,10 +147,10 @@ void UdpTransceiver::Reset()
         writeAdded_      = false;
         reservedPort_    = false;
         dropCnt_         = 0;
-        
+
         queue<Buffer::Ptr> empty;
         swap(sendQ_, empty);
-        
+
         lastNewRemoteAddr_.Clear();
 
         remoteIP_.erase();
@@ -180,9 +180,9 @@ bool UdpTransceiver::Start()
         ELOG("Connection is not linked");
         return false;
     }
-    
+
     TransportImpl* p_tp = TransportImpl::GetInstance();
-    
+
     //
     // if local address is not available but remote address is,
     // this means this is connected UDP we are creating. Otherwise,
@@ -191,7 +191,7 @@ bool UdpTransceiver::Start()
     // for normal UDP mode.
     //
     Address addr = pConn_->GetLocalAddress();
-    
+
     if (addr.Valid() == false) {
         addr = pConn_->GetRemoteAddress();
         if (addr.Valid()) {
@@ -202,9 +202,9 @@ bool UdpTransceiver::Start()
             return false;
         }
     }
-    
+
     bool bResult = false;
-    
+
     if (!connectedUdp_) {
         if (PortReserve::Ptr sp_rsv = p_tp->GetReservedPort(addr.Port())) {
             MLOG("Found reserved port: " << addr.Port() <<
@@ -214,7 +214,7 @@ bool UdpTransceiver::Start()
             bResult = true;
         }
     }
-    
+
     if (socket_ == INVALID_SOCKET) {
         socket_ = socket(addr.IPType(), SOCK_DGRAM, IPPROTO_UDP);
         if (socket_ == INVALID_SOCKET) {
@@ -222,7 +222,7 @@ bool UdpTransceiver::Start()
             return false;
         }
     }
-    
+
     if (!connectedUdp_) {
         // if port was not reserved then we would not have port bound
         if (bResult == false) {
@@ -233,12 +233,12 @@ bool UdpTransceiver::Start()
     }
     else {
         if (::connect(socket_, addr.SockAddr(), addr.SockAddrLen()) == 0) {
-            
+
             // if connected UDP is used then get local address
             // that is set by operating system
             sockaddr_storage local;
             ev_socklen_t     len = sizeof(sockaddr_storage);
-            
+
             if (getsockname(socket_, (sockaddr*)&local, &len) == 0) {
                 Address local_addr(local);
                 MLOG("local address: " << local_addr);
@@ -248,7 +248,7 @@ bool UdpTransceiver::Start()
             else {
                 ELOG("Error at getsockname()");
             }
-            
+
             bResult = true;
         }
     }
@@ -257,19 +257,19 @@ bool UdpTransceiver::Start()
         DLOG("socket " << socket_ <<
              (connectedUdp_ ? " connected" : " bound") <<
              " to " << addr);
-        
+
         evutil_make_socket_nonblocking(socket_);
         evutil_make_listen_socket_reuseable(socket_);
-        
+
         p_tp->SetQoSTag(socket_, pConn_, flowID_);
-        
+
         if (pConn_->IsPayloadType(Connection::SIP)) {
             MLOG("adjusting recv buf size to 30000");
             recvBufSize_ = 30000;
         }
 
         uint16_t timeout = 0;
-        
+
         if (p_tp->IsAppServer() == false) {
             if (pConn_->IsFallback()) {
                 if (pConn_->IsPayloadType(Connection::RTP)) {
@@ -278,7 +278,7 @@ bool UdpTransceiver::Start()
                 if (pConn_->IsPayloadType(Connection::RTCP)) {
                     timeout = RTCP_TIMEOUT;
                 }
-                
+
                 if (timeout != 0 && p_tp->IsUdpBlocked()) {
                     timeout /= 5;
                     MLOG("UDP seems blocked - shorten timeout to " << timeout << " ms");
@@ -296,7 +296,7 @@ bool UdpTransceiver::Start()
                 MLOG("Disabling read timeout as fallback is disabled");
             }
         }
-        
+
         bResult = CreateLibEvent(timeout);
     }
     else {
@@ -305,7 +305,7 @@ bool UdpTransceiver::Start()
              " to " << addr << " (" <<
              evutil_socket_error_to_string(e) << ") errno=" << e);
     }
-    
+
     return bResult;
 }
 
@@ -317,35 +317,35 @@ bool UdpTransceiver::CreateLibEvent(uint16_t timeout)
         event_free(pReadEvent_);
         pReadEvent_ = 0;
     }
-    
+
     if (TransportImpl* p = TransportImpl::GetInstance()) {
-        
+
         short what = EV_READ|EV_PERSIST;
-        
+
         // if this is client, then trigger timeout
         if (timeout > 0) {
             MLOG("Setting socket read timeout as " << timeout << "ms");
             what |= EV_TIMEOUT;
         }
-        
+
         bResult = p->CreateEvent(pReadEvent_, socket_, what,
                                  OnLibEvent, this, timeout);
     }
-    
+
     return bResult;
 }
-    
+
 void UdpTransceiver::OnLibEvent(evutil_socket_t sock, short what, void* pArg)
 {
     _DLOG_("socket " << sock << " has event " <<
            (what & EV_READ ? "READ" : "") <<
            (what & EV_WRITE ? "WRITE" : ""));
-    
+
     if (UdpTransceiver* p = reinterpret_cast<UdpTransceiver*>(pArg)) {
         if (p->socket_ != sock) {
             return;
         }
-        
+
         try {
             if (what & EV_READ) {
                 p->OnReadEvent();
@@ -372,13 +372,13 @@ bool UdpTransceiver::Send(Buffer::Ptr spBuffer)
         ELOG(GetStatusString());
         return false;
     }
-    
+
     if ((socket_ == INVALID_SOCKET) || !pConn_) {
         return false;
     }
-    
+
     MutexLock scoped(&qlock_);
-    
+
     if (sendQ_.size() > Q_SIZE) {
         if (!(dropCnt_++ % 100)) {
             MLOG("packet dropped (cnt: " << dropCnt_ <<
@@ -386,9 +386,9 @@ bool UdpTransceiver::Send(Buffer::Ptr spBuffer)
         }
         return false;
     }
-    
+
     sendQ_.push(spBuffer);
-    
+
     // trigger write operation if not done yet for first time
     if (!pWriteEvent_) {
         if (TransportImpl* p = TransportImpl::GetInstance()) {
@@ -405,24 +405,13 @@ bool UdpTransceiver::Send(Buffer::Ptr spBuffer)
             writeAdded_ = true;
         }
     }
-    
+
     return true;
 }
 
 bool UdpTransceiver::Send(const uint8_t* buf, size_t size)
 {
-    if (IsActive() == false) {
-        ELOG(GetStatusString());
-        return false;
-    }
-
-    if ((socket_ == INVALID_SOCKET) || !pConn_) {
-        return false;
-    }
-
-    SendPayload((char*)buf, size, pConn_->GetRemoteAddress());
-    
-    return true;
+    return Send(buf, size, pConn_->GetRemoteAddress());
 }
 
 bool UdpTransceiver::Send(const uint8_t* buf, size_t size, const fuze::Address& rRemote)
@@ -444,9 +433,9 @@ bool UdpTransceiver::Send(const uint8_t* buf, size_t size, const fuze::Address& 
 void UdpTransceiver::OnWriteEvent()
 {
     while (true) {
-        
+
         Buffer::Ptr sp_buf;
-        
+
         {
             MutexLock scoped(&qlock_);
             if (sendQ_.empty()) {
@@ -461,9 +450,9 @@ void UdpTransceiver::OnWriteEvent()
                 sendQ_.pop();
             }
         }
-        
+
         Address remote;
-        
+
         if (!connectedUdp_) {
             // first set connection remote as default remote address
             if (pConn_->IsRemotePerBuffer()) {
@@ -477,7 +466,7 @@ void UdpTransceiver::OnWriteEvent()
                 remote = pConn_->GetRemoteAddress();
             }
         }
-        
+
         SendPayload((char*)sp_buf->getBuf(), sp_buf->size(), remote);
     }
 }
@@ -529,7 +518,7 @@ void UdpTransceiver::SendPayload(char* pData, long dataLen, const Address& rRemo
         }
     }
 }
-    
+
 void UdpTransceiver::OnReadEvent()
 {
 //#define FALLBACK_TEST
@@ -543,24 +532,24 @@ void UdpTransceiver::OnReadEvent()
         return;
     }
 #endif
-    
+
     if (IsActive() == false) {
         ELOG(GetStatusString());
         return;
     }
-    
+
     if (connID_ == INVALID_ID || !pConn_) {
         ELOG("Failed to get active connection")
         return;
     }
-    
+
     long udp_bytes = -1;
-    
+
     do {
         sockaddr_storage saddr;
-        
+
         NetworkBuffer::Ptr sp_packet = pConn_->GetBuffer(recvBufSize_);
-        
+
 		char*    p_buf = (char*)sp_packet->getBuf();
 		uint32_t size  = sp_packet->size();
 
@@ -568,15 +557,15 @@ void UdpTransceiver::OnReadEvent()
             udp_bytes = recv(socket_, p_buf, size, 0);
         }
         else {
-            ev_socklen_t slen = sizeof(sockaddr_storage);            
+            ev_socklen_t slen = sizeof(sockaddr_storage);
             udp_bytes = recvfrom(socket_, p_buf, size, 0,
                                  (sockaddr*)&saddr, &slen);
         }
-        
+
         if (udp_bytes > 0) {
-            
+
             pConn_->OnBytesRecv((uint32_t)udp_bytes);
-            
+
             if (pConn_->IsPayloadType(Connection::STUN)) {
                 if (stun::IsStun(p_buf, udp_bytes)) {
                     MLOG(toStr(stun::GetType(p_buf, udp_bytes)) << " " <<
@@ -585,20 +574,20 @@ void UdpTransceiver::OnReadEvent()
                     stun::PrintStun(p_buf, udp_bytes);
                 }
             }
-            
+
             if (!bConnected_) {
                 // set active timer now
                 if ((TransportImpl::GetInstance()->IsAppServer() == false) &&
                     TransportImpl::GetInstance()->IsUdpBlocked()) {
 
                     MLOG("Network seemed blocking UDP but it wasn't");
-                    
+
                     uint16_t new_timeout = 0;
-                    
+
                     if (pConn_->IsPayloadType(Connection::RTP)) {
                         new_timeout = RTP_TIMEOUT;
                     }
-                    
+
                     if (pConn_->IsPayloadType(Connection::RTCP)) {
                         new_timeout = RTCP_TIMEOUT;
                     }
@@ -608,14 +597,14 @@ void UdpTransceiver::OnReadEvent()
                         CreateLibEvent(new_timeout);
                     }
                 }
-                
+
                 bConnected_ = true;
             }
-            
+
             sp_packet->setSize((uint32_t)udp_bytes);
-            
+
             Address recv_addr(saddr);
-            
+
             // for connected UDP, application already knows the remote as it was
             // the requirement of doing connected udp
             if (pConn_->IsRemotePerBuffer()) {
@@ -626,15 +615,15 @@ void UdpTransceiver::OnReadEvent()
                 if (!HandleRemoteChange(recv_addr)) {
                     return; // ignoring invalid remote address
                 }
-                
+
                 sp_packet->remoteIP_   = remoteIP_;
                 sp_packet->remotePort_ = remotePort_;
                 sp_packet->changed_    = true;
             }
-            
+
             // count the number of valid packet received
             recvCnt_++;
-            
+
             pConn_->OnData(sp_packet);
         }
         else {
@@ -643,7 +632,7 @@ void UdpTransceiver::OnReadEvent()
                 ELOG("Error: " << error << " (" <<
                      evutil_socket_error_to_string(error) << ")");
                 event_del(pReadEvent_);
-                
+
                 {
                     MutexLock scoped(&qlock_);
                     if (writeAdded_ && pWriteEvent_) {
@@ -651,9 +640,9 @@ void UdpTransceiver::OnReadEvent()
                         writeAdded_ = false;
                     }
                 }
-                
+
                 const char* p_reason = "Unknown";
-                
+
                 EventType type = ET_FAILED;
                 if (EVUTIL_ERR_CONNECT_REFUSED(error)) {
                     type = ET_REFUSED;
@@ -662,7 +651,7 @@ void UdpTransceiver::OnReadEvent()
                 else if (EVUTIL_ERR_CONNECT_RESET(error)) {
                     p_reason = "ICMP Unreachable";
                 }
-                
+
                 pConn_->OnEvent(type, p_reason);
             }
         }
@@ -678,11 +667,11 @@ bool UdpTransceiver::HandleRemoteChange(const Address& rRecvAddr)
     //   2) current stream stopped for at least 2 seconds
     //      and new stream is streaming more than 2 seconds
     // otherwise ignore packets with different source address
-    
+
     // for client we shouldn't see this happening but
     // some wifi NAT device is doing weird forwarding
-    Address remote = pConn_->GetRemoteAddress();
-    
+    const Address& remote = pConn_->GetRemoteAddress();
+
     if (TransportImpl::GetInstance()->IsAppServer() == false) {
         if ((++remoteChangeCnt_ % 100 == 1) ||
             (remoteChangeCnt_ <= 10)) {
@@ -692,9 +681,9 @@ bool UdpTransceiver::HandleRemoteChange(const Address& rRecvAddr)
         }
         return false;
     }
-    
+
     bool change_remote_address = false;
-    
+
     // 1) this is very first packet
     if (recvCnt_ == 0) {
         change_remote_address = true;
@@ -705,7 +694,7 @@ bool UdpTransceiver::HandleRemoteChange(const Address& rRecvAddr)
             lastRecvCnt_ = recvCnt_;
             checkTime_   = GetTimeMs();
         }
-        
+
         // if current steam is dead for 2 seconds
         // then restart with new remote address
         if ((remoteChangeCnt_ % 20) == 0) {
@@ -726,7 +715,7 @@ bool UdpTransceiver::HandleRemoteChange(const Address& rRecvAddr)
             }
         }
     }
-    
+
     if (change_remote_address) {
         MLOG("Remote Address adjusted by NAT - " <<
              rRecvAddr << " (current " << remote << ")");
@@ -744,13 +733,13 @@ bool UdpTransceiver::HandleRemoteChange(const Address& rRecvAddr)
         }
         return false;
     }
-    
+
     return true;
 }
-    
+
 void UdpTransceiver::OnTimeOutEvent()
 {
     pConn_->OnTransceiverTimeout();
 }
-    
+
 } //namespace fuze

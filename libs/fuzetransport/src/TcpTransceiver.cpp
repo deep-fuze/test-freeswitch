@@ -290,6 +290,8 @@ TcpTransceiver::TcpTransceiver(int transID)
     , tcpCore_(*this)
     , tcpFramer_(*this)
     , bConnected_(false)
+    , bTypeCheck_(false)
+    , bRealTime_(false)
     , bUseFrame_(false)
     , pState_(StateSetupTcp::GetInstance())
     , setupMethod_(TcpTxrxState::SETUP_TCP)
@@ -313,6 +315,8 @@ void TcpTransceiver::Reset()
         connID_     = INVALID_ID;
         pConn_      = 0;
         bConnected_ = false;
+        bTypeCheck_ = false;
+        bRealTime_  = false;
         
         tcpCore_.Reset();
         
@@ -721,14 +725,19 @@ bool TcpTransceiver::Send(Buffer::Ptr spBuffer)
         return false;
     }
 
+    if (!bTypeCheck_ && pConn_) {
+        bRealTime_  = (pConn_->IsPayloadType(Connection::AUDIO) ||
+                       pConn_->IsPayloadType(Connection::VIDEO));
+        bTypeCheck_ = true;
+    }
+    
     // impose queue size limit    
     size_t   q_size;
     uint32_t q_buf_size;
     tcpCore_.GetSendQInfo(q_size, q_buf_size);
     
     // if this is real time traffic then we need to flush the queue quickly
-    if (pConn_->IsPayloadType(Connection::AUDIO) ||
-        pConn_->IsPayloadType(Connection::VIDEO)) {
+    if (bRealTime_) {
         if (q_size > Q_SIZE) {
             WLOG("sendQ_ reached the real time limit (" <<
                  q_buf_size << " bytes, " << q_size << " > " << Q_SIZE << ")");
