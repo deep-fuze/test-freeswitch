@@ -93,3 +93,6 @@ library_include_HEADERS = \
 
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = srtp-1.42.pc
+
+.update: $(lib_LTLIBRARIES)
+	touch .update

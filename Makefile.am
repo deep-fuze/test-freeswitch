@@ -519,6 +519,9 @@ libs/srtp/crypto/cipher/aes_icm.c \
 libs/srtp/srtp/srtp.c \
 libs/srtp/srtp/ekt.c
 
+libs/srtp/.update:
+	touch libs/srtp/.update
+
 libs/srtp/libsrtp2.a: libs/srtp libs/srtp/.update $(SRTP_SRC)
 	touch $(switch_srcdir)/src/include/switch.h
 	@cd libs/srtp && $(MAKE)
@@ -537,6 +540,16 @@ libs/Libevent/libevent.la: libs/Libevent
 libs/fuzetransport/libfuzetransport.la: libs/Libevent/libevent.la libs/fuzetransport 
 	touch src/include/switch.h
 	@cd libs/fuzetransport && $(MAKE)
+	@$(TOUCH_TARGET)
+
+libs/tiff-4.0.2/libtiff/libtiff.la: libs/tiff-4.0.2
+	touch src/include/switch.h
+	@cd libs/tiff-4.0.2 && $(MAKE)
+	@$(TOUCH_TARGET)
+
+libs/spandsp/src/libspandsp.la: libs/tiff-4.0.2/libtiff/libtiff.la libs/spandsp
+	touch src/include/switch.h
+	@cd libs/spandsp && $(MAKE)
 	@$(TOUCH_TARGET)
 
 ##

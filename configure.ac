@@ -1631,7 +1631,7 @@ ac_configure_args="$ac_configure_args CONFIGURE_CFLAGS='$CFLAGS $CPPFLAGS' CONFI
 #	--localstatedir='$localstatedir' --datadir='$datadir'"
 
 # Run configure in all the subdirs
-# AC_CONFIG_SUBDIRS([libs/srtp])
+AC_CONFIG_SUBDIRS([libs/srtp])
 if test "$use_system_apr" != "yes"; then
    AC_CONFIG_SUBDIRS([libs/apr])
 fi
@@ -1646,7 +1646,7 @@ AC_CONFIG_SUBDIRS([libs/js])
 AC_CONFIG_SUBDIRS([libs/libsndfile])
 AC_CONFIG_SUBDIRS([libs/sofia-sip])
 AC_CONFIG_SUBDIRS([libs/portaudio])
-AC_CONFIG_SUBDIRS([libs/freetdm])
+#AC_CONFIG_SUBDIRS([libs/freetdm])
 #AC_CONFIG_SUBDIRS([libs/unimrcp])
 AC_CONFIG_SUBDIRS([libs/tiff-4.0.2])
 AC_CONFIG_SUBDIRS([libs/spandsp])
