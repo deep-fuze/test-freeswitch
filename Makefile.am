@@ -137,10 +137,11 @@ endif
 
 
 WEBRTC_LIB_DIR = $(switch_srcdir)/libs/webrtcneteq
-WEBRTC_LIBS = $(WEBRTC_LIB_DIR)/libwebrtccore.a
+WEBRTC_LIBS = $(WEBRTC_LIB_DIR)/libwebrtccore.a $(WEBRTC_LIB_DIR)/libwebrtcneteq.la
 
-CORE_LIBS += libs/webrtcneteq/libwebrtcneteq.la libs/spandsp/src/libspandsp.la
-CORE_LIBS += libs/fuzetransport/libfuzetransport.la libs/Libevent/libevent.la libs/Libevent/libevent_pthreads.la
+CORE_LIBS += libs/spandsp/src/libspandsp.la
+CORE_LIBS += libs/fuzetransport/libfuzetransport.la
+CORE_LIBS += libs/Libevent/libevent.la libs/Libevent/libevent_pthreads.la
 CORE_LIBS += $(WEBRTC_LIBS) libs/opus-1.2.1/libopus.la
 
 if ENABLE_SRTP

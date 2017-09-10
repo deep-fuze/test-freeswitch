@@ -3094,14 +3094,14 @@ SWITCH_DECLARE(void) switch_rtp_ping(switch_rtp_t *rtp_session)
 }
 
 int srtp_crypto_get_random(uint8_t *key, int len) {
-	/* libsrtp 2.0 doesn't have crypto_get_random, we use OpenSSL's RAND_* to replace it:
-	 * https://wiki.openssl.org/index.php/Random_Numbers */
-	int rc = RAND_bytes(key, len);
-	if(rc != 1) {
-		/* Error generating */
-		return -1;
-	}
-	return 0;
+    /* libsrtp 2.0 doesn't have crypto_get_random, we use OpenSSL's RAND_* to replace it:
+     * https://wiki.openssl.org/index.php/Random_Numbers */
+    int rc = RAND_bytes(key, len);
+    if(rc != 1) {
+        /* Error generating */
+        return -1;
+    }
+    return 0;
 }
 
 SWITCH_DECLARE(void) switch_rtp_get_random(void *buf, uint32_t len)
@@ -5392,6 +5392,10 @@ SWITCH_DECLARE(void) switch_rtp_destroy(switch_rtp_t **rtp_session)
         fuze_transport_close_connection((*rtp_session)->rtcp_conn);
     } else {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session), SWITCH_LOG_INFO, "fuze transport NOT close rtcp connection\n");
+    }
+
+    if ((*rtp_session)->use_webrtc_neteq) {
+        switch_core_destroy_neteq_inst((*rtp_session)->session);
     }
 
     switch_mutex_unlock((*rtp_session)->flag_mutex);
@@ -8526,7 +8530,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                     srtp_index = srtp_protect_get_index(rtp_session->send_ctx[rtp_session->srtp_idx_rtp],  &send_msg->header);
 #endif
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR,
-									  "Error: %s SRTP protection failed on pkt=%u with code (%u) %d\n",// idx=%llu\n",
+                                      "Error: %s SRTP protection failed on pkt=%u with code (%u) %d\n",// idx=%llu\n",
                                       rtp_session->rtp_conn_name, rtp_session->write_count, ntohs(send_msg->header.seq), stat);
                     rtp_session->srtp_protect_error = SWITCH_TRUE;
                 }
@@ -9214,8 +9218,8 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
 {
     switch_rtp_t *rtp_session;
     void *neteq_inst;
-	int current_num_packets = 0, max_num_packets = 0;
-	NetEqNetworkStatistics nwstats;
+    int current_num_packets = 0, max_num_packets = 0;
+    NetEqNetworkStatistics nwstats;
     int jbuf = -1;
     uint16_t local_send = 0, local_recv = 0;
     int max_proc_time = 0;
@@ -9233,7 +9237,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
 
     neteq_inst = switch_core_get_neteq_inst(rtp_session->session);
     if (neteq_inst) {
-		WebRtcNetEQ_CurrentPacketBufferStatistics(neteq_inst, &current_num_packets, &max_num_packets);
+        WebRtcNetEQ_CurrentPacketBufferStatistics(neteq_inst, &current_num_packets, &max_num_packets);
 
         if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
             jbuf = nwstats.current_buffer_size_ms;
@@ -9243,7 +9247,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
                 loss = (short)((float)nwstats.packet_loss_rate/2.56);
             }
 
-			max_proc_time = nwstats.max_waiting_time_ms;
+            max_proc_time = nwstats.max_waiting_time_ms;
 
             if ((jbuf > 250 && rtp_session->stats.last_jitter < 250) ||
                 (jbuf < 250 && rtp_session->stats.last_jitter > 250) ||
@@ -9255,8 +9259,8 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
                                   "jitter buffer stats: curr:%dms pref:%dms pkts:%d wait_times [mean:%d median:%d min:%d max:%d]\n",
                                   jbuf, nwstats.preferred_buffer_size_ms,
-								  current_num_packets, nwstats.mean_waiting_time_ms, nwstats.median_waiting_time_ms,
-								  nwstats.min_waiting_time_ms, nwstats.max_waiting_time_ms);
+                                  current_num_packets, nwstats.mean_waiting_time_ms, nwstats.median_waiting_time_ms,
+                                  nwstats.min_waiting_time_ms, nwstats.max_waiting_time_ms);
             }
         }
     } else {

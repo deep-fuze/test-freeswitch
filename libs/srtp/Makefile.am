@@ -2,7 +2,7 @@ AUTOMAKE_OPTIONS = gnu
 NAME=srtp
 
 AM_CFLAGS    = $(new_AM_CFLAGS) -I./src -Icrypto/include -I$(srcdir)/include -I$(srcdir)/crypto/include
-AM_CPPFLAGS  = $(AM_CFLAGS)
+AM_CPPFLAGS  = $(AM_CFLAGS) -fPIC
 AM_LDFLAGS   = $(new_AM_LDFLAGS) -L.
 
 HMAC_OBJS = @HMAC_OBJS@

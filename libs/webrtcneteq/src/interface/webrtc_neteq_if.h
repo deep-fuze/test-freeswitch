@@ -65,6 +65,8 @@ typedef struct {
 } NetEqNetworkStatistics;
 
 WebRtcNetEQ_status_t WebRtcNetEQ_GetNetworkStatistics(void *inst, NetEqNetworkStatistics *ret_stats);
+WebRtcNetEQ_status_t WebRtcNetEQ_SetMaximumDelay(void *inst, int delay);
+WebRtcNetEQ_status_t WebRtcNetEQ_SetMinimumDelay(void *inst, int delay);
 
 void WebRtcNetEQ_Destroy(void *inst);
 

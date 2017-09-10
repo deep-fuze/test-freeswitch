@@ -2699,6 +2699,7 @@ SWITCH_DECLARE(void) switch_core_set_log_filter_cb(switch_core_session_t *sessio
 SWITCH_DECLARE(int) switch_core_log_check(switch_core_session_t *session, const char *key);
 
 SWITCH_DECLARE(void *) switch_core_get_neteq_inst(switch_core_session_t *session);
+SWITCH_DECLARE(void) switch_core_destroy_neteq_inst(switch_core_session_t *session);
 
 SWITCH_DECLARE(int) switch_core_get_monitor_index(switch_core_session_t *session);
 

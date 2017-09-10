@@ -15,6 +15,8 @@
 #define CONVERT_STATUS(ret) ((ret) == 0 ? WebRtcNetEQ_SUCCESS : \
                                 ((ret == -2) ? WebRtcNetEQ_NOT_STARTED : WebRtcNetEQ_ERROR))
 
+#define MAX_DELAY 12000
+
 class t_WebRTC {
 public:
   rtc::scoped_refptr<webrtc::AudioDecoderFactory> decoder_factory;
@@ -101,6 +103,8 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Init_inst(void **inst, app_memory_alloc_t alloc
 
   // kDecoderCNGnb,
   // kDecoderCNGwb,
+
+  neteq->SetMaximumDelay(MAX_DELAY);
 
   neteq_inst->local_seqno = neteq_inst->last_rd_seqno = 0;
   neteq_inst->pkt_ms = packet_ms;
@@ -363,6 +367,52 @@ WebRtcNetEQ_status_t WebRtcNetEQ_GetNetworkStatistics(void *inst, NetEqNetworkSt
       memcpy(ret_stats, &stats, sizeof(NetEqNetworkStatistics));
     }
   }
+
+  return CONVERT_STATUS(ret);
+}
+
+WebRtcNetEQ_status_t WebRtcNetEQ_SetMaximumDelay(void *inst, int delay)
+{
+  neteq_inst_t *neteq_inst = (neteq_inst_t *)inst;
+
+  if (inst == NULL) {
+    app_log_cb(3, "WebRtcNetEQ_SetMaximumDelay Error inst == %d\n", 0);
+    return WebRtcNetEQ_ERROR;
+  }
+
+  webrtc::NetEq *neteq = (webrtc::NetEq *)neteq_inst->main_inst;
+
+  if (neteq == NULL) {
+    app_log_cb(3, "WebRtcNetEQ_SetMaximumDelay Error neteq == %d\n", 0);
+    return WebRtcNetEQ_ERROR;
+  }
+
+  int ret = 0;
+
+  neteq->SetMaximumDelay(delay);
+
+  return CONVERT_STATUS(ret);
+}
+
+WebRtcNetEQ_status_t WebRtcNetEQ_SetMinimumDelay(void *inst, int delay)
+{
+  neteq_inst_t *neteq_inst = (neteq_inst_t *)inst;
+
+  if (inst == NULL) {
+    app_log_cb(3, "WebRtcNetEQ_SetMinimumDelay Error inst == %d\n", 0);
+    return WebRtcNetEQ_ERROR;
+  }
+
+  webrtc::NetEq *neteq = (webrtc::NetEq *)neteq_inst->main_inst;
+
+  if (neteq == NULL) {
+    app_log_cb(3, "WebRtcNetEQ_SetMinimumDelay Error neteq == %d\n", 0);
+    return WebRtcNetEQ_ERROR;
+  }
+
+  int ret = 0;
+
+  neteq->SetMinimumDelay(delay);
 
   return CONVERT_STATUS(ret);
 }
