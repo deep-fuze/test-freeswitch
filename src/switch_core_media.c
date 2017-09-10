@@ -9040,6 +9040,8 @@ SWITCH_DECLARE(void) switch_core_media_set_extmap_string(switch_core_session_t *
                     if (strstr(attr->a_name, "extmap") && attr->a_value) {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
                                           "Found  extmap %s : %s", attr->a_name, attr->a_value);
+// MQT-6348: Disable for now
+#ifdef SSRC_AUDIO_LEVEL
                         if (strstr(attr->a_value, "ssrc-audio-level")) {
                             const char *uuid;
                             switch_core_session_t *other_session;
@@ -9056,6 +9058,7 @@ SWITCH_DECLARE(void) switch_core_media_set_extmap_string(switch_core_session_t *
                                 switch_core_session_rwunlock(other_session);
                             }
                         }
+#endif
                     }
                 }
             }
