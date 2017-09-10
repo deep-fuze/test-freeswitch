@@ -10,13 +10,20 @@ WEBRTC_BUILDDIR=$(switch_builddir)/libs/webrtcneteq/src
 WEBRTC_OBJ_DIR=$(WEBRTC_DIR)/libwebrtc/out/webrtc/src/out/Release/obj/webrtc
 
 $(WEBRTC_DIR)/libwebrtc:
-	git clone https://github.com/aisouard/libwebrtc.git
+	git clone https://github.com/lsurazski/libwebrtc.git
 
 $(WEBRTC_DIR)/libwebrtc/out:
 	cd libwebrtc && mkdir out
 
-$(WEBRTC_DIR)/$(WEBRTC): $(WEBRTC_DIR)/libwebrtc $(WEBRTC_DIR)/libwebrtc/out
-	cd libwebrtc/out && cmake .. && make
+.step1: $(WEBRTC_DIR)/libwebrtc $(WEBRTC_DIR)/libwebrtc/out
+	cd libwebrtc/out && cmake -DGN_EXTRA_ARGS="cflags=-fPIC" ..
+	touch .step1
+
+.step2: .step1
+	cd libwebrtc/out && make
+	touch .step2
+
+.installed_webrtc: .step2
 	mv $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation.o $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation_2.o
 	find $(WEBRTC_OBJ_DIR)/modules/audio_coding -name "*.o"	| xargs ar rv libwebrtccore.a
 	ar rv libwebrtccore.a $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/*.o
@@ -31,12 +38,6 @@ $(WEBRTC_DIR)/$(WEBRTC): $(WEBRTC_DIR)/libwebrtc $(WEBRTC_DIR)/libwebrtc/out
 	ar rv libwebrtccore.a $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation_2.o
 	ar rv libwebrtccore.a $(WEBRTC_OBJ_DIR)/../third_party/libsrtp/libsrtp/srtp.o
 	find $(WEBRTC_OBJ_DIR)/common_audio/ -name "*.o" | xargs ar rv libwebrtccore.a
-	touch $(WEBRTC_DIR)/installed_webrtc
+	touch .installed_webrtc
 
-
-#cp libwebrtccore.a $(WEBRTC_DIR)/$(WEBRTC)
-
-$(WEBRTC_DIR)/installed_webrtc: $(WEBRTC_DIR)/$(WEBRTC)
-
-
-all: $(WEBRTC_DIR)/installed_webrtc
+all: .installed_webrtc
