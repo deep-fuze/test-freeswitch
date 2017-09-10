@@ -5,16 +5,6 @@
 extern "C" {
 #endif
 
-#if OLD_WEBRTC
-#include "interface/webrtc_neteq_internal.h"
-#else
-#include "include/webrtc/typedefs.h"
-/* from: src/interface/webrtc_neteq_if.h */
-typedef void (*resampler_create_cb_t) (uint32_t from_rate, uint32_t to_rate, void *pool, void **resampler);
-typedef uint32_t (*resample_cb_t) (void *resampler, int16_t *src, uint32_t src_len, int16_t *dst);
-#endif
-
-
 typedef void* (*app_memory_alloc_t) (void *pool, uint32_t size);
 
 typedef enum {

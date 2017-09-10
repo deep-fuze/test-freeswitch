@@ -16,5 +16,6 @@ AC_PROG_CC
 AC_SUBST([DOLLAR_SIGN],[$])
 
 AC_CONFIG_FILES([Makefile])
-AC_CONFIG_COMMANDS([build_opus.sh], [./build_opus.sh], [chmod +x build_opus.sh], [build_webrtc.sh], [./build_webrtc.sh], [chmod +x build_webrtc.sh])
+AC_CONFIG_COMMANDS([build_opus.sh], [./build_opus.sh], [chmod +x build_opus.sh])
+AC_CONFIG_COMMANDS([build_webrtc.sh], [./build_webrtc.sh], [chmod +x build_webrtc.sh])
 AC_OUTPUT

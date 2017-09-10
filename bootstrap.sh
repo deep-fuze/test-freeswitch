@@ -10,7 +10,7 @@ BASEDIR=`pwd`;
 LIBDIR=${BASEDIR}/libs;
 SUBDIRS="apr \
   libzrtp js js/nsprpub libsndfile sofia-sip \
-  srtp spandsp portaudio tiff-4.0.2 \
+  spandsp portaudio tiff-4.0.2 \
   fs webrtcneteq Libevent fuzetransport";
 
 while getopts 'jhd:v' o; do 

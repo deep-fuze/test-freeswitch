@@ -36,8 +36,6 @@ AM_LDFLAGS  = $(SWITCH_AM_LDFLAGS) $(AM_LIBAPR_LDFLAGS) $(AM_LIBAPU_LDFLAGS)
 
 DEFAULT_SOUNDS=en-us-callie-8000
 
-DEFAULT_INCLUDES=-I$(switch_srcdir)/libs/webrtcneteq/src/include/third_party/boringssl/src/include -I. -I$(switch_srcdir)/src/include
-
 .INTERMEDIATE: -ldl -liconv -lpthread
 
 .DEFAULT: $(switch_builddir)/modules.conf src/mod/modules.inc
@@ -120,6 +118,7 @@ CORE_CFLAGS += -I$(switch_srcdir)/libs/srtp/crypto/include -Ilibs/srtp/crypto/in
 CORE_CFLAGS += -I$(switch_builddir)/libs/spandsp/src -I$(switch_srcdir)/libs/spandsp/src 
 CORE_CFLAGS += -I$(switch_builddir)/libs/tiff-4.0.2/libtiff -I$(switch_srcdir)/libs/tiff-4.0.2/libtiff
 CORE_CFLAGS += -I$(switch_srcdir)/libs/webrtcneteq/src
+CORE_CFLAGS += -I$(switch_srcdir)/libs/webrtcneteq/libwebrtc/out
 CORE_CFLAGS += -I$(switch_srcdir)/libs/fuzetransport
 CORE_CFLAGS += -I$(switch_srcdir)/libs/Libevent/include
 
@@ -136,19 +135,17 @@ else
 CORE_LIBS +=  libs/apr-util/libaprutil-1.la
 endif
 
-WEBRTC_LIB_DIR = libs/webrtcneteq/lib/x64/Release
-#WEBRTC_LIBS = -lboringssl -lfield_trial_default -lprotobuf_full -lprotoc_lib -lwebrtc -lcpu_features_linux -lmetrics_default -lprotobuf_lite -lsystem_wrappers
 
-CORE_LIBS += libs/webrtcneteq/libwebrtcneteq.la libs/spandsp/src/libspandsp.la libs/opus-1.2.1/libopus.la 
+WEBRTC_LIB_DIR = $(switch_srcdir)/libs/webrtcneteq
+WEBRTC_LIBS = $(WEBRTC_LIB_DIR)/libwebrtccore.a
+
+CORE_LIBS += libs/webrtcneteq/libwebrtcneteq.la libs/spandsp/src/libspandsp.la
 CORE_LIBS += libs/fuzetransport/libfuzetransport.la libs/Libevent/libevent.la libs/Libevent/libevent_pthreads.la
-CORE_LIBS += $(WEBRTC_LIB_DIR)/libwebrtc.a $(WEBRTC_LIB_DIR)/libboringssl.a $(WEBRTC_LIB_DIR)/libfield_trial_default.a \
-	$(WEBRTC_LIB_DIR)/libmetrics_default.a $(WEBRTC_LIB_DIR)/libcpu_features_linux.a \
-	$(WEBRTC_LIB_DIR)/libprotoc_lib.a $(WEBRTC_LIB_DIR)/libprotobuf_full.a \
-	$(WEBRTC_LIB_DIR)/libprotobuf_lite.a $(WEBRTC_LIB_DIR)/libsystem_wrappers.a
+CORE_LIBS += $(WEBRTC_LIBS) libs/opus-1.2.1/libopus.la
 
 if ENABLE_SRTP
 CORE_CFLAGS += -DENABLE_SRTP
-#CORE_LIBS += libs/srtp/libsrtp.la
+CORE_LIBS += libs/srtp/libsrtp2.a
 endif
 
 MOD_LINK      = $(switch_srcdir)/libfreeswitch.la
@@ -498,19 +495,31 @@ libs/apr/libapr-1.la: libs/apr/Makefile libs/apr/.update
 libs/apr-util/libaprutil-1.la: libs/apr/libapr-1.la libs/apr-util libs/apr-util/.update
 	@if [ $(MAKELEVEL) = 0 -o -z "`echo "$(MAKEARGS)" | grep  "j"`" ] ; then touch $(switch_srcdir)/src/include/switch.h; cd libs/apr-util && $(MAKE) $(MFLAGS) && touch libaprutil-1.la; fi
 
-SRTP_SRC =	libs/srtp/srtp/srtp.c libs/srtp/srtp/ekt.c libs/srtp/crypto/cipher/cipher.c libs/srtp/crypto/cipher/null_cipher.c \
-		libs/srtp/crypto/cipher/aes.c libs/srtp/crypto/cipher/aes_icm.c \
-		libs/srtp/crypto/cipher/aes_cbc.c \
-		libs/srtp/crypto/hash/null_auth.c libs/srtp/crypto/hash/sha1.c \
-		libs/srtp/crypto/hash/hmac.c libs/srtp/crypto/hash/auth.c \
-		libs/srtp/crypto/math/datatypes.c libs/srtp/crypto/math/stat.c \
-		libs/srtp/crypto/kernel/crypto_kernel.c libs/srtp/crypto/kernel/alloc.c \
-		libs/srtp/crypto/kernel/key.c \
-		libs/srtp/crypto/rng/prng.c libs/srtp/crypto/rng/ctr_prng.c \
-		libs/srtp/crypto/kernel/err.c libs/srtp/crypto/rng/rand_source.c \
-		libs/srtp/crypto/replay/rdb.c libs/srtp/crypto/replay/rdbx.c libs/srtp/crypto/replay/ut_sim.c 
+SRTP_SRC = \
+libs/srtp/crypto/hash/hmac.c \
+libs/srtp/crypto/hash/sha1.c \
+libs/srtp/crypto/hash/hmac_ossl.c \
+libs/srtp/crypto/hash/null_auth.c \
+libs/srtp/crypto/hash/auth.c \
+libs/srtp/crypto/kernel/alloc.c \
+libs/srtp/crypto/kernel/crypto_kernel.c \
+libs/srtp/crypto/kernel/err.c \
+libs/srtp/crypto/kernel/key.c \
+libs/srtp/crypto/replay/rdbx.c \
+libs/srtp/crypto/replay/ut_sim.c \
+libs/srtp/crypto/replay/rdb.c \
+libs/srtp/crypto/math/stat.c \
+libs/srtp/crypto/math/datatypes.c \
+libs/srtp/crypto/cipher/null_cipher.c \
+libs/srtp/crypto/cipher/cipher.c \
+libs/srtp/crypto/cipher/aes_gcm_ossl.c \
+libs/srtp/crypto/cipher/aes_icm_ossl.c \
+libs/srtp/crypto/cipher/aes.c \
+libs/srtp/crypto/cipher/aes_icm.c \
+libs/srtp/srtp/srtp.c \
+libs/srtp/srtp/ekt.c
 
-libs/srtp/libsrtp.la: libs/srtp libs/srtp/.update $(SRTP_SRC)
+libs/srtp/libsrtp2.a: libs/srtp libs/srtp/.update $(SRTP_SRC)
 	touch $(switch_srcdir)/src/include/switch.h
 	@cd libs/srtp && $(MAKE)
 	@$(TOUCH_TARGET)

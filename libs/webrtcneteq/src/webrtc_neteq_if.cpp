@@ -3,14 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#ifdef OLD_WEBRTC
-#include "interface/webrtc_neteq.h"
-#include "interface/webrtc_neteq_help_macros.h"
-
-#include "g722_interface.h"
-#include "g711_interface.h"
-#include "opus_interface.h"
-#else
+#include "include/webrtc/typedefs.h"
 #include "interface/webrtc_neteq_if.h"
 #include "include/webrtc/common_types.h"
 #include "include/webrtc/modules/include/module_common_types.h"
@@ -18,7 +11,6 @@
 #include "include/webrtc/modules/audio_coding/neteq/neteq_decoder_enum.h"
 #include "include/webrtc/api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "include/webrtc/modules/audio_coding/neteq/neteq_decoder_enum.h"
-#endif
 
 #define CONVERT_STATUS(ret) ((ret) == 0 ? WebRtcNetEQ_SUCCESS : \
                                 ((ret == -2) ? WebRtcNetEQ_NOT_STARTED : WebRtcNetEQ_ERROR))

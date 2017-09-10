@@ -4,12 +4,11 @@ AUTOMAKE_OPTIONS = gnu subdir-objects
 PREFIX=$(prefix)
 NAME = webrtcneteq
 
-WEBRTC_LIB_DIR = lib/x64/Release
-WEBRTC_LIBS = 
-#-lwebrtc
-#-lboringssl -lfield_trial_default -lprotobuf_full -lprotoc_lib -lwebrtc -lcpu_features_linux -lmetrics_default -lprotobuf_lite -lsystem_wrappers
+WEBRTC_INC_DIR=./libwebrtc/out
+WEBRTC_LIB_DIR = .
+WEBRTC_LIBS = $(WEBRTC_LIB_DIR)/libwebrtccore.a
 
-AM_CFLAGS    = -std=c++0x $(new_AM_CFLAGS) -I./src -I../spandsp/src -I../opus-1.2.1/include -I./src/include
+AM_CFLAGS    = -std=c++0x $(new_AM_CFLAGS) -I./src -I../spandsp/src -I../opus-1.2.1/include -I$(WEBRTC_INC_DIR) -I$(WEBRTC_INC_DIR)/include
 AM_CPPFLAGS  = $(AM_CFLAGS)
 AM_LDFLAGS   = $(new_AM_LDFLAGS) -L. -L$(WEBRTC_LIB_DIR)
 

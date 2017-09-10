@@ -246,7 +246,7 @@ main(int argc, char **argv)
 	SSL_library_init();
 	ERR_load_crypto_strings();
 	SSL_load_error_strings();
-	// OpenSSL_add_all_algorithms();
+	OpenSSL_add_all_algorithms();
 
 	/* This isn't strictly necessary... OpenSSL performs RAND_poll
 	 * automatically on first use of random number generator. */

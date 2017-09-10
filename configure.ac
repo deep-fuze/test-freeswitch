@@ -268,8 +268,8 @@ if test "${enable_optimizer}" = "yes" ; then
 fi
 
 # set defaults for use on all platforms
-SWITCH_AM_CFLAGS="-I${switch_srcdir}/src/include -I${switch_builddir}/src/include -I${switch_srcdir}/libs/libteletone/src -I${switch_srcdir}/libs/webrtcneteq/src -I${switch_srcdir}/libs/fuzetransport -I${switch_srcdir}/libs/Libevent/include"
-SWITCH_AM_CXXFLAGS="-I${switch_srcdir}/src/include -I${switch_builddir}/src/include -I${switch_srcdir}/libs/libteletone/src -I${switch_srcdir}/libs/webrtcneteq/src -I${switch_srcdir}/libs/fuzetransport -I${switch_srcdir}/libs/Libevent/include"
+SWITCH_AM_CFLAGS="-I${switch_srcdir}/src/include -I${switch_builddir}/src/include -I${switch_srcdir}/libs/libteletone/src  -I${switch_srcdir}/libs/webrtcneteq/src -I${switch_srcdir}/libs/fuzetransport -I${switch_srcdir}/libs/Libevent/include"
+SWITCH_AM_CXXFLAGS="-I${switch_srcdir}/src/include -I${switch_builddir}/src/include -I${switch_srcdir}/libs/libteletone/src  -I${switch_srcdir}/libs/webrtcneteq/src -I${switch_srcdir}/libs/fuzetransport -I${switch_srcdir}/libs/Libevent/include"
 SWITCH_AM_LDFLAGS="-lm"
 
 #set SOLINK variable based on compiler and host
@@ -616,6 +616,62 @@ path_push_unique () {
 
 # tweak platform specific flags
 case "$host" in
+    *darwin13.*|*darwin12.*|*darwin11.*)
+        APR_ADDTO(SWITCH_AM_CFLAGS, -DMACOSX)
+        APR_ADDTO(CFLAGS, -pipe -no-cpp-precomp -Wno-deprecated-declarations)
+        APR_ADDTO(CPPFLAGS, -I/usr/local/opt/openssl/include)
+        APR_ADDTO(LDFLAGS, -pipe -bind_at_load -L/usr/local/opt/openssl/lib)
+        APR_ADDTO(CXXFLAGS, -pipe)
+        APR_REMOVEFROM(SWITCH_AM_CFLAGS, -fPIC)
+	if test "x$enable_core_odbc_support" != "xno"; then
+	        APR_ADDTO([PLATFORM_CORE_LDFLAGS], [--framework CoreFoundation])
+	fi
+	APR_ADDTO([PLATFORM_CORE_LIBS], [-ldl])
+    ;;
+    *darwin10.*)
+        APR_ADDTO(SWITCH_AM_CFLAGS, -DMACOSX)
+        APR_ADDTO(CFLAGS, -pipe -no-cpp-precomp)
+        APR_ADDTO(CPPFLAGS, -I/usr/local/opt/openssl/include)
+        APR_ADDTO(LDFLAGS, -pipe -bind_at_load -L/usr/local/opt/openssl/lib)
+        APR_ADDTO(CXXFLAGS, -pipe)
+        APR_REMOVEFROM(SWITCH_AM_CFLAGS, -fPIC)
+	if test "x$enable_core_odbc_support" != "xno"; then
+	        APR_ADDTO([PLATFORM_CORE_LDFLAGS], [--framework CoreFoundation])
+	fi
+	APR_ADDTO([PLATFORM_CORE_LIBS], [-ldl])
+    ;;
+    *darwin*)
+        APR_ADDTO(CPPFLAGS, -I/usr/local/opt/openssl/include)
+        APR_ADDTO(LDFLAGS, -L/usr/local/opt/openssl/lib)
+        APR_ADDTO(SWITCH_AM_CFLAGS, -DMACOSX)
+        APR_REMOVEFROM(SWITCH_AM_CFLAGS, -fPIC)
+	if test "x$enable_core_odbc_support" != "xno"; then
+	        APR_ADDTO([PLATFORM_CORE_LDFLAGS], [--framework CoreFoundation])
+	fi
+	APR_ADDTO([PLATFORM_CORE_LIBS], [-ldl])
+    ;;
+    *-solaris2*)
+	if test "${enable_64}" = "yes"; then
+           APR_ADDTO(CPPFLAGS, [-I/opt/64/include])
+           APR_ADDTO(LDFLAGS, [-L/opt/64/lib -Wl,-rpath,/opt/64/lib])
+           APR_ADDTO(SWITCH_AM_CFLAGS, [-I/opt/64/include])
+           APR_ADDTO(SWITCH_AM_LDFLAGS, [-L/opt/64/lib -Wl,-rpath,/opt/64/lib])
+	else
+           APR_ADDTO(CPPFLAGS, [-I/opt/include])
+           APR_ADDTO(LDFLAGS, [-L/opt/lib -Wl,-rpath,/opt/lib])
+           APR_ADDTO(SWITCH_AM_CFLAGS, [-I/opt/include])
+           APR_ADDTO(SWITCH_AM_LDFLAGS, [-L/opt/lib -Wl,-rpath,/opt/lib])
+	fi
+        APR_ADDTO(SWITCH_AM_CFLAGS, -DPATH_MAX=2048 -D__EXTENSIONS__)
+        APR_ADDTO(SWITCH_AM_LDFLAGS, -lsendfile -lresolv -lsocket -lnsl -luuid)
+        APR_ADDTO(ESL_LDFLAGS, -lnsl -lsocket)
+	APR_ADDTO([PLATFORM_CORE_LIBS], [-ldl -lcrypt -lrt -lsendfile -lresolv -lsocket -lnsl -luuid])
+    ;;
+    *dragonfly*)
+        APR_ADDTO(CPPFLAGS, -I/usr/local/include)
+        APR_ADDTO(LDFLAGS, -L/usr/local/lib)
+        APR_ADDTO(SWITCH_AM_CFLAGS, -I/usr/local/include)
+    ;;
     *openbsd*)
         APR_ADDTO(CPPFLAGS, -I/usr/local/include)
         APR_ADDTO(LDFLAGS, -L/usr/local/lib)
@@ -1143,30 +1199,16 @@ AS_IF([test "x$enable_core_libedit_support" != "xno"], [
   CPPFLAGS="${save_CPPFLAGS}"
 ])
 
-current_dir=`(pwd)`
+SAC_OPENSSL
 
-[echo "Trying to use BoringSSL instead of OpenSSL..."];
-AC_DEFINE([HAVE_BORINGSSL], [1], [Boring SSL instead of OpenSSL])
-AC_DEFINE([HAVE_OPENSSL_DTLS_SRTP], [1], "")
-AC_DEFINE([HAVE_OPENSSL], [1], "")
-AC_DEFINE([OPENSSL], [1], "")
-AC_DEFINE([OPENSSL_VERSION_NUMBER], [0x100020af], "")
-AC_DEFINE([DCRYPTO_MEM_CHECK_ON], [0], "")
-
-boringssl_inc_dir=[${current_dir}/libs/webrtcneteq/src/include/third_party/boringssl/src/include]
-boringssl_lib_dir=[${current_dir}/libs/webrtcneteq/lib/x64/Release]
-boringssl_dir=[${current_dir}/libs/webrtcneteq]
-AC_MSG_NOTICE([BoringSSL directory is ${boringssl_dir} include ${boringssl_inc_dir} lib ${boringssl_lib_dir}])
-
-boringssl_defines=[" -DHAVE_OPENSSL -DHAVE_BORINGSSL -DHAVE_OPENSSL_DTLS_SRTP -DOPENSSL -DOPENSSL_VERSION_NUMBER=0x100020af -DCRYPTO_MEM_CHECK_ON=0 "]
-
-CFLAGS=["$CFLAGS -I${boringssl_inc_dir} ${boringssl_defines} "];
-LIBS=["-L${boringssl_lib_dir} $LIBS"];
-
-openssl_CFLAGS="$openssl_CFLAGS -DHAVE_OPENSSL";
-APR_ADDTO(SWITCH_AM_CFLAGS, [${boringssl_defines}])
-APR_ADDTO(SWITCH_AM_CFLAGS, [-I${boringssl_inc_dir}])
-
+if test x$HAVE_OPENSSL = x1; then
+	openssl_CFLAGS="$openssl_CFLAGS -DHAVE_OPENSSL";
+	APR_ADDTO(SWITCH_AM_CFLAGS, -DHAVE_OPENSSL)
+	AC_CHECK_LIB(ssl, SSL_CTX_set_tlsext_use_srtp, AC_DEFINE_UNQUOTED(HAVE_OPENSSL_DTLS_SRTP, 1, HAVE_OPENSSL_DTLS_SRTP), AC_MSG_ERROR([OpenSSL >= 1.0.1e and associated developement headers required]))
+	AC_CHECK_LIB(ssl, DTLSv1_method, AC_DEFINE_UNQUOTED(HAVE_OPENSSL_DTLS, 1, HAVE_OPENSSL_DTLS), AC_MSG_ERROR([OpenSSL >= 1.0.1e and associaed developement headers required]))
+else
+	AC_MSG_ERROR([OpenSSL >= 1.0.1e and associated developement headers required])
+fi
 
 AX_CHECK_JAVA
 
@@ -1218,7 +1260,7 @@ if test "x$ac_cv_have_php" != "xno" -a "x$ac_cv_have_php_config" != "xno"; then
    PHP=php
    PHP_CONFIG=php-config
    PHP_LDFLAGS="`$PHP_CONFIG --ldflags`"
-   PHP_LIBS="`$PHP_CONFIG --libs | sed -r 's/ ?-l(bz2|pcre|xml2|gssapi_krb5|krb5|k5crypto|com_err|history|z|readline|gmp|boringssl|crypto)//g'`"
+   PHP_LIBS="`$PHP_CONFIG --libs | sed -r 's/ ?-l(bz2|pcre|xml2|gssapi_krb5|krb5|k5crypto|com_err|history|z|readline|gmp|ssl|crypto)//g'`"
    PHP_EXT_DIR="`$PHP_CONFIG --extension-dir`"
    PHP_INC_DIR="`$PHP -r 'echo ini_get("include_path");' | cut -d: -f2`"
    PHP_INI_DIR="`$PHP_CONFIG --configure-options | tr " " "\n" | grep -- --with-config-file-scan-dir | cut -f2 -d=`"
@@ -1583,25 +1625,35 @@ AC_SUBST(OUR_DISABLED_INSTALL_MODS)
 AC_SUBST(OUR_DISABLED_UNINSTALL_MODS)
 AC_SUBST(AM_MAKEFLAGS)
 
-ac_configure_args="$ac_configure_args CONFIGURE_CFLAGS='$CFLAGS $CPPFLAGS' CONFIGURE_CXXFLAGS='$CXXFLAGS $CPPFLAGS' CONFIGURE_LDFLAGS='$LDFLAGS' "
 
+ac_configure_args="$ac_configure_args CONFIGURE_CFLAGS='$CFLAGS $CPPFLAGS' CONFIGURE_CXXFLAGS='$CXXFLAGS $CPPFLAGS' CONFIGURE_LDFLAGS='$LDFLAGS' "
 #	--prefix='$prefix' --exec_prefix='$exec_prefix' --libdir='$libdir' --libexecdir='$libexecdir' --bindir='$bindir' --sbindir='$sbindir' \
 #	--localstatedir='$localstatedir' --datadir='$datadir'"
 
 # Run configure in all the subdirs
-AC_CONFIG_SUBDIRS([libs/srtp])
+# AC_CONFIG_SUBDIRS([libs/srtp])
 if test "$use_system_apr" != "yes"; then
    AC_CONFIG_SUBDIRS([libs/apr])
 fi
 if test "$use_system_aprutil" != "yes"; then
    AC_CONFIG_SUBDIRS([libs/apr-util])
 fi
+#AC_CONFIG_SUBDIRS([libs/ilbc])
+#AC_CONFIG_SUBDIRS([libs/iksemel])
+AC_CONFIG_SUBDIRS([libs/js/nsprpub])
+AC_CONFIG_SUBDIRS([libs/js])
+#AC_CONFIG_SUBDIRS([libs/libdingaling])
 AC_CONFIG_SUBDIRS([libs/libsndfile])
 AC_CONFIG_SUBDIRS([libs/sofia-sip])
 AC_CONFIG_SUBDIRS([libs/portaudio])
 AC_CONFIG_SUBDIRS([libs/freetdm])
+#AC_CONFIG_SUBDIRS([libs/unimrcp])
 AC_CONFIG_SUBDIRS([libs/tiff-4.0.2])
 AC_CONFIG_SUBDIRS([libs/spandsp])
+#AC_CONFIG_SUBDIRS([libs/broadvoice])
+#AC_CONFIG_SUBDIRS([libs/libg722_1])
+#AC_CONFIG_SUBDIRS([libs/silk])
+#AC_CONFIG_SUBDIRS([libs/libcodec2])
 if test "x${enable_zrtp}" = "xyes"; then
    AC_CONFIG_SUBDIRS([libs/libzrtp])
 fi
