@@ -406,7 +406,7 @@ static switch_status_t switch_opus_ctl(switch_codec_t *codec,
             context->loss_current = *loss;
         }
         opus_encoder_ctl(context->encoder_object, OPUS_SET_PACKET_LOSS_PERC(*loss));
-        bw_factor = -1 + (*loss + 4)/5;
+        br_factor = -1 + (*loss + 4)/5;
         if (br_factor < 0) {
             br_factor = 0;
         }
