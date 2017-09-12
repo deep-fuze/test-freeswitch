@@ -53,7 +53,6 @@ typedef struct filelist {
     uint32_t rd_cnt;
 } filelist_t;
 
-
 /* This is a frame.  Each codec will have a queue of frames. */
 typedef struct conference_frame {
     switch_frame_t frame;
@@ -75,8 +74,9 @@ typedef struct conference_write_codec {
     struct conference_write_codec *next;
     switch_mutex_t *codec_mutex;
 
-    conference_encoder_state_t *encoder;
+    int cwc_idx;
 
+    conference_encoder_state_t *encoder;
     conference_frame_t *frames;
     
     int num_conf_frames;
@@ -84,18 +84,14 @@ typedef struct conference_write_codec {
     uint32_t codec_id;
     uint32_t impl_id;
     uint32_t ianacode;
+    int loss_percent;
 
     uint32_t write_idx;
     
-    uint64_t stats_cnt;
-    uint64_t encode_cnt;
-    uint64_t rd_cnt;
-    uint64_t ivr_encode_cnt;
     uint32_t last_write_size;
     switch_codec_t frame_codec;
 
     uint32_t listener_count;
-
 } conference_write_codec_t;
 
 /* This is a member object.
@@ -103,28 +99,16 @@ typedef struct conference_write_codec {
  */
 typedef struct conf_member_encoder_optimization {
     conference_write_codec_t *cwc;
-    
     filelist_t *filelist;
-    
     file_cursor_t cursor;
-    
     switch_bool_t output_loop_initialized;
-
-  switch_time_t last_time_processed;
+    switch_time_t last_time_processed;
     uint32_t read_idx;
-    
-    uint64_t stats_cnt;
-    uint64_t individual_encode_cnt;
-    uint64_t shared_encode_cnt;
-    uint64_t shared_copy_cnt;
-    uint64_t mute_cnt;
-    uint64_t ivr_encode_cnt;
-    uint64_t ivr_copy_cnt;
 } conf_member_encoder_optimization_t;
 
-/* 711a, 711u, 722, opus */
-#define N_CWC 6
-#define ENC_FRAME_DATA (960)
+/* 711a, 711u, 722, (opus5,10,20,30,40,50) */
+#define N_CWC 4
+#define ENC_FRAME_DATA (960*2)
 
 /* This is a conference object.
  * Each conference has one of these
@@ -146,10 +130,9 @@ void cwc_next(conference_write_codec_t *cwc);
 
 void cwc_destroy(conference_write_codec_t *cwc);
 switch_size_t cwc_read_buffer(conference_write_codec_t *cwc, uint32_t read_idx, uint8_t *data, uint32_t bytes);
-switch_bool_t cwc_write_buffer(conference_write_codec_t *cwc, int16_t *data,
-                               uint32_t bytes);
+switch_bool_t cwc_write_buffer(conference_write_codec_t *cwc, int16_t *data, uint32_t bytes);
 switch_bool_t cwc_frame_written(conference_write_codec_t *cwc, uint32_t read_idx);
-conference_write_codec_t *cwc_get(conference_write_codec_t *cwc, int codec_id, int impl_id);
+conference_write_codec_t *cwc_get(conference_write_codec_t *cwc, int codec_id, int impl_id, int loss_percent);
 
 /* Conference Encoder Optimization Functions */
 void ceo_start_write(conf_encoder_optimization_t *ceo);
@@ -157,10 +140,10 @@ switch_bool_t ceo_initilialize(conf_encoder_optimization_t *ceo, switch_memory_p
 void ceo_destroy(conf_encoder_optimization_t *ceo, char *name);
 switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, uint32_t bytes, int16_t max);
 switch_status_t ceo_write_new_wc(conf_encoder_optimization_t *ceo, switch_codec_t *frame_codec, switch_codec_t *write_codec,
-                                 int codec_id, int impl_id, int ianacode);
+                                 int codec_id, int impl_id, int ianacode, int loss_percent);
 
-void ceo_set_listener_count(conf_encoder_optimization_t *ceo, int ianacode, uint32_t count);
-void ceo_set_listener_count_incr(conf_encoder_optimization_t *ceo, int ianacode, uint32_t count);
+void ceo_set_listener_count(conf_encoder_optimization_t *ceo, int ianacode, int loss_percent, uint32_t count);
+void ceo_set_listener_count_incr(conf_encoder_optimization_t *ceo, int ianacode, int loss_percent, uint32_t count);
 
 /* Conference frames */
 void meo_initialize(conf_member_encoder_optimization_t *meo);

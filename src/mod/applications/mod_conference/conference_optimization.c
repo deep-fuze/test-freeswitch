@@ -11,14 +11,10 @@ static switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t rea
 static switch_bool_t cwc_frame_encoded(conference_write_codec_t *cwc, uint32_t read_idx);
 
 SWITCH_DECLARE(conference_encoder_state_t *) switch_core_conference_encode_alloc(switch_memory_pool_t *pool);
-SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_init(conference_encoder_state_t *encoder_state, switch_codec_t *write_codec, switch_memory_pool_t *pool);
+SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_init(conference_encoder_state_t *encoder_state, switch_codec_t *write_codec, switch_memory_pool_t *pool, int loss);
 SWITCH_DECLARE(void) switch_core_conference_encode_destroy(conference_encoder_state_t *encoder_state);
 SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_frame(conference_encoder_state_t *encoder_state, switch_frame_t *frame,
                                                                     switch_io_flag_t flags, switch_frame_t **ret_enc_frame);
-
-uint32_t cwc_get_idx(conference_write_codec_t *cwc) {
-    return cwc->write_idx;
-}
 
 void cwc_print(conference_write_codec_t *cwc, switch_core_session_t *session, int rd_idx) {
     switch_mutex_lock(cwc->codec_mutex);
@@ -40,7 +36,6 @@ void cwc_next(conference_write_codec_t *cwc) {
 
     if (cwc->frames[cwc->write_idx].written) {
         cwc->write_idx = idx;
-        cwc->stats_cnt += 1;
         cwc->frames[idx].encoded = SWITCH_FALSE;
         cwc->frames[idx].written = SWITCH_FALSE;
     }
@@ -66,10 +61,6 @@ switch_bool_t cwc_initialize(conference_write_codec_t *cwc, switch_memory_pool_t
     cwc->codec_id = 0;
     cwc->impl_id = 0;
     cwc->write_idx = 0;
-    cwc->stats_cnt = 0;
-    cwc->encode_cnt = 0;
-    cwc->rd_cnt = 0;
-    cwc->ivr_encode_cnt = 0;
 
     if (create_encoder) {
         cwc->encoder = switch_core_conference_encode_alloc(frame_pool);
@@ -216,22 +207,22 @@ void ceo_start_write(conf_encoder_optimization_t *ceo) {
     }
 }
 
-void ceo_set_listener_count(conf_encoder_optimization_t *ceo, int ianacode, uint32_t count) {
+void ceo_set_listener_count(conf_encoder_optimization_t *ceo, int ianacode, int loss_percent, uint32_t count) {
     for (conference_write_codec_t *wp_ptr = ceo->cwc[0];
          wp_ptr != NULL;
          wp_ptr = wp_ptr->next) {
-        if (wp_ptr->ianacode == ianacode) {
+        if (wp_ptr->ianacode == ianacode && wp_ptr->loss_percent == loss_percent) {
             wp_ptr->listener_count = count;
             return;
         }
     }
 }
 
-void ceo_set_listener_count_incr(conf_encoder_optimization_t *ceo, int ianacode, uint32_t count) {
+void ceo_set_listener_count_incr(conf_encoder_optimization_t *ceo, int ianacode, int loss_percent, uint32_t count) {
     for (conference_write_codec_t *wp_ptr = ceo->cwc[0];
          wp_ptr != NULL;
          wp_ptr = wp_ptr->next) {
-        if (wp_ptr->ianacode == ianacode) {
+        if (wp_ptr->ianacode == ianacode && wp_ptr->loss_percent >= loss_percent) {
             wp_ptr->listener_count += count;
             return;
         }
@@ -314,29 +305,32 @@ switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, 
 }
 
 switch_status_t ceo_write_new_wc(conf_encoder_optimization_t *ceo, switch_codec_t *frame_codec, switch_codec_t *write_codec,
-                                 int codec_id, int impl_id, int ianacode) {
+                                 int codec_id, int impl_id, int ianacode, int loss_percent) {
     conference_write_codec_t *new_write_codec;
 
     for (int i = 0; i < N_CWC; i++) {
-        if ((new_write_codec = switch_core_alloc(ceo->write_codecs_pool, sizeof(*new_write_codec))) == 0) {
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "no memory for new codec\n");
-            return SWITCH_STATUS_FALSE;
-        } else {
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, " created new codec_id=%d impl_id=%d ianacode=%d\n",
-                              codec_id, impl_id, ianacode);
-            memset(new_write_codec, 0, sizeof(*new_write_codec));
+        for (int j = loss_percent; j >= 0; j -= 10) {
+            if ((new_write_codec = switch_core_alloc(ceo->write_codecs_pool, sizeof(*new_write_codec))) == 0) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "no memory for new codec\n");
+                return SWITCH_STATUS_FALSE;
+            } else {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, " created new codec_id=%d impl_id=%d ianacode=%d loss=%d%%\n",
+                                  codec_id, impl_id, ianacode, j);
+                memset(new_write_codec, 0, sizeof(*new_write_codec));
 
-            cwc_initialize(new_write_codec, ceo->write_codecs_pool, ceo->enc_frame_pool, (i == 0), frame_codec);
-            if (new_write_codec->encoder) {
-                switch_core_conference_encode_init(new_write_codec->encoder, write_codec, ceo->enc_frame_pool);
+                cwc_initialize(new_write_codec, ceo->write_codecs_pool, ceo->enc_frame_pool, (i == 0), frame_codec);
+                if (new_write_codec->encoder) {
+                    switch_core_conference_encode_init(new_write_codec->encoder, write_codec, ceo->enc_frame_pool, j);
+                }
+
+                new_write_codec->ianacode = ianacode;
+                new_write_codec->codec_id = codec_id;
+                new_write_codec->impl_id = impl_id;
+                new_write_codec->loss_percent = j;
+                new_write_codec->next = ceo->cwc[i];
+                new_write_codec->cwc_idx = i;
+                ceo->cwc[i] = new_write_codec;
             }
-
-            new_write_codec->ianacode = ianacode;
-            new_write_codec->codec_id = codec_id;
-            new_write_codec->impl_id = impl_id;
-
-            new_write_codec->next = ceo->cwc[i];
-            ceo->cwc[i] = new_write_codec;
         }
     }
 
@@ -349,13 +343,6 @@ void meo_initialize(conf_member_encoder_optimization_t *meo) {
     meo->cwc = NULL;
     meo->output_loop_initialized = SWITCH_FALSE;
     meo->read_idx = 0;
-    meo->stats_cnt = 0;
-    meo->individual_encode_cnt = 0;
-    meo->shared_copy_cnt = 0;
-    meo->shared_encode_cnt = 0;
-    meo->mute_cnt = 0;
-    meo->ivr_encode_cnt = 0;
-    meo->ivr_copy_cnt = 0;
     fc_init(&meo->cursor);
 }
 
@@ -652,9 +639,10 @@ filelist_t *filelist_get(filelist_t *pl, int codec_id, int impl_id) {
     return NULL;
 }
 
-conference_write_codec_t *cwc_get(conference_write_codec_t *cwc, int codec_id, int impl_id) {
+conference_write_codec_t *cwc_get(conference_write_codec_t *cwc, int codec_id, int impl_id, int loss_percent) {
     for (conference_write_codec_t *ret = cwc; ret != NULL; ret = ret->next) {
-        if (ret->codec_id == codec_id && ret->impl_id == impl_id) {
+        if (ret->codec_id == codec_id && ret->impl_id == impl_id &&
+            (loss_percent == -1 || (loss_percent == ret->loss_percent))) {
             return ret;
         }
     }
