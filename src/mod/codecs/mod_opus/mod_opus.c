@@ -75,6 +75,7 @@ struct opus_context {
     float loss_target;
     int bitrate_current;
     int bitrate_target;
+    int complexity;
 };
 
 struct {
@@ -276,6 +277,7 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
         context->bitrate_current = context->bitrate_target;
         context->loss_target = 5.0;
         context->loss_current = context->loss_target;
+        context->complexity = complexity;
 
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Create OPUS encoder: bps=%d vbr=%d complexity=%d samplerate=%d inbandfec=%d\n",
                           bitrate_bps, use_vbr, complexity, samplerate, inbandfec);
@@ -394,25 +396,53 @@ static switch_status_t switch_opus_ctl(switch_codec_t *codec,
         return SWITCH_STATUS_FALSE;
     }
 
-    if (flag == 1) {
-        int16_t *loss = (int16_t *)data;
-        int br_factor;
-        int br;
-        if (*loss < 5) {
-            *loss = 5;
-            context->loss_current = *loss;
-        } else if (*loss > 50) {
-            *loss = 50;
-            context->loss_current = *loss;
+    switch (flag) {
+    case 1:
+        {
+            int16_t *loss = (int16_t *)data;
+            int br_factor;
+            int br;
+            if (*loss < 5) {
+                *loss = 5;
+                context->loss_current = *loss;
+            } else if (*loss > 50) {
+                *loss = 50;
+                context->loss_current = *loss;
+            }
+            opus_encoder_ctl(context->encoder_object, OPUS_SET_PACKET_LOSS_PERC(*loss));
+            br_factor = -1 + (*loss + 4)/5;
+            if (br_factor < 0) {
+                br_factor = 0;
+            }
+            br = context->bitrate_target + br_factor*1000;
+            context->bitrate_current = br;
+            opus_encoder_ctl(context->encoder_object, OPUS_SET_BITRATE(context->bitrate_current));
         }
-        opus_encoder_ctl(context->encoder_object, OPUS_SET_PACKET_LOSS_PERC(*loss));
-        br_factor = -1 + (*loss + 4)/5;
-        if (br_factor < 0) {
-            br_factor = 0;
+        break;
+    case 2:
+        {
+            if (context->complexity > 1) {
+                context->complexity -= 1;
+                opus_encoder_ctl(context->encoder_object, OPUS_SET_COMPLEXITY(context->complexity));
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Adjusted OPUS codec complexity down to %d\n", context->complexity);
+            } else {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "OPUS codec complexity already minimum\n");
+            }
         }
-        br = context->bitrate_target + br_factor*1000;
-        context->bitrate_current = br;
-        opus_encoder_ctl(context->encoder_object, OPUS_SET_BITRATE(context->bitrate_current));
+        break;
+    case 3:
+        {
+            if (context->complexity < 10) {
+                context->complexity += 1;
+                opus_encoder_ctl(context->encoder_object, OPUS_SET_COMPLEXITY(context->complexity));
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Adjusted OPUS codec complexity up to %d\n", context->complexity);
+            } else {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "OPUS codec complexity already maximum\n");
+            }
+        }
+        break;
+    default:
+        break;
     }
 
     return SWITCH_STATUS_SUCCESS;

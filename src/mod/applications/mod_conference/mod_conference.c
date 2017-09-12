@@ -697,6 +697,10 @@ typedef struct conference_obj {
     int lineno;
 
     int check_opus_loss_cnt;
+
+    switch_time_t conference_loop_time;
+    int conference_loop_time_cnt;
+
 } conference_obj_t;
 
 /* Relationship with another member */
@@ -1313,15 +1317,19 @@ void conference_mutex_lock_line(conference_obj_t *conference, int line) {
     conference->lineno = line;
 }
 
-void conference_mutex_unlock(conference_obj_t *conference) {
+#define LOOPS_TO_AVG_OVER 200
+
+switch_time_t conference_mutex_unlock(conference_obj_t *conference) {
     switch_time_t now = switch_time_now();
-    if ((now - conference->mutex_time) > 10000) {
+    switch_time_t delta = now - conference->mutex_time;
+    if (delta > 10000) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
                           "TIMELOCK: Conference locked (mod_conference.c:%d) for a long time %" PRId64 "ms\n",
-                          conference->lineno, (now - conference->mutex_time)/1000);
+                          conference->lineno, delta);
     }
     conference->lineno = 0;
     switch_mutex_unlock(conference->mutex);
+    return delta;
 }
 
 static void conference_cdr_del(conference_member_t *member)
@@ -3261,8 +3269,36 @@ static int opus_loss_cal(conference_member_t *member, int loss) {
 
 static void member_set_cwc(conference_member_t *member, int loss)
 {
-    member->meo.cwc = cwc_get(member->conference->ceo.cwc[member->meo.cwc->cwc_idx],
-                              member->codec_id, member->impl_id, loss);
+    if (member->meo.cwc) {
+        member->meo.cwc = cwc_get(member->conference->ceo.cwc[member->meo.cwc->cwc_idx],
+                                  member->codec_id, member->impl_id, loss);
+    } else {
+        member->meo.cwc = cwc_get(member->conference->ceo.cwc[0],
+                                  member->codec_id, member->impl_id, loss);
+    }
+}
+
+static void conference_opus_complexity_adjust(conference_obj_t *conference) {
+    conference_member_t *member = NULL;
+
+    conference_mutex_lock(conference);
+    switch_mutex_lock(conference->member_mutex);
+
+    for (int i = 0; i < eMemberListTypes_Recorders; i++) {
+        for (member = conference->member_lists[i]; member; member = member->next) {
+            if (switch_test_flag(member, MFLAG_NOCHANNEL) || !switch_test_flag(member, MFLAG_RUNNING)) {
+                continue;
+            }
+            if (member->ianacode < 95) {
+                continue;
+            }
+            if (switch_core_codec_ready(&member->write_codec)) {
+                switch_core_ctl(&member->write_codec, 2, NULL);
+            }
+        }
+    }
+    switch_mutex_unlock(conference->member_mutex);
+    conference_mutex_unlock(conference);
 }
 
 static void conference_opus_loss_adjust(conference_obj_t *conference) {
@@ -4165,6 +4201,22 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
 
     cl->fuze_ticks += 1;
 
+    /* check whether we're generally taking too much time in this loop ... if we are we should try to
+     * get rid of some complexity.
+     */
+    if (conference->conference_loop_time_cnt >= LOOPS_TO_AVG_OVER) {
+        switch_time_t avg = conference->conference_loop_time/conference->conference_loop_time_cnt;
+        if (avg >= 10000) {
+            /* next time through try to adjust things down */
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Spending too much time in conference loop avg time %" PRId64 " over %d runs.\n",
+                              avg, conference->conference_loop_time_cnt);
+            conference_opus_complexity_adjust(conference);
+            ceo_complexity_adjust(&conference->ceo, -1);
+        }
+        conference->conference_loop_time = 0;
+        conference->conference_loop_time_cnt = 0;
+    }
+
     /* Encoder Optimization: Start the next cycle of output */
     ceo_start_write(&conference->ceo);
 
@@ -4958,7 +5010,10 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                           (switch_time_now() - now)/1000, debug_str);
     }
 
-    conference_mutex_unlock(conference);
+    delta = conference_mutex_unlock(conference);
+
+    conference->conference_loop_time += delta;
+    conference->conference_loop_time_cnt += 1;
 
     return CONFERENCE_LOOP_RET_OK;
 }

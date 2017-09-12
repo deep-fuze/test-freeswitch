@@ -6,6 +6,8 @@
 #define CONF_DBLOCK_SIZE CONF_BUFFER_SIZE
 #define CONF_DBUFFER_SIZE CONF_BUFFER_SIZE
 
+//#define SIMULATE_LOAD
+
 static switch_bool_t cwc_set_frame(conference_write_codec_t *cwc, uint32_t read_idx, switch_frame_t *frame);
 static switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t read_idx, int16_t *max);
 static switch_bool_t cwc_frame_encoded(conference_write_codec_t *cwc, uint32_t read_idx);
@@ -15,6 +17,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_init(conference_en
 SWITCH_DECLARE(void) switch_core_conference_encode_destroy(conference_encoder_state_t *encoder_state);
 SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_frame(conference_encoder_state_t *encoder_state, switch_frame_t *frame,
                                                                     switch_io_flag_t flags, switch_frame_t **ret_enc_frame);
+SWITCH_DECLARE(switch_status_t) switch_core_conference_encoder_adjust_complexity(conference_encoder_state_t *encoder_state, int direction);
 
 void cwc_print(conference_write_codec_t *cwc, switch_core_session_t *session, int rd_idx) {
     switch_mutex_lock(cwc->codec_mutex);
@@ -103,6 +106,11 @@ void cwc_destroy(conference_write_codec_t *cwc) {
 }
 
 switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t *data, uint32_t bytes, int16_t max) {
+#ifndef SIMULATE_LOAD
+    int simulate_load = 0;
+#else
+    int simulate_load = 1;
+#endif
     if (bytes > ENC_FRAME_DATA) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "cwc_write_buffer = %d\n", bytes);
         return SWITCH_FALSE;
@@ -116,7 +124,7 @@ switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t
     switch_mutex_lock(cwc->codec_mutex);
 
     /* now encode here! */
-    if (cwc->encoder && cwc->listener_count > 0 && !cwc->frames[cwc->write_idx].encoded) {
+    if (cwc->encoder && (cwc->listener_count > 0 || simulate_load) && !cwc->frames[cwc->write_idx].encoded) {
         switch_status_t encode_status;
         switch_io_flag_t flags = SWITCH_IO_FLAG_NONE;
         switch_frame_t *ret_enc_frame;
@@ -251,6 +259,16 @@ void ceo_destroy(conf_encoder_optimization_t *ceo, char *name) {
     }
 }
 
+void ceo_complexity_adjust(conf_encoder_optimization_t *ceo, int direction) {
+    for (conference_write_codec_t *wp_ptr = ceo->cwc[0];
+         wp_ptr != NULL;
+         wp_ptr = wp_ptr->next) {
+        if (wp_ptr->ianacode > 95 && wp_ptr->encoder) {
+            switch_core_conference_encoder_adjust_complexity(wp_ptr->encoder, direction);
+        }
+    }
+}
+
 //#define SIMULATE_ENCODER_LOSS
 switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, uint32_t bytes, int16_t max) {
 #ifdef SIMULATE_ENCODER_LOSS
@@ -307,6 +325,9 @@ switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, 
 switch_status_t ceo_write_new_wc(conf_encoder_optimization_t *ceo, switch_codec_t *frame_codec, switch_codec_t *write_codec,
                                  int codec_id, int impl_id, int ianacode, int loss_percent) {
     conference_write_codec_t *new_write_codec;
+#ifdef SIMULATE_LOAD
+    loss_percent += 150;
+#endif
 
     for (int i = 0; i < N_CWC; i++) {
         for (int j = loss_percent; j >= 0; j -= 10) {

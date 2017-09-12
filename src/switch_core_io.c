@@ -3015,6 +3015,19 @@ SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_init(conference_en
     return status;
 }
 
+SWITCH_DECLARE(switch_status_t) switch_core_conference_encoder_adjust_complexity(conference_encoder_state_t *encoder_state, int direction)
+{
+    switch_status_t status = SWITCH_STATUS_SUCCESS;
+    if (switch_core_codec_ready(&encoder_state->write_codec)) {
+        if (direction == 1) {
+            switch_core_ctl(&encoder_state->write_codec, 3, NULL);
+        } else {
+            switch_core_ctl(&encoder_state->write_codec, 2, NULL);
+        }
+    }
+    return status;
+}
+
 SWITCH_DECLARE(void) switch_core_conference_encode_destroy(conference_encoder_state_t *encoder_state)
 {
     if (encoder_state->write_resampler) {

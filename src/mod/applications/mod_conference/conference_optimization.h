@@ -144,6 +144,7 @@ switch_status_t ceo_write_new_wc(conf_encoder_optimization_t *ceo, switch_codec_
 
 void ceo_set_listener_count(conf_encoder_optimization_t *ceo, int ianacode, int loss_percent, uint32_t count);
 void ceo_set_listener_count_incr(conf_encoder_optimization_t *ceo, int ianacode, int loss_percent, uint32_t count);
+void ceo_complexity_adjust(conf_encoder_optimization_t *ceo, int direction);
 
 /* Conference frames */
 void meo_initialize(conf_member_encoder_optimization_t *meo);
