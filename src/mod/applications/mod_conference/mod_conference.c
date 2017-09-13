@@ -370,9 +370,6 @@ typedef struct {
     int leadin_over;
     switch_io_flag_t io_flags;
     switch_thread_id_t tid;
-#ifdef PROFILE
-    switch_time_t ts[10];
-#endif
     switch_time_t rx_time, max_time, rx_period_start;
 } input_loop_data_t;
 
@@ -430,6 +427,7 @@ typedef struct {
     int idx;
     int count;
     int process_avg_idx;
+    switch_bool_t full;
 
     float process_avg[PROCESS_AVG_CNT];
     float process_avg_min[PROCESS_AVG_CNT];
@@ -700,7 +698,6 @@ typedef struct conference_obj {
 
     switch_time_t conference_loop_time;
     int conference_loop_time_cnt;
-
 } conference_obj_t;
 
 /* Relationship with another member */
@@ -912,9 +909,6 @@ static switch_status_t conf_api_unlock_and_unmute(conference_member_t *member, s
 static int conference_list_add(conference_obj_t *conference, participant_thread_data_t *ol);
 static int conference_list_remove(conference_obj_t *conference, participant_thread_data_t *ol);
 static void conference_list_add_to_idx(conference_obj_t *conference, participant_thread_data_t *ol, int idx);
-#ifdef NOTIFY_MUTED
-static void notify_muted(conference_member_t *member);
-#endif
 static void launch_conference_record_thread(conference_obj_t *conference, char *path, switch_bool_t autorec);
 
 SWITCH_STANDARD_API(conf_api_main);
@@ -4206,6 +4200,8 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
      */
     if (conference->conference_loop_time_cnt >= LOOPS_TO_AVG_OVER) {
         switch_time_t avg = conference->conference_loop_time/conference->conference_loop_time_cnt;
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Average time spent in conference loop %" PRId64 " over %d runs.\n",
+                          avg, conference->conference_loop_time_cnt);
         if (avg >= 10000) {
             /* next time through try to adjust things down */
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Spending too much time in conference loop avg time %" PRId64 " over %d runs.\n",
@@ -6477,17 +6473,8 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
         il->io_flags &= ~SWITCH_IO_FLAG_ACTIVE_TALKER;
     }
 
-#ifdef PROFILE
-    il->ts[0] = switch_time_now();
-    status = switch_core_session_fast_read_frame_from_socket(session, &il->read_frame, il->io_flags, 0);
-    il->ts[0] = switch_time_now() - il->ts[0];
-    il->ts[1] = switch_time_now();
-    status = switch_core_session_fast_read_frame_from_jitterbuffer(session, &il->read_frame, il->io_flags, 0);
-    il->ts[1] = switch_time_now() - il->ts[1];
-#else
     status = switch_core_session_fast_read_frame_from_socket(session, &il->read_frame, il->io_flags, 0);
     status = switch_core_session_fast_read_frame_from_jitterbuffer(session, &il->read_frame, il->io_flags, 0);
-#endif
 
     if (status == SWITCH_STATUS_FALSE || !il->read_frame || !il->read_frame->datalen) {
         /*
@@ -7319,9 +7306,12 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
     uint32_t overflow_number = list->idx/globals.nthreads;
     switch_time_t status_output_period = PROCESSING_PERIOD;
     int runs = 0;
-#ifdef PROFILE
-    switch_time_t ts[10];
-#endif
+    switch_time_t conference_input_time = 0;
+    int conference_input_time_cnt = 0;
+    switch_time_t conference_mix_time = 0;
+    int conference_mix_time_cnt = 0;
+    switch_time_t conference_output_time = 0;
+    int conference_output_time_cnt = 0;
 
     /*
      * There's an edge case where we might have 2 threads processing a single queue.  The last thread
@@ -7329,6 +7319,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
      */
     get_conference_thread_lock(tid);
     list->tid = tid;
+    list->full = SWITCH_FALSE;
     release_conference_thread_lock();
     
     if (switch_core_timer_init(&timer, "soft", interval, tsamples, NULL) != SWITCH_STATUS_SUCCESS) {
@@ -7345,18 +7336,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
      * for normal threads: wake up every 20ms
      */
     next_wake_up = switch_time_now() + 20000;
-
     conference_thread_list_lock(list->idx, tid);
-#ifdef PROFILE
-    ts[0] = ts[1] = ts[2] = ts[3] = ts[4] = ts[5] = ts[6] = switch_time_now();
-#endif
-
-#if 0
-    if (list->tid < globals.nthreads) {
-        switch_core_thread_set_cpu_affinity(list->tid);
-    }
-#endif
-
     while (1) {
         int count = 0, count_null = 0, count_not_sent = 0, count_ok = 0, count_no_frame = 0, count_long_sends = 0;
         uint32_t time_since_last_output;
@@ -7364,13 +7344,13 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
         int count_sent_frames = 0;
         float total_sent_frames = 0;
         float avg_time_since_last_output = 0.0;
+        switch_time_t input_processing_time;
+        switch_time_t output_processing_time;
+        switch_time_t mix_processing_time;
+
         globals.output_thread_time[list->idx] = loop_now;
 
         /* luke todo put in a stop condition */
-#ifdef PROFILE
-        ts[0] = switch_time_now();
-#endif
-
         if (list->count == 0) {
             status_output_period = PROCESSING_PERIOD_WHILE_IDLE;
         } else {
@@ -7402,25 +7382,12 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             min_time = 20000;
 
             for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
-                uint64_t data_time;
-                uint64_t time_in_meeting;
                 if (ols->stopping) { continue; }
                 if (ols->member->variable_encoded_length) { continue; }
-
-                time_in_meeting = (switch_time_now() - ols->member->time_of_first_packet)/1000;
-                data_time = (ols->member->data_sent/8);
-
-                if (abs(time_in_meeting-data_time) > 250) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_WARNING,
-                                      "time in meeting: %" PRId64 "ms data time: %" PRId64 "ms delta: %" PRId64 "ms\n",
-                                      time_in_meeting, data_time, time_in_meeting-data_time);
-                }
             }
         }
 
-#ifdef PROFILE
-        ts[1] = switch_time_now();
-#endif
+        input_processing_time = switch_time_now();
         for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
             INPUT_LOOP_RET ret;
             switch_time_t now = switch_time_now();
@@ -7444,14 +7411,6 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             now = switch_time_now();
             ret = conference_loop_input(ols->ild);
             now = switch_time_now() - now;
-
-#ifdef PROFILE
-            if (now > 2000) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_WARNING,
-                                  "conference_loop_input took %" PRId64 "us [%" PRId64 " %" PRId64 " %" PRId64 " %" PRId64 " %" PRId64 "]\n",
-                                  now, ols->ild->ts[0], ols->ild->ts[1], ols->ild->ts[2], ols->ild->ts[3],ols->ild->ts[4]);
-            }
-#endif
 
             ols->ild->rx_time += now;
             if (now > ols->ild->max_time) {
@@ -7484,19 +7443,43 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             }
         }
 
-#ifdef PROFILE
-        ts[2] = switch_time_now();
-        if ((ts[2] - ts[1]) > 20000) {
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
-                              "1:%" PRId64 " 2:%" PRId64 " 3:%" PRId64 " 4:%" PRId64 " 5:%" PRId64 " 6:%" PRId64 "\n",
-                              (ts[1]-ts[0])/1000,
-                              (ts[2]-ts[1])/1000,
-                              (ts[3]-ts[2])/1000,
-                              (ts[4]-ts[3])/1000,
-                              (ts[5]-ts[4])/1000,
-                              (ts[6]-ts[5])/1000);
+        input_processing_time = switch_time_now() - input_processing_time;
+
+        conference_input_time += input_processing_time;
+        conference_input_time_cnt += 1;
+
+        if (conference_input_time_cnt >= LOOPS_TO_AVG_OVER &&
+            conference_output_time_cnt >= 1 &&
+            conference_mix_time_cnt >= 1) {
+            switch_time_t avg_input = conference_input_time/conference_input_time_cnt;
+            switch_time_t avg_output = conference_output_time/conference_output_time_cnt;
+            switch_time_t avg_mix = conference_mix_time/conference_mix_time_cnt;
+            switch_time_t avg = avg_input + avg_output + avg_mix;
+            switch_time_t max = 12000;
+
+            if (count > 0) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                                  "Average Processing Time: %" PRId64 " I: %" PRId64 " M: %" PRId64 " O: %" PRId64 "\n",
+                                  avg, avg_input, avg_mix, avg_output);
+                if (list->idx >= globals.nthreads) {
+                    max = 15000;
+                }
+                if (avg > max) {
+                    switch_log_printf(SWITCH_CHANNEL_LOG,
+                                      SWITCH_LOG_INFO, "Input Loop Average Processing Time Too High: %" PRId64 "\n",
+                                      avg);
+                    list->full = SWITCH_TRUE;
+                } else {
+                    list->full = SWITCH_FALSE;
+                }
+            }
+            conference_input_time = 0;
+            conference_input_time_cnt = 0;
+            conference_output_time = 0;
+            conference_mix_time = 0;
+            conference_output_time_cnt = 0;
+            conference_mix_time_cnt = 0;
         }
-#endif
 
         /*
          * this covers the synchronization for overflow threads
@@ -7532,6 +7515,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
 
             loop_now = switch_time_now();
             count = 0;
+
             /*
              * Make sure that each conference that we have here has some participants in the main thread.
              * First check if we want to move any participants before making the decision to the "expensive" lock
@@ -7547,7 +7531,8 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                 if ((ols->member->conference->participants_per_thread[0] < MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD) ||
                     (ols->member->one_of_active)) {
                     /* move me */
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO, "Moving member %d from list: %d to list: %d\n",
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
+                                      "Moving member %d from list: %d to list: %d\n",
                                       ols->member->id, list->idx, ols->member->conference->list_idx);
                     move_count += 1;
                 }
@@ -7637,9 +7622,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             } /* move_count > 0 */
         }
 
-#ifdef PROFILE
-        ts[3] = switch_time_now();
-#endif
+        mix_processing_time = switch_time_now();
         if (list->idx < globals.nthreads) {
             count = 0;
             for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
@@ -7689,6 +7672,10 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                 }
             }
         }
+        mix_processing_time = switch_time_now() - mix_processing_time;
+
+        conference_mix_time += mix_processing_time;
+        conference_mix_time_cnt += 1;
 
         for (int idx = list->idx+globals.nthreads; idx < globals.tthreads; idx+=globals.nthreads) {
             switch_mutex_lock(globals.conference_thread[idx].cond_mutex);
@@ -7701,20 +7688,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             }
         }
 
-#ifdef PROFILE
-        ts[4] = switch_time_now();
-        if ((ts[4] - ts[5]) > 40000) {
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
-                              "1:%" PRId64 " 2:%" PRId64 " 3:%" PRId64 " 4:%" PRId64 " 5:%" PRId64 " 6:%" PRId64 "\n",
-                              (ts[1]-ts[0])/1000,
-                              (ts[2]-ts[1])/1000,
-                              (ts[3]-ts[2])/1000,
-                              (ts[4]-ts[3])/1000,
-                              (ts[5]-ts[4])/1000,
-                              (ts[6]-ts[5])/1000);
-        }
-#endif
-
+        output_processing_time = switch_time_now();
         for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
             OUTPUT_LOOP_RET ret = OUTPUT_LOOP_OK;
 
@@ -7827,42 +7801,24 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                 continue;
             }
         } /* for */
-
-#ifdef DEBUG_OUTPUT_ERRORS
-        if (count_null || count_not_sent || count_no_frame || avg_time_since_last_output > 0 || count_sent_frames) {
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
-                              "output loop %d count_ok=%d, count_null=%d count_not_sent=%d count_no_frame=%d "
-                              "long time since last send=%0.2f/%d threads sent frame =%0.2f/%d threads\n",
-                              list->idx, count_ok, count_null, count_not_sent, count_no_frame,
-                              count_long_sends > 0 ? (avg_time_since_last_output/count_long_sends) : 0,
-                              count_long_sends,
-                              count_sent_frames > 0 ? total_sent_frames/count_sent_frames : 0,
-                              count_sent_frames);
-        }
-#endif
+        output_processing_time = switch_time_now() - output_processing_time;
+        conference_output_time += output_processing_time;
+        conference_output_time_cnt += 1;
 
         loop_count += 1;
-#ifdef PROFILE
-        ts[5] = switch_time_now();
-#endif
+
         if (list->idx < globals.nthreads) {
             switch_time_t current_time = switch_time_now();
             switch_time_t wake_up_delta = (current_time < next_wake_up) ? (next_wake_up - current_time) : 0;
             switch_time_t time_asleep;
-#ifdef SIMULATE_DELAY
-            int rand_delay = rand() % 100000;
-#endif
+
             runs += 1;
             if (runs > 10 && current_time >= next_wake_up) {
                 wake_up_delta = 1000;
             }
             if (wake_up_delta) {
                 switch_time_t delta2;
-#ifdef SIMULATE_DELAY
-                if (rand_delay > 20000 && rand_delay < 60000) {
-                    wake_up_delta += rand_delay;
-                }
-#endif
+
                 release_conference_thread_list_lock(list->idx, runs);
                 switch_sleep(wake_up_delta);
 
@@ -7902,9 +7858,6 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             }
             loop_now = switch_time_now();
         }
-#ifdef PROFILE
-        ts[6] = switch_time_now();
-#endif
     } /* while */
 
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "output loop %d stopping count=%d list->tid=%lld tid=%lld\n",
@@ -14634,13 +14587,17 @@ static int conference_list_add(conference_obj_t *conference, participant_thread_
 
             avg = calculate_thread_utilization(idx);
 
-            if  (avg > min_sleep_per_thread && globals.conference_thread[idx].count < max_participants_per_thread) {
+            if  (avg > min_sleep_per_thread &&
+                 globals.conference_thread[idx].count < max_participants_per_thread &&
+                 globals.conference_thread[idx].full == SWITCH_FALSE) {
                 lowest = idx;
                 break;
             } else {
                 if (idx == start) {
                     highest_avg = avg;
-                } else if (avg > highest_avg && globals.conference_thread[idx].count < max_participants_per_thread) {
+                } else if (avg > highest_avg &&
+                           globals.conference_thread[idx].count < max_participants_per_thread &&
+                           globals.conference_thread[idx].full == SWITCH_FALSE) {
                     highest_avg = avg;
                     lowest = idx;
                 }
@@ -14649,12 +14606,14 @@ static int conference_list_add(conference_obj_t *conference, participant_thread_
     } else {
         for (idx = conference->list_idx; idx < globals.tthreads; idx += globals.nthreads) {
             if (idx < globals.nthreads) {
-                if (globals.conference_thread[idx].count < max_participants_per_thread) {
+                if (globals.conference_thread[idx].count < max_participants_per_thread &&
+                    globals.conference_thread[idx].full == SWITCH_FALSE) {
                     lowest = idx;
                     break;
                 }
             } else {
-                if (globals.conference_thread[idx].count < max_participants_per_othread) {
+                if (globals.conference_thread[idx].count < max_participants_per_othread &&
+                    globals.conference_thread[idx].full == SWITCH_FALSE) {
                     lowest = idx;
                     break;
                 }

@@ -25,19 +25,20 @@ $(WEBRTC_DIR)/libwebrtc/out:
 
 .installed_webrtc: .step2
 	mv $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation.o $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation_2.o
-	find $(WEBRTC_OBJ_DIR)/modules/audio_coding -name "*.o"	| xargs ar rv libwebrtccore.a
-	ar rv libwebrtccore.a $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/*.o
-	ar rv libwebrtccore.a $(WEBRTC_OBJ_DIR)/base/rtc_base_approved/checks.o
-	ar rv libwebrtccore.a $(WEBRTC_OBJ_DIR)/webrtc_common/common_types.o
-	ar rv libwebrtccore.a $(WEBRTC_OBJ_DIR)/modules/audio_coding/builtin_audio_decoder_factory_internal/builtin_audio_decoder_factory_internal.o
-	ar rv libwebrtccore.a $(WEBRTC_OBJ_DIR)/api/audio_codecs/builtin_audio_decoder_factory/builtin_audio_decoder_factory.o
-	ar rv libwebrtccore.a $(WEBRTC_OBJ_DIR)/api/audio_codecs/audio_codecs_api/*
-	ar rv libwebrtccore.a $(WEBRTC_OBJ_DIR)/base/rtc_base_approved/*.o
-	ar rv libwebrtccore.a $(WEBRTC_OBJ_DIR)/modules/audio_coding/neteq/*.o
-	ar rv libwebrtccore.a $(WEBRTC_OBJ_DIR)/system_wrappers/metrics_default/metrics_default.o
-	ar rv libwebrtccore.a $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation_2.o
-	ar rv libwebrtccore.a $(WEBRTC_OBJ_DIR)/../third_party/libsrtp/libsrtp/srtp.o
-	find $(WEBRTC_OBJ_DIR)/common_audio/ -name "*.o" | xargs ar rv libwebrtccore.a
+	find $(WEBRTC_OBJ_DIR)/modules/audio_coding -name "*.o"	| xargs ar cru libwebrtccore.a
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/*.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/base/rtc_base_approved/checks.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/webrtc_common/common_types.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/modules/audio_coding/builtin_audio_decoder_factory_internal/builtin_audio_decoder_factory_internal.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/api/audio_codecs/builtin_audio_decoder_factory/builtin_audio_decoder_factory.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/api/audio_codecs/audio_codecs_api/*
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/base/rtc_base_approved/*.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/modules/audio_coding/neteq/*.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/system_wrappers/metrics_default/metrics_default.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation_2.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/../third_party/libsrtp/libsrtp/srtp.o
+	find $(WEBRTC_OBJ_DIR)/common_audio/ -name "*.o" | xargs ar cru libwebrtccore.a
+	ranlib libwebrtccore.a
 	touch .installed_webrtc
 
 all: .installed_webrtc

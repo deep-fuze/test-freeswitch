@@ -6,7 +6,7 @@
 #define CONF_DBLOCK_SIZE CONF_BUFFER_SIZE
 #define CONF_DBUFFER_SIZE CONF_BUFFER_SIZE
 
-//#define SIMULATE_LOAD
+//#define SIMULATE_LOAD 30
 
 static switch_bool_t cwc_set_frame(conference_write_codec_t *cwc, uint32_t read_idx, switch_frame_t *frame);
 static switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t read_idx, int16_t *max);
@@ -326,7 +326,7 @@ switch_status_t ceo_write_new_wc(conf_encoder_optimization_t *ceo, switch_codec_
                                  int codec_id, int impl_id, int ianacode, int loss_percent) {
     conference_write_codec_t *new_write_codec;
 #ifdef SIMULATE_LOAD
-    loss_percent += 150;
+    loss_percent += SIMULATE_LOAD;
 #endif
 
     for (int i = 0; i < N_CWC; i++) {

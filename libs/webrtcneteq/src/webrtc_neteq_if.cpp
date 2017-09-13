@@ -27,8 +27,13 @@ public:
 
 t_WebRTC g_WebRTC;
 
+//#define SIMULATE_LOAD 100
+
 typedef struct {
-  void *main_inst;
+  webrtc::NetEq *main_inst;
+#ifdef SIMULATE_LOAD
+  webrtc::NetEq *other_inst[SIMULATE_LOAD];
+#endif
   uint16_t local_seqno;
   uint16_t last_rd_seqno; 
   uint16_t pkt_ms;
@@ -43,7 +48,7 @@ typedef struct {
  * Create the jitter buffer
  */
 WebRtcNetEQ_status_t WebRtcNetEQ_Init_inst(void **inst, app_memory_alloc_t alloc_cb, void *mempool, 
-					   uint32_t rate, uint32_t payload, const char *codecname, uint16_t packet_ms)
+                                           uint32_t rate, uint32_t payload, const char *codecname, uint16_t packet_ms)
 {
   neteq_inst_t *neteq_inst;
 
@@ -70,31 +75,58 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Init_inst(void **inst, app_memory_alloc_t alloc
   neteq = webrtc::NetEq::Create(neteq_inst->config, g_WebRTC.decoder_factory);
   neteq_inst->main_inst = neteq;
 
+#ifdef SIMULATE_LOAD
+  for (int i = 0; i < SIMULATE_LOAD; i++) {
+    app_log_cb(1, "WebRtcNetEQ_Init_inst: Simulating load %d\n", i);
+    neteq_inst->other_inst[i] = webrtc::NetEq::Create(neteq_inst->config, g_WebRTC.decoder_factory);
+  }
+#endif
+
   if (!neteq) {
     app_log_cb(3, "WebRtcNetEQ_Init_inst: ERROR couldn't create webrtc::NetEq %d\n");
     return WebRtcNetEQ_ERROR;
   } else {
     app_log_cb(1, "WebRtcNetEQ_Init_inst: Created webrtc::NetEq %p NetEqInst %p\n",
-	       neteq, neteq_inst);
+               neteq, neteq_inst);
   }
 
   switch (payload) {
   case 0:
     neteq->RegisterPayloadType(webrtc::NetEqDecoder::kDecoderPCMu, "g.711u", 0);
     app_log_cb(1, "WebRtcNetEQ_Init_inst: registered decoder pt=%d name=%s rate=%d\n", payload, codecname, rate);
+#ifdef SIMULATE_LOAD
+    for (int i = 0; i < SIMULATE_LOAD; i++) {
+      neteq_inst->other_inst[i]->RegisterPayloadType(webrtc::NetEqDecoder::kDecoderPCMu, "g.711u", 0);
+    }
+#endif
     break;
   case 8:
     neteq->RegisterPayloadType(webrtc::NetEqDecoder::kDecoderPCMa, "g.711a", 8);
     app_log_cb(1, "WebRtcNetEQ_Init_inst: registered decoder pt=%d name=%s rate=%d\n", payload, codecname, rate);
+#ifdef SIMULATE_LOAD
+    for (int i = 0; i < SIMULATE_LOAD; i++) {
+      neteq_inst->other_inst[i]->RegisterPayloadType(webrtc::NetEqDecoder::kDecoderPCMa, "g.711a", 8);
+    }
+#endif
     break;
   case 9:
     neteq->RegisterPayloadType(webrtc::NetEqDecoder::kDecoderG722, "g.722", 9);
     app_log_cb(1, "WebRtcNetEQ_Init_inst: registered decoder pt=%d name=%s rate=%d\n", payload, codecname, rate);
+#ifdef SIMULATE_LOAD
+    for (int i = 0; i < SIMULATE_LOAD; i++) {
+      neteq_inst->other_inst[i]->RegisterPayloadType(webrtc::NetEqDecoder::kDecoderG722, "g.722", 9);
+    }
+#endif
     break;
   default:
     if (payload > 95 && !strcasecmp(codecname, "opus") && rate == 48000) {
       neteq->RegisterPayloadType(webrtc::NetEqDecoder::kDecoderOpus, "opus", payload);
       app_log_cb(1, "WebRtcNetEQ_Init_inst: registered decoder pt=%d name=%s rate=%d\n", payload, codecname, rate);
+#ifdef SIMULATE_LOAD
+      for (int i = 0; i < SIMULATE_LOAD; i++) {
+        neteq_inst->other_inst[i]->RegisterPayloadType(webrtc::NetEqDecoder::kDecoderOpus, "opus", payload);
+      }
+#endif
     } else {
       app_log_cb(3, "WebRtcNetEQ_Init_inst: ERROR bad payload type pt=%d name=%s rate=%d\n", payload, codecname, rate);
       return WebRtcNetEQ_ERROR;
@@ -123,8 +155,8 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Init_inst(void **inst, app_memory_alloc_t alloc
 
 static const uint32_t kMaskTimestamp = 0x03ffffff;
 WebRtcNetEQ_status_t WebRtcNetEQ_Insert(void *inst, int8_t *payload, uint32_t payload_len,
-					uint8_t payload_type, uint16_t seqno,
-					uint32_t ts, uint32_t ssrc, uint8_t marker)
+                                        uint8_t payload_type, uint16_t seqno,
+                                        uint32_t ts, uint32_t ssrc, uint8_t marker)
 {
   webrtc::RTPHeader header;
   neteq_inst_t *neteq_inst = (neteq_inst_t *)inst;
@@ -165,6 +197,11 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Insert(void *inst, int8_t *payload, uint32_t pa
 
   if (payload_len <= (neteq_inst->samples_per_10ms*8)) {
     ret = neteq->InsertPacket(header, rtc::ArrayView<const uint8_t>((const uint8_t*)payload, payload_len), now_in_ms);
+#ifdef SIMULATE_LOAD
+    for (int i = 0; i < SIMULATE_LOAD; i++) {
+      neteq_inst->other_inst[i]->InsertPacket(header, rtc::ArrayView<const uint8_t>((const uint8_t*)payload, payload_len), now_in_ms);
+    }
+#endif
   } else {
     app_log_cb(3, "WebRtcNetEQ_Insert Error payload len too long %d\n", payload_len);
   }
@@ -219,28 +256,36 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Extract(void *inst, int8_t *pcm_data, uint32_t 
     bool muted = false;
 
     ret = neteq->GetAudio(&audio_frame, &muted);
-
     olen = audio_frame.samples_per_channel_;
+
+#ifdef SIMULATE_LOAD
+    for (int i = 0; i < SIMULATE_LOAD; i++) {
+      webrtc::AudioFrame audio_frame_x;
+      bool muted_x = false;
+      neteq_inst->other_inst[i]->GetAudio(&audio_frame_x, &muted_x);
+    }
+#endif
+
 
     if (ret == 0) {
       if (!muted) {
-	const int8_t *data = (int8_t *)audio_frame.data();
-	if (audio_frame.sample_rate_hz_ == neteq_inst->rate) {
-	  memcpy(pcm_data, data, audio_frame.samples_per_channel_*2);
-	  neteq_inst->receiving = true;
-	} else {
-	  app_log_cb(2, "WebRtcNetEQ_Extract extract s/c=%lld r=%d (actual %d) nc=%lld t=%d va=%d\n",
-		     audio_frame.samples_per_channel_, audio_frame.sample_rate_hz_, neteq_inst->rate,
-		     audio_frame.num_channels_, audio_frame.speech_type_, audio_frame.vad_activity_);
-	  memset(pcm_data, 0, neteq_inst->samples_per_10ms*2);
-	}
+        const int8_t *data = (int8_t *)audio_frame.data();
+        if (audio_frame.sample_rate_hz_ == neteq_inst->rate) {
+          memcpy(pcm_data, data, audio_frame.samples_per_channel_*2);
+          neteq_inst->receiving = true;
+        } else {
+          app_log_cb(2, "WebRtcNetEQ_Extract extract s/c=%lld r=%d (actual %d) nc=%lld t=%d va=%d\n",
+                     audio_frame.samples_per_channel_, audio_frame.sample_rate_hz_, neteq_inst->rate,
+                     audio_frame.num_channels_, audio_frame.speech_type_, audio_frame.vad_activity_);
+          memset(pcm_data, 0, neteq_inst->samples_per_10ms*2);
+        }
 #if DEBUG
-	app_log_cb(1, "WebRtcNetEQ_Extract extract s/c=%lld r=%d nc=%lld t=%d va=%d\n",
-		   audio_frame.samples_per_channel_, audio_frame.sample_rate_hz_, audio_frame.num_channels_,
-		   audio_frame.speech_type_, audio_frame.vad_activity_);
+        app_log_cb(1, "WebRtcNetEQ_Extract extract s/c=%lld r=%d nc=%lld t=%d va=%d\n",
+                   audio_frame.samples_per_channel_, audio_frame.sample_rate_hz_, audio_frame.num_channels_,
+                   audio_frame.speech_type_, audio_frame.vad_activity_);
 #endif
       } else {
-	memset(pcm_data, 0, neteq_inst->samples_per_10ms*2);
+        memset(pcm_data, 0, neteq_inst->samples_per_10ms*2);
       }
     } else {
       app_log_cb(3, "WebRtcNetEQ_Extract Error extract ret == %d\n", ret);
