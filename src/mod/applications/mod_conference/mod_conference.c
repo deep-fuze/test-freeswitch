@@ -7288,6 +7288,499 @@ static void cleanup_member(participant_thread_data_t *ols) {
     }
 }
 
+/*
+ * Move participants from an overflow thread to the main thread
+ * Goals: 
+ *   1. Make sure that all active speakers are on the main thread (overflow threads are just for
+ *   broadcasting the mix
+ *   2. Make sure that the main thread has at least 2 conference participants
+ *
+ */
+
+static void rebalance_overflow_participants(conference_thread_data_t *list, int overflow_number)
+{
+	int count = 0, move_count = 0;
+	participant_thread_data_t *prev = NULL;
+
+	for (participant_thread_data_t *ols = list->loop; ols; ) {
+		count += 1;
+		if (count > 1000) {
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
+			break;
+		}
+
+		if (ols->stopping ||
+			ols->member->conference->list_idx == -1) {
+			ols = ols->next;
+			continue;
+		}
+
+		if ((ols->member->conference->participants_per_thread[0] < MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD) ||
+			(ols->member->one_of_active)) {
+			/* move me */
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
+							  "Moving member %d from list: %d to list: %d\n",
+							  ols->member->id, list->idx, ols->member->conference->list_idx);
+			move_count += 1;
+		}
+		ols = ols->next;
+	}
+	
+#ifdef SIMULATE_MOVING
+	move_count += (rand() % 100 < 10 ? 1 : 0);
+#endif
+	if (move_count > 0) {
+		int moved = 0;
+		/*
+		 * This lock is expensive as there is only one such lock shared across all threads.
+		 * Grab this lock with extreme caution!
+		 */
+		count = 0;
+		/*
+		 * Make sure that each conference that we have here has some participants in the main thread.
+		 * The simplified conference processing model requires this otherwise mixing will not happen
+		 * as mixing ONLY happens on the main thread.
+		 */
+		for (participant_thread_data_t *ols = list->loop; ols; ) {
+			int to;
+#ifdef SIMULATE_MOVING
+			int rand_move = rand() % 100;
+#else
+			int rand_move = 100;
+#endif
+			count += 1;
+			if (count > 1000) {
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
+				break;
+			}
+
+			if (ols->stopping || ols->member->conference->list_idx == -1) {
+				prev = ols;
+				ols = ols->next;
+				continue;
+			}
+
+			if (ols->member->conference->participants_per_thread[0] >= MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD &&
+				!ols->member->one_of_active && (rand_move >= 10 || moved)) {
+				prev = ols;
+                ols = ols->next;
+                continue;
+			}
+
+			/* move me */
+			to = ols->member->conference->list_idx;
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO, "Moving member %d from list: %d to list: %d\n",
+							  ols->member->id, list->idx, to);
+				
+			ols->member->meo.cwc = cwc_get(ols->member->conference->ceo.cwc[0],
+										   ols->member->codec_id, ols->member->impl_id, -1);
+			ols->member->meo.filelist = filelist_get(globals.filelist[ols->member->conference->list_idx],
+													 ols->member->codec_id, ols->member->impl_id);
+			meo_reset_idx(&ols->member->meo);
+
+			if (ols->member->meo.cwc == NULL || ols->member->meo.filelist == NULL) {
+				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_ERROR,
+								  "FAILED to set cwc:%s filelist:%s on move of member %d codec: %d/%d\n",
+								  (ols->member->meo.cwc == NULL ? "null" : "set"),
+								  (ols->member->meo.filelist == NULL ? "null" : "set"),
+								  ols->member->id, ols->member->codec_id, ols->member->impl_id);
+			} else {
+				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO, "move ol mid:%s/%d set cwc n_frames=%d\n",
+								  ols->member->mname, ols->member->id, ols->member->meo.cwc->num_conf_frames);
+			}
+
+			if (prev == NULL) {
+				list->loop = ols->next;
+				ols->next = NULL;
+				conference_list_add_to_idx(ols->member->conference, ols, ols->member->conference->list_idx);
+				ols->new_ol = SWITCH_TRUE;
+				ols = list->loop;
+				globals.conference_thread[list->idx].count -= 1;
+			} else {
+				prev->next = ols->next;
+				ols->next = NULL;
+				conference_list_add_to_idx(ols->member->conference, ols, ols->member->conference->list_idx);
+				ols->new_ol = SWITCH_TRUE;
+				ols = prev->next;
+				globals.conference_thread[list->idx].count -= 1;
+			}
+			if (rand_move < 10) {
+				moved = 1;
+			}
+		}
+	}
+}
+
+/*
+ * If the main thread seems to be consuming too many resources (i.e. it's "full") try to move
+ * some participants to an overflow thread.
+ *
+ */
+static void rebalance_main_participants(conference_thread_data_t *list)
+{
+	int count = 0, moved = 0;
+	participant_thread_data_t *prev = NULL;
+	int max_participants = 0;
+	participant_thread_data_t *max_member = NULL;
+	int to, to_idx;
+
+	/* we should only move participants off the main thread if the thread is full */
+	if (!list->full || list->idx >= globals.nthreads) {
+		return;
+	}
+
+	/* find the largest conference on the thread that is a candidate to move */
+	for (participant_thread_data_t *ols = list->loop; ols; ) {
+		count += 1;
+		if (count > 1000) {
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
+			break;
+		}
+		if (ols->stopping) { ols = ols->next; continue; }
+		if ((ols->member->conference->participants_per_thread[0] < MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD) ||
+			(ols->member->one_of_active) || (ols->member->conference->list_idx == -1)) {
+			/* skip this member */
+		} else if (ols->member->conference->participants_per_thread[0] > max_participants) {
+			max_participants = ols->member->conference->participants_per_thread[0];
+			max_member = ols;
+		}
+		ols = ols->next;
+	}
+
+	if (max_member == NULL) {
+		return;
+	}
+
+	count = 0;
+
+	to = 1;
+	for (int i = 1; i < N_CWC; i++) {
+		to_idx = list->idx+i*globals.nthreads;
+		if (globals.conference_thread[to_idx].full) {
+			continue;
+		}
+		if (globals.output_thread_dead[to_idx] > 100) {
+			continue;
+		}
+		if  (globals.conference_thread[to_idx].count < globals.max_participants_per_thread) {
+			to = i;
+			break;
+		}
+	}
+
+	to_idx = list->idx + to*globals.nthreads;
+
+	for (participant_thread_data_t *ols = list->loop; moved < 5 && ols; ) {
+		count += 1;
+		if (count > 1000) {
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
+			break;
+		}
+			
+		if (ols->stopping || ols->member->conference != max_member->member->conference || 
+			ols->member->one_of_active ||
+			ols->member->conference->participants_per_thread[list->idx] < MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD ||
+			ols->member->ms == MS_UNMUTED || ols->member->ms == MS_UNMUTING) {
+			prev = ols;
+			ols = ols->next;
+			continue;
+		}
+
+		/* move me */
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
+						  "Moving member %d from list: %d to list: %d\n",
+						  ols->member->id, list->idx, to);
+
+		ols->member->meo.cwc = cwc_get(ols->member->conference->ceo.cwc[to],
+									   ols->member->codec_id, ols->member->impl_id, -1);
+		ols->member->meo.filelist = filelist_get(globals.filelist[to_idx],
+												 ols->member->codec_id, ols->member->impl_id);
+		meo_reset_idx(&ols->member->meo);
+				
+		if (ols->member->meo.cwc == NULL || ols->member->meo.filelist == NULL) {
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_ERROR,
+							  "FAILED to set cwc:%s filelist:%s on move of member %d codec: %d/%d\n",
+							  (ols->member->meo.cwc == NULL ? "null" : "set"),
+							  (ols->member->meo.filelist == NULL ? "null" : "set"),
+							  ols->member->id, ols->member->codec_id, ols->member->impl_id);
+		} else {
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
+							  "move ol mid:%s/%d set cwc n_frames=%d\n",
+							  ols->member->mname, ols->member->id, ols->member->meo.cwc->num_conf_frames);
+		}
+				
+		if (prev == NULL) {
+			list->loop = ols->next;
+			ols->next = NULL;
+			conference_list_add_to_idx(ols->member->conference, ols, to_idx);
+			ols->new_ol = SWITCH_TRUE;
+			ols = list->loop;
+			globals.conference_thread[list->idx].count -= 1;
+		} else {
+			prev->next = ols->next;
+			ols->next = NULL;
+			conference_list_add_to_idx(ols->member->conference, ols, to_idx);
+			ols->new_ol = SWITCH_TRUE;
+			ols = prev->next;
+			globals.conference_thread[list->idx].count -= 1;
+		}
+		moved += 1;
+	}
+	if (moved >= 5) {
+		list->full = SWITCH_FALSE;
+	}
+
+}
+
+#if 0
+static void rebalance_move_conference(conference_thread_data_t *list)
+{
+	int count = 0, moved = 0;
+	participant_thread_data_t *prev = NULL;
+	int min_participants = 1000;
+	participant_thread_data_t *min_member = NULL;
+	int to, to_idx;
+	switch_bool_t larger_confs = SWITCH_FALSE;
+
+	/* we should only move participants off the main thread if the thread is full */
+	if (!list->full || list->idx >= globals.nthreads) {
+		return;
+	}
+
+	/* find the largest conference on the thread that is a candidate to move */
+	for (participant_thread_data_t *ols = list->loop; ols; ) {
+		count += 1;
+		if (count > 1000) {
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
+			break;
+		}
+		if (ols->stopping) { ols = ols->next; continue; }
+		if ((ols->member->conference->participants_per_thread[0] < MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD) ||
+			(ols->member->conference->list_idx == -1)) {
+			/* skip this member */
+		} else if (ols->member->conference->participants_per_thread[0] < min_participants) {
+			bool skip = SWITCH_FALSE;
+			for (int i = 1; i < N_CWC; i++) {
+				if (ols->member->conference->participants_per_thread[i] > 0) {
+					skip = SWITCH_TRUE;
+				}
+			}
+			if (!skip) {
+				min_participants = ols->member->conference->participants_per_thread[0];
+				min_member = ols;
+			} else {
+				larger_confs = SWITCH_TRUE;
+			}
+		} else if (min_member && 
+				   ols->member->conference->participants_per_thread[0] >= min_participants &&
+				   min_member->member->conference != ols->member->conference) {
+			larger_confs = SWITCH_TRUE;
+		}
+		ols = ols->next;
+	}
+
+	if (min_member == NULL || !larger_confs) {
+		return;
+	}
+
+	min_participants = 1000;
+	to_idx = -1;
+	for (int i = 0; i < globals.nthreads; i++) {
+		if (i == list->idx) {
+			continue;
+		}
+		if (globals.output_thread_dead[i] > 100) {
+			continue;
+		}
+		if (globals.output_thread_dead[i].full) {
+			continue;
+		}
+		if (globals.conference_thread[i].count == 0) {
+			to_idx = i;
+			break;
+		}
+		if (globals.conference_thread[i].count < min_participants) {
+			min_participants = globals.conference_thread[i].count;
+			to_idx = i;
+		}
+	}
+	if (to_idx == -1) {
+		return;
+	}
+	for (participant_thread_data_t *ols = list->loop; moved < 5 && ols; ) {
+		count += 1;
+		if (count > 1000) {
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
+			break;
+		}
+			
+		if (ols->stopping || ols->member->conference != max_member->member->conference || 
+			ols->member->one_of_active ||
+			ols->member->conference->participants_per_thread[list->idx] < MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD &&
+			ols->member->ms == MS_UNMUTED || ols->member->ms == MS_UNMUTING) {
+			prev = ols;
+			ols = ols->next;
+			continue;
+		}
+
+		/* move me */
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
+						  "Moving member %d from list: %d to list: %d\n",
+						  ols->member->id, list->idx, to);
+
+		ols->member->meo.cwc = cwc_get(ols->member->conference->ceo.cwc[to],
+									   ols->member->codec_id, ols->member->impl_id, -1);
+		ols->member->meo.filelist = filelist_get(globals.filelist[to_idx],
+												 ols->member->codec_id, ols->member->impl_id);
+		meo_reset_idx(&ols->member->meo);
+				
+		if (ols->member->meo.cwc == NULL || ols->member->meo.filelist == NULL) {
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_ERROR,
+							  "FAILED to set cwc:%s filelist:%s on move of member %d codec: %d/%d\n",
+							  (ols->member->meo.cwc == NULL ? "null" : "set"),
+							  (ols->member->meo.filelist == NULL ? "null" : "set"),
+							  ols->member->id, ols->member->codec_id, ols->member->impl_id);
+		} else {
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
+							  "move ol mid:%s/%d set cwc n_frames=%d\n",
+							  ols->member->mname, ols->member->id, ols->member->meo.cwc->num_conf_frames);
+		}
+				
+		if (prev == NULL) {
+			list->loop = ols->next;
+			ols->next = NULL;
+			conference_list_add_to_idx(ols->member->conference, ols, to_idx);
+			ols->new_ol = SWITCH_TRUE;
+			ols = list->loop;
+			globals.conference_thread[list->idx].count -= 1;
+		} else {
+			prev->next = ols->next;
+			ols->next = NULL;
+			conference_list_add_to_idx(ols->member->conference, ols, to_idx);
+			ols->new_ol = SWITCH_TRUE;
+			ols = prev->next;
+			globals.conference_thread[list->idx].count -= 1;
+		}
+		moved += 1;
+	}
+	if (moved >= 5) {
+		list->full = SWITCH_FALSE;
+	}
+}
+#endif
+
+static void output_processing(conference_thread_data_t *list, switch_thread_id_t tid)
+{
+    switch_timer_t timer = {0};
+	int sent_frames;
+	uint32_t time_since_last_output;
+	int count_null = 0, count_not_sent = 0, count_ok = 0, count_no_frame = 0;
+
+	for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
+		OUTPUT_LOOP_RET ret = OUTPUT_LOOP_OK;
+
+		if (ols->stopping) { continue; }
+		if (!ols->member->meo.cwc) { continue; }
+
+		if (!ols->initialized) {
+			switch_mutex_lock(ols->member->meo.cwc->codec_mutex);
+			meo_reset_idx(&ols->member->meo);
+			switch_mutex_unlock(ols->member->meo.cwc->codec_mutex);
+			meo_start(&ols->member->meo);
+			ols->initialized = SWITCH_TRUE;
+		}
+
+		if (ols->new_ol) {
+			ols->new_ol = SWITCH_FALSE;
+			
+			if (conference_loop_input_setup(ols->ild) != SWITCH_STATUS_SUCCESS) {
+				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_ERROR,
+								  "Failed to create input loop for mid:%s/%d\n",
+								  ols->member->mname, ols->member->id);
+			}
+			ols->tid = tid;
+			switch_monitor_change_tid(tid, switch_core_get_monitor_index(ols->member->session));
+			switch_monitor_change_desc(tid, switch_core_get_monitor_index(ols->member->session), "conference_thread");
+			ols->member->meo.cwc = cwc_get(ols->member->conference->ceo.cwc[list->idx/globals.nthreads],
+										   ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id, -1);
+
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO, "new_ol mid:%s/%d set cwc n_frames=%d\n",
+							  ols->member->mname, ols->member->id, ols->member->meo.cwc->num_conf_frames);
+
+			ols->member->meo.filelist = filelist_get(globals.filelist[list->idx],
+													 ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id);
+			switch_channel_change_thread(ols->channel);
+		}
+
+		if (ols->starting && !switch_test_flag(ols->member, MFLAG_ITHREAD) && ols->sanity > 0) {
+			ols->sanity -= 1;
+			continue;
+		} else if (ols->starting && switch_test_flag(ols->member, MFLAG_ITHREAD)) {
+			ols->starting = SWITCH_FALSE;
+			ols->sanity = 0;
+		}
+
+		if (!switch_test_flag(ols->member, MFLAG_RUNNING) || !switch_test_flag(ols->member, MFLAG_ITHREAD) ||
+			!switch_channel_ready(ols->channel)) {
+			cleanup_member(ols);
+			continue;
+		}
+
+		if (!ols->stopping) {
+			switch_time_t now = switch_time_now();
+
+			if ((now - ols->rx_period_start) > PROCESSING_PERIOD) {
+				ols->rx_period_start = now;
+				ols->max_time = 0;
+				ols->rx_time = 0;
+			}
+
+			ret = process_participant_output(ols, &timer, &time_since_last_output, &sent_frames);
+
+			now = switch_time_now() - now;
+			ols->rx_time += now;
+			if (now > ols->max_time) {
+				ols->max_time = now;
+			}
+		}
+
+		if (ret == OUTPUT_LOOP_OK) {
+			count_ok += 1;
+		} else if (ret == OUTPUT_LOOP_OK_NULL_FRAME) {
+			count_null += 1;
+		} else if (ret == OUTPUT_LOOP_OK_NOT_SENT) {
+			count_not_sent += 1;
+		} else if (ret == OUTPUT_LOOP_OK_NO_FRAME) {
+			count_no_frame += 1;
+		}
+
+		if (!ols->stopping &&
+			!(ret == OUTPUT_LOOP_OK || ret == OUTPUT_LOOP_OK_NULL_FRAME ||
+			  ret == OUTPUT_LOOP_OK_NOT_SENT || ret == OUTPUT_LOOP_OK_NO_FRAME)) {
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
+							  "Conference Output stopping:%d stopped:%d ret:%d\n",
+							  ols->stopping, ols->stopped, ret);
+
+			if (ret ==  OUTPUT_LOOP_FAILED) {
+				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
+								  "Loop failed\n");
+			} else if (ret == OUTPUT_LOOP_HANGUP) {
+				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
+								  "Hangup\n");
+			} else if (ols->stopping && !ols->stopped) {
+				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
+								  "Stopping\n");
+			}
+
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
+							  "stopping ret=%d\n", ret);
+
+			cleanup_member(ols);
+			continue;
+		}
+	} /* for */
+}
+
 static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void *obj)
 {
     conference_thread_data_t *list = (conference_thread_data_t *)obj;
@@ -7303,7 +7796,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
     switch_time_t next_wake_up;
     switch_time_t time_asleep_sum = 0;
     uint32_t behind = 0;
-    uint32_t overflow_number = list->idx/globals.nthreads;
+    int overflow_number = list->idx/globals.nthreads;
     switch_time_t status_output_period = PROCESSING_PERIOD;
     int runs = 0;
     switch_time_t conference_input_time = 0;
@@ -7338,15 +7831,10 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
     next_wake_up = switch_time_now() + 20000;
     conference_thread_list_lock(list->idx, tid);
     while (1) {
-        int count = 0, count_null = 0, count_not_sent = 0, count_ok = 0, count_no_frame = 0, count_long_sends = 0;
-        uint32_t time_since_last_output;
-        int sent_frames;
-        int count_sent_frames = 0;
-        float total_sent_frames = 0;
-        float avg_time_since_last_output = 0.0;
         switch_time_t input_processing_time;
         switch_time_t output_processing_time;
         switch_time_t mix_processing_time;
+        int count = 0;
 
         globals.output_thread_time[list->idx] = loop_now;
 
@@ -7386,6 +7874,10 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                 if (ols->member->variable_encoded_length) { continue; }
             }
         }
+
+		if (list->idx < globals.nthreads && list->full) {
+			rebalance_main_participants(list);
+		}
 
         input_processing_time = switch_time_now();
         for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
@@ -7455,12 +7947,22 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             switch_time_t avg_output = conference_output_time/conference_output_time_cnt;
             switch_time_t avg_mix = conference_mix_time/conference_mix_time_cnt;
             switch_time_t avg = avg_input + avg_output + avg_mix;
+
+			/*
+			 * Try to keep processing under 12000us of every 20000us slice on the main threads.  This allows
+			 * for some variability + movement for active speakers.
+			 */
             switch_time_t max = 12000;
 
             if (count > 0) {
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
                                   "Average Processing Time: %" PRId64 " I: %" PRId64 " M: %" PRId64 " O: %" PRId64 "\n",
                                   avg, avg_input, avg_mix, avg_output);
+
+				/*
+				 * Overflow threads can consume a little more as they're just decoding incoming packets and sending
+				 * packets.  There's less need for variability on these threads as they do not deal with encodes.
+				 */
                 if (list->idx >= globals.nthreads) {
                     max = 15000;
                 }
@@ -7485,8 +7987,6 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
          * this covers the synchronization for overflow threads
          */
         if (list->idx >= globals.nthreads) {
-            int move_count = 0;
-            participant_thread_data_t *prev = NULL;
             switch_time_t time_asleep = 0;
             switch_time_t current_time = switch_time_now();
 
@@ -7521,105 +8021,7 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
              * First check if we want to move any participants before making the decision to the "expensive" lock
              * and move.
              */
-            for (participant_thread_data_t *ols = list->loop; ols; ) {
-                count += 1;
-                if (count > 1000) {
-                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
-                }
-
-                if (ols->stopping) { ols = ols->next; continue; }
-                if ((ols->member->conference->participants_per_thread[0] < MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD) ||
-                    (ols->member->one_of_active)) {
-                    /* move me */
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
-                                      "Moving member %d from list: %d to list: %d\n",
-                                      ols->member->id, list->idx, ols->member->conference->list_idx);
-                    move_count += 1;
-                }
-                ols = ols->next;
-            }
-
-#ifdef SIMULATE_MOVING
-            move_count += (rand() % 100 < 10 ? 1 : 0);
-#endif
-            if (move_count > 0) {
-                int moved = 0;
-                /*
-                 * This lock is expensive as there is only one such lock shared across all threads.
-                 * Grab this lock with extreme caution!
-                 */
-                count = 0;
-                /*
-                 * Make sure that each conference that we have here has some participants in the main thread.
-                 * The simplified conference processing model requires this otherwise mixing will not happen
-                 * as mixing ONLY happens on the main thread.
-                 */
-                for (participant_thread_data_t *ols = list->loop; ols; ) {
-#ifdef SIMULATE_MOVING
-                    int rand_move = rand() % 100;
-#else
-                    int rand_move = 100;
-#endif
-                    count += 1;
-                    if (count > 1000) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "too many loops %d\n", count);
-                    }
-
-                    if (ols->stopping) { ols = ols->next; continue; }
-                    if ((ols->member->conference->participants_per_thread[0] < MIN_PARTICIPANTS_PER_CONFERENCE_IN_MAIN_THREAD) ||
-                        (ols->member->one_of_active) || (rand_move < 10 && !moved)) {
-                        /* move me */
-                        int to = ols->member->conference->list_idx;
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO, "Moving member %d from list: %d to list: %d\n",
-                                          ols->member->id, list->idx, to);
-
-                        ols->member->meo.cwc = cwc_get(ols->member->conference->ceo.cwc[0],
-                                                       ols->member->codec_id, ols->member->impl_id, -1);
-                        ols->member->meo.filelist = filelist_get(globals.filelist[0],
-                                                                 ols->member->codec_id, ols->member->impl_id);
-                        meo_reset_idx(&ols->member->meo);
-
-                        if (ols->member->meo.cwc == NULL || ols->member->meo.filelist == NULL) {
-                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_ERROR,
-                                              "FAILED to set cwc:%s filelist:%s on move of member %d codec: %d/%d\n",
-                                              (ols->member->meo.cwc == NULL ? "null" : "set"),
-                                              (ols->member->meo.filelist == NULL ? "null" : "set"),
-                                              ols->member->id, ols->member->codec_id, ols->member->impl_id);
-                        } else {
-                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO, "move ol mid:%s/%d set cwc n_frames=%d\n",
-                                              ols->member->mname, ols->member->id, ols->member->meo.cwc->num_conf_frames);
-                        }
-
-                        if (prev == NULL) {
-                            list->loop = ols->next;
-                            ols->next = NULL;
-                            if (ols->member->conference->list_idx == -1) {
-                                ols->member->conference->list_idx = overflow_number;
-                            }
-                            conference_list_add_to_idx(ols->member->conference, ols, ols->member->conference->list_idx);
-                            ols->new_ol = SWITCH_TRUE;
-                            ols = list->loop;
-                            globals.conference_thread[list->idx].count -= 1;
-                        } else {
-                            prev->next = ols->next;
-                            ols->next = NULL;
-                            if (ols->member->conference->list_idx == -1) {
-                                ols->member->conference->list_idx = overflow_number;
-                            }
-                            conference_list_add_to_idx(ols->member->conference, ols, ols->member->conference->list_idx);
-                            ols->new_ol = SWITCH_TRUE;
-                            ols = prev->next;
-                            globals.conference_thread[list->idx].count -= 1;
-                        }
-                    } else {
-                        prev = ols;
-                        ols = ols->next;
-                    }
-                    if (rand_move < 10) {
-                        moved = 1;
-                    }
-                }
-            } /* move_count > 0 */
+			rebalance_overflow_participants(list, overflow_number);
         }
 
         mix_processing_time = switch_time_now();
@@ -7672,8 +8074,8 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
                 }
             }
         }
-        mix_processing_time = switch_time_now() - mix_processing_time;
 
+        mix_processing_time = switch_time_now() - mix_processing_time;
         conference_mix_time += mix_processing_time;
         conference_mix_time_cnt += 1;
 
@@ -7689,118 +8091,9 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
         }
 
         output_processing_time = switch_time_now();
-        for (participant_thread_data_t *ols = list->loop; ols; ols = ols->next) {
-            OUTPUT_LOOP_RET ret = OUTPUT_LOOP_OK;
 
-            if (ols->stopping) { continue; }
-            if (!ols->member->meo.cwc) { continue; }
+		output_processing(list, tid);
 
-            if (!ols->initialized) {
-                switch_mutex_lock(ols->member->meo.cwc->codec_mutex);
-                meo_reset_idx(&ols->member->meo);
-                switch_mutex_unlock(ols->member->meo.cwc->codec_mutex);
-                meo_start(&ols->member->meo);
-                ols->initialized = SWITCH_TRUE;
-            }
-
-            if (ols->new_ol) {
-                ols->new_ol = SWITCH_FALSE;
-
-                if (conference_loop_input_setup(ols->ild) != SWITCH_STATUS_SUCCESS) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_ERROR,
-                                      "Failed to create input loop for mid:%s/%d\n",
-                                      ols->member->mname, ols->member->id);
-                }
-                ols->tid = tid;
-                switch_monitor_change_tid(tid, switch_core_get_monitor_index(ols->member->session));
-                switch_monitor_change_desc(tid, switch_core_get_monitor_index(ols->member->session), "conference_thread");
-                ols->member->meo.cwc = cwc_get(ols->member->conference->ceo.cwc[list->idx/globals.nthreads],
-                                               ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id, -1);
-
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO, "new_ol mid:%s/%d set cwc n_frames=%d\n",
-                                  ols->member->mname, ols->member->id, ols->member->meo.cwc->num_conf_frames);
-
-                ols->member->meo.filelist = filelist_get(globals.filelist[list->idx],
-                                                         ols->member->orig_read_impl.codec_id, ols->member->orig_read_impl.impl_id);
-                switch_channel_change_thread(ols->channel);
-            }
-
-            if (ols->starting && !switch_test_flag(ols->member, MFLAG_ITHREAD) && ols->sanity > 0) {
-                ols->sanity -= 1;
-                continue;
-            } else if (ols->starting && switch_test_flag(ols->member, MFLAG_ITHREAD)) {
-                ols->starting = SWITCH_FALSE;
-                ols->sanity = 0;
-            }
-
-            if (!switch_test_flag(ols->member, MFLAG_RUNNING) || !switch_test_flag(ols->member, MFLAG_ITHREAD) ||
-                !switch_channel_ready(ols->channel)) {
-                cleanup_member(ols);
-                continue;
-            }
-
-            if (!ols->stopping) {
-                switch_time_t now = switch_time_now();
-
-                if ((now - ols->rx_period_start) > PROCESSING_PERIOD) {
-                    ols->rx_period_start = now;
-                    ols->max_time = 0;
-                    ols->rx_time = 0;
-                }
-
-                ret = process_participant_output(ols, &timer, &time_since_last_output, &sent_frames);
-                if (time_since_last_output > 0) {
-                    avg_time_since_last_output += time_since_last_output;
-                    count_long_sends += 1;
-                }
-                if (sent_frames > 1) {
-                    total_sent_frames += sent_frames;
-                    count_sent_frames += 1;
-                }
-
-                now = switch_time_now() - now;
-                
-                ols->rx_time += now;
-                if (now > ols->max_time) {
-                    ols->max_time = now;
-                }
-            }
-
-            if (ret == OUTPUT_LOOP_OK) {
-                count_ok += 1;
-            } else if (ret == OUTPUT_LOOP_OK_NULL_FRAME) {
-                count_null += 1;
-            } else if (ret == OUTPUT_LOOP_OK_NOT_SENT) {
-                count_not_sent += 1;
-            } else if (ret == OUTPUT_LOOP_OK_NO_FRAME) {
-                count_no_frame += 1;
-            }
-
-            if (!ols->stopping &&
-                !(ret == OUTPUT_LOOP_OK || ret == OUTPUT_LOOP_OK_NULL_FRAME ||
-                  ret == OUTPUT_LOOP_OK_NOT_SENT || ret == OUTPUT_LOOP_OK_NO_FRAME)) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
-                                  "Conference Output stopping:%d stopped:%d ret:%d\n",
-                                  ols->stopping, ols->stopped, ret);
-
-                if (ret ==  OUTPUT_LOOP_FAILED) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
-                                      "Loop failed\n");
-                } else if (ret == OUTPUT_LOOP_HANGUP) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
-                                      "Hangup\n");
-                } else if (ols->stopping && !ols->stopped) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
-                                      "Stopping\n");
-                }
-
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
-                                  "stopping ret=%d\n", ret);
-
-                cleanup_member(ols);
-                continue;
-            }
-        } /* for */
         output_processing_time = switch_time_now() - output_processing_time;
         conference_output_time += output_processing_time;
         conference_output_time_cnt += 1;
