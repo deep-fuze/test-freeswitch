@@ -268,7 +268,7 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
         /* come up with a way to specify these */
         int bitrate_bps = 16000 /*opus_prefs.bitrate*/;
         int use_vbr = opus_prefs.use_vbr;
-        int complexity = 5 /*opus_prefs.complexity*/;
+        int complexity = 10 /*opus_prefs.complexity*/;
         int err;
         int samplerate = opus_codec_settings.samplerate ? opus_codec_settings.samplerate : codec->implementation->actual_samples_per_second;
         int inbandfec = 1;
