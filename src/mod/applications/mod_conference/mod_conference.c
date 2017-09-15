@@ -7523,6 +7523,8 @@ static void rebalance_main_participants(conference_thread_data_t *list)
 
 }
 
+// force conference moves to test conference moving
+//#define FUN_WITH_MOVES
 static void rebalance_move_conferences(conference_thread_data_t *list)
 {
     int count = 0, moved = 0;
@@ -7533,9 +7535,11 @@ static void rebalance_move_conferences(conference_thread_data_t *list)
     switch_bool_t larger_confs = SWITCH_FALSE;
 
     /* we should only move participants off the main thread if the thread is full */
+#ifndef FUN_WITH_MOVES
     if (!list->full || list->idx >= globals.nthreads) {
         return;
     }
+#endif
 
     /* find the largest conference on the thread that is a candidate to move */
     for (participant_thread_data_t *ols = list->loop; ols; ) {
@@ -7569,9 +7573,11 @@ static void rebalance_move_conferences(conference_thread_data_t *list)
     }
 
     if (min_member == NULL || !larger_confs) {
+#ifdef FUN_WITH_MOVES
+        if (min_member == NULL)
+#endif
         return;
     }
-
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Rebalance Move Participants (list=%d)\n", list->idx);
 
     min_participants = 1000;
@@ -7842,6 +7848,13 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             }
         }
 
+#ifdef FUN_WITH_MOVES
+        if (list->idx < globals.nthreads) {
+            if (loop_count % 200 == 0) {
+                rebalance_move_conferences(list);
+            }
+        }
+#endif
         if (list->idx < globals.nthreads && list->full) {
             rebalance_move_conferences(list);
             rebalance_main_participants(list);
