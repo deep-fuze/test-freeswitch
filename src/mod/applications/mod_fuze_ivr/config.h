@@ -24,7 +24,15 @@ struct ivrc_profile
     const char *conf_address;
     const char *conference_id;
     const char *extension;
+    const char *corp_name;
     int is_retired;
+
+    /* contactive */
+    const char *caller_name;
+    const char *caller_userid;
+    const char *caller_email;
+    int number_auth_is_allowed;
+    int caller_contactive_found;
 
     const char *api_profile;
     

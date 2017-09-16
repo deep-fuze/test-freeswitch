@@ -853,6 +853,12 @@ struct conference_member {
     float loss;
     float loss_target;
     int loss_idx;
+
+    switch_bool_t contactive;
+    char contactive_name[1024];
+    char contactive_userid[1024];
+    char contactive_email[1024];
+    char corp_name[1025];
 };
 
 typedef enum {
@@ -2287,6 +2293,9 @@ static switch_status_t conference_add_event_member_data(conference_member_t *mem
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Member-Ghost", "%s", switch_test_flag(member, MFLAG_GHOST) ? "true" : "false");
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Energy-Level", "%d", member->energy_level);
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Current-Energy", "%d", member->score);
+    if (strlen(member->contactive_name) > 0) {
+        switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Contactive-Name", "%s", member->contactive_name);
+    }
 
     return status;
 }
@@ -2986,6 +2995,10 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
         }
 
         memset(member->mname, 0, MAX_MEMBERNAME_LEN);
+        memset(member->contactive_name, 0, 1024);
+        memset(member->contactive_userid, 0, 1024);
+        memset(member->contactive_email, 0, 1024);
+        memset(member->corp_name, 0, 1024);
 
         if (member->sdpname) {
             char meeting_id[MAX_MEETING_ID_LEN];
@@ -2997,8 +3010,41 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             memset(instance_id, 0, MAX_INSTANCE_ID_LEN);
 
             /* e=sip:LSurazski@fuze.com;transport=tls;ak=K07e263539dfd55f9;id=6669902;inst=5033486 */
+            /* 16282212926@sjointgfn06;id=6819476;inst=5197892;contactive=true;name=Luke%20Surazski;userid=lsurazski;email=lsurazski%40thinkingphones.com;corp=thinkingphones*/
+
             pch = strchr(member->sdpname,'i');
             
+            if ((pch = strstr(member->sdpname, "contactive=true"))) {
+                switch_channel_set_variable(member->channel, "contactive", "true");
+                member->contactive = SWITCH_TRUE;
+
+                switch_set_flag(member, MFLAG_MOD);
+
+                if ((pch = strstr(member->sdpname, "contactive_name="))) {
+                    len = (ech = strstr(pch, ";")) ? (ech - pch) : strlen(member->sdpname) - (pch-member->sdpname);
+                    strncpy(member->contactive_name, pch+16, len-16);
+                    switch_url_decode(member->contactive_name);
+                    switch_channel_set_variable(member->channel, "contactive_name", member->contactive_name);
+                }
+                if ((pch = strstr(member->sdpname, "userid="))) {
+                    len = (ech = strstr(pch, ";")) ? (ech - pch) : strlen(member->sdpname) - (pch-member->sdpname);
+                    strncpy(member->contactive_userid, pch+7, len-7);
+                    switch_url_decode(member->contactive_userid);
+                    switch_channel_set_variable(member->channel, "contactive_userid", member->contactive_userid);
+                }
+                if ((pch = strstr(member->sdpname, "email="))) {
+                    len = (ech = strstr(pch, ";")) ? (ech - pch) : strlen(member->sdpname) - (pch-member->sdpname);
+                    strncpy(member->contactive_email, pch+6, len-6);
+                    switch_url_decode(member->contactive_email);
+                    switch_channel_set_variable(member->channel, "contactive_email", member->contactive_email);
+                }
+                if ((pch = strstr(member->sdpname, "corp="))) {
+                    len = (ech = strstr(pch, ";")) ? (ech - pch) : strlen(member->sdpname) - (pch-member->sdpname);
+                    strncpy(member->corp_name, pch+5, len-5);
+                    switch_url_decode(member->corp_name);
+                    switch_channel_set_variable(member->channel, "corp_name", member->corp_name);
+                }
+            }
             if ((pch = strstr(member->sdpname, "sip:")) != 0 || 
                 (pch = strstr(member->sdpname, "sips:")) != 0) {
                 if ((ech = strstr(pch, ";")) != 0) {
@@ -3024,7 +3070,11 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                 }
             }
             if ((pch = strstr(member->sdpname, "inst=")) != 0) {
-                len = strlen(member->sdpname) - (pch-member->sdpname);
+                if ((ech = strstr(pch, ";")) != 0) {
+                    len = (ech - pch);
+                } else {
+                    len = strlen(member->sdpname) - (pch-member->sdpname);
+                }
                 if (len > (MAX_INSTANCE_ID_LEN-1)) {
                     len = MAX_INSTANCE_ID_LEN-1;
                 }
@@ -3068,8 +3118,10 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                     switch_channel_set_variable(member->channel, "meeting_instance", conference->instance_id);
                 }
             }
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "Meeting Id: %s Instance Id: %s Conference member's name: %s\n",
-                              conference->meeting_id, conference->instance_id, member->mname);
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                              "Meeting Id: %s Instance Id: %s Conference member's name: %s contactive: %d name: %s userid: %s email: %s corp: %s\n",
+                              conference->meeting_id, conference->instance_id, member->mname,
+                              member->contactive, member->contactive_name, member->contactive_userid, member->contactive_email, member->corp_name);
         } else {
             if (strlen(conference->meeting_id) == 0) {
                 switch_snprintf(conference->meeting_id, sizeof(conference->meeting_id)-1, "%s", conference->name);

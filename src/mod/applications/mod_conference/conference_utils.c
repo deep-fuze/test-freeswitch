@@ -18,6 +18,8 @@
 #define PREPROD_MEETING_ID_LEN 7
 #define PROD_MEETING_ID_LEN 8
 
+SWITCH_DECLARE(void) switch_rtp_silence_transport_session(switch_core_session_t *session, int size);
+
 struct server_iso_code {
     const char *server_name;
     const char *country_code;
@@ -103,7 +105,9 @@ fuze_status_t fuze_curl_execute(switch_core_session_t *session, conf_auth_profil
 
     SWITCH_STANDARD_STREAM(stream);
 
+    switch_rtp_silence_transport_session(session, 1500);
     switch_api_execute("curl", arguments, session, &stream);
+    switch_rtp_silence_transport_session(session, 0);
 
     // TODO:
     profile->is_retired = -1;

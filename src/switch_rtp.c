@@ -9588,6 +9588,43 @@ SWITCH_DECLARE(void) switch_rtp_silence_transport(switch_channel_t *channel, int
     return;
 }
 
+SWITCH_DECLARE(void) switch_rtp_silence_transport_session(switch_core_session_t *session, int size)
+{
+    switch_rtp_t *rtp_session;
+    switch_channel_t *channel;
+
+    if (!session) {
+        return;
+    }
+
+    channel = switch_core_session_get_channel(session);
+
+    if (!channel) {
+        return;
+    }
+
+    rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session) {
+        return;
+    }
+
+    if (rtp_session->ignore_rtp_size != size && !rtp_session->flags[SWITCH_ZRTP_FLAG_SECURE_RECV]) {
+        if (size > 0) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+                              "Silencing session for packets < %d bytes\n", size);
+        } else {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+                              "Disabling silencing for session\n");
+        }
+
+        fuze_transport_ignore_packets(rtp_session->rtp_conn, size);
+        rtp_session->ignore_rtp_size = size;
+    }
+    return;
+}
+
+
 SWITCH_DECLARE(void) switch_rtp_set_active(switch_channel_t *channel, switch_bool_t active)
 {
     switch_rtp_t *rtp_session;
