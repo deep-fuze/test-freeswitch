@@ -414,7 +414,7 @@ static switch_status_t switch_opus_ctl(switch_codec_t *codec,
             if (br_factor < 0) {
                 br_factor = 0;
             }
-            br = context->bitrate_target + br_factor*1000;
+            br = context->bitrate_target + br_factor*2700;
             context->bitrate_current = br;
             opus_encoder_ctl(context->encoder_object, OPUS_SET_BITRATE(context->bitrate_current));
         }
