@@ -2149,9 +2149,13 @@ switch_bool_t is_muted(conference_member_t *member) {
 
 static void update_mute_state(conference_member_t *member, mute_event_t event)
 {
-
+	int ms_cnt_threshold = MS_CNT_THRESHOLD;
     if (!member)
         return;
+
+	if (member->ianacode == OPUS_IANACODE) {
+		ms_cnt_threshold = MS_CNT_THRESHOLD*4;
+	}
 
     switch (member->ms) {
     case MS_UNMUTED:
@@ -2161,7 +2165,7 @@ static void update_mute_state(conference_member_t *member, mute_event_t event)
             member->ms_cnt = 0;
             break;
         case ME_CN:
-            if (member->ms_cnt > MS_CNT_THRESHOLD) {
+            if (member->ms_cnt > ms_cnt_threshold) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
                                   "update_mute_state(UNMUTED,CN) -> (CN)\n");
                 member->ms_cnt = 0;
@@ -2188,7 +2192,7 @@ static void update_mute_state(conference_member_t *member, mute_event_t event)
         case ME_MUTE:
             break;
         case ME_CN:
-            if (member->ms_cnt > MS_CNT_THRESHOLD) {
+            if (member->ms_cnt > ms_cnt_threshold) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
                                   "update_mute_state(MUTED,CN) -> (CN)\n");
                 member->ms = MS_CN;

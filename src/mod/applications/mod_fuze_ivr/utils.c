@@ -118,6 +118,7 @@ fuze_status_t fuze_curl_execute(switch_core_session_t *session, ivrc_profile_t *
                 item = cJSON_GetObjectItem(body, "corp_name");
                 if (item) {
                     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: message corp_name: %s\n", item->valuestring);
+#if 0
                     if (!strncmp(item->valuestring, "TPN.", 4)) {
                       switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: corp name (%s) matches required TPN pattern\n", item->valuestring);
                       profile->corp_name = fuze_session_encode(session, switch_core_session_strdup(session, item->valuestring+4));
@@ -125,6 +126,7 @@ fuze_status_t fuze_curl_execute(switch_core_session_t *session, ivrc_profile_t *
                       switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: corp name (%s) doesn't match required TPN pattern. Contactive lookup disabled\n", item->valuestring);
                       profile->number_auth_is_allowed = SWITCH_FALSE;
                     }
+#endif
                 } else {
                   profile->number_auth_is_allowed = SWITCH_FALSE;
                 }

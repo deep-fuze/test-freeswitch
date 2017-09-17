@@ -385,6 +385,8 @@ void fuze_conference_number_authenticate(switch_core_session_t *session, ivrc_pr
   auth = switch_channel_get_variable(channel, "fuze_contactive_caller_token");
 
 
+  profile->corp_name = "thinkingphones";
+
   if (!base_url || !auth || !profile->corp_name) {
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Fuze Conference Authenticate Fail url=%s auth=%s corp_name=%s\n",
 		      base_url ? "set" : "null", auth ? "set" : "null", profile->corp_name ? profile->corp_name : "null");
