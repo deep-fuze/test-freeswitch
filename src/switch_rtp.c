@@ -3093,6 +3093,7 @@ SWITCH_DECLARE(void) switch_rtp_ping(switch_rtp_t *rtp_session)
     check_rtcp_and_ice(rtp_session);
 }
 
+#ifdef SRTP2
 int srtp_crypto_get_random(uint8_t *key, int len) {
     /* libsrtp 2.0 doesn't have crypto_get_random, we use OpenSSL's RAND_* to replace it:
      * https://wiki.openssl.org/index.php/Random_Numbers */
@@ -3103,11 +3104,16 @@ int srtp_crypto_get_random(uint8_t *key, int len) {
     }
     return 0;
 }
+#endif
 
 SWITCH_DECLARE(void) switch_rtp_get_random(void *buf, uint32_t len)
 {
 #ifdef ENABLE_SRTP
+#ifdef SRTP2
     srtp_crypto_get_random(buf, len);
+#else
+    crypto_get_random(buf, len);
+#endif
 #else
     switch_stun_random_string(buf, len, NULL);
 #endif
@@ -3148,7 +3154,11 @@ SWITCH_DECLARE(void) switch_rtp_shutdown(void)
     }
 #endif
 #ifdef ENABLE_SRTP
+#ifdef SRTP2
     srtp_crypto_kernel_shutdown();
+#else
+    crypto_kernel_shutdown();
+#endif
 #endif
 
 }
@@ -4236,7 +4246,11 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_crypto_key(switch_rtp_t *rtp_sess
 #else
     switch_rtp_crypto_key_t *crypto_key;
     srtp_policy_t *policy;
+#ifdef SRTP2
     srtp_err_status_t stat;
+#else
+    err_status_t stat;
+#endif
     switch_status_t status = SWITCH_STATUS_SUCCESS;
 
     switch_channel_t *channel = switch_core_session_get_channel(rtp_session->session);
@@ -4282,17 +4296,25 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_crypto_key(switch_rtp_t *rtp_sess
 
     switch (crypto_key->type) {
     case AES_CM_128_HMAC_SHA1_80:
+#ifdef SRTP2
         srtp_crypto_policy_set_aes_cm_128_hmac_sha1_80(&policy->rtp);
         srtp_crypto_policy_set_aes_cm_128_hmac_sha1_80(&policy->rtcp);
-
+#else
+        crypto_policy_set_aes_cm_128_hmac_sha1_80(&policy->rtp);
+        crypto_policy_set_aes_cm_128_hmac_sha1_80(&policy->rtcp);
+#endif
         if (switch_channel_direction(channel) == SWITCH_CALL_DIRECTION_OUTBOUND) {
             switch_channel_set_variable(channel, "rtp_has_crypto", "AES_CM_128_HMAC_SHA1_80");
         }
         break;
     case AES_CM_128_HMAC_SHA1_32:
+#ifdef SRTP2
         srtp_crypto_policy_set_aes_cm_128_hmac_sha1_32(&policy->rtp);
         srtp_crypto_policy_set_aes_cm_128_hmac_sha1_80(&policy->rtcp);
-
+#else
+        crypto_policy_set_aes_cm_128_hmac_sha1_32(&policy->rtp);
+        crypto_policy_set_aes_cm_128_hmac_sha1_80(&policy->rtcp);
+#endif
 
         if (switch_channel_direction(channel) == SWITCH_CALL_DIRECTION_OUTBOUND) {
             switch_channel_set_variable(channel, "rtp_has_crypto", "AES_CM_128_HMAC_SHA1_32");
@@ -4300,8 +4322,13 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_crypto_key(switch_rtp_t *rtp_sess
         break;
 
     case AEAD_AES_256_GCM_8:
+#ifdef SRTP2
         srtp_crypto_policy_set_aes_gcm_256_8_auth(&policy->rtp);
         srtp_crypto_policy_set_aes_gcm_256_8_auth(&policy->rtcp);
+#else
+        crypto_policy_set_aes_gcm_256_8_auth(&policy->rtp);
+        crypto_policy_set_aes_gcm_256_8_auth(&policy->rtcp);
+#endif
 
         if (switch_channel_direction(channel) == SWITCH_CALL_DIRECTION_OUTBOUND) {
             switch_channel_set_variable(channel, "rtp_has_crypto", "AEAD_AES_256_GCM_8");
@@ -4309,8 +4336,13 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_crypto_key(switch_rtp_t *rtp_sess
         break;
 
     case AEAD_AES_128_GCM_8:
+#ifdef SRTP2
         srtp_crypto_policy_set_aes_gcm_128_8_auth(&policy->rtp);
         srtp_crypto_policy_set_aes_gcm_128_8_auth(&policy->rtcp);
+#else
+        crypto_policy_set_aes_gcm_128_8_auth(&policy->rtp);
+        crypto_policy_set_aes_gcm_128_8_auth(&policy->rtcp);
+#endif
 
         if (switch_channel_direction(channel) == SWITCH_CALL_DIRECTION_OUTBOUND) {
             switch_channel_set_variable(channel, "rtp_has_crypto", "AEAD_AES_128_GCM_8");
@@ -4318,15 +4350,25 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_crypto_key(switch_rtp_t *rtp_sess
         break;
 
     case AES_CM_256_HMAC_SHA1_80:
+#ifdef SRTP2
         srtp_crypto_policy_set_aes_cm_256_hmac_sha1_80(&policy->rtp);
         srtp_crypto_policy_set_aes_cm_256_hmac_sha1_80(&policy->rtcp);
+#else
+        crypto_policy_set_aes_cm_256_hmac_sha1_80(&policy->rtp);
+        crypto_policy_set_aes_cm_256_hmac_sha1_80(&policy->rtcp);
+#endif
         if (switch_channel_direction(channel) == SWITCH_CALL_DIRECTION_OUTBOUND) {
             switch_channel_set_variable(channel, "rtp_has_crypto", "AES_CM_256_HMAC_SHA1_80");
         }
         break;
     case AES_CM_128_NULL_AUTH:
+#ifdef SRTP2
         srtp_crypto_policy_set_aes_cm_128_null_auth(&policy->rtp);
         srtp_crypto_policy_set_aes_cm_128_null_auth(&policy->rtcp);
+#else
+        crypto_policy_set_aes_cm_128_null_auth(&policy->rtp);
+        crypto_policy_set_aes_cm_128_null_auth(&policy->rtcp);
+#endif
 
         if (switch_channel_direction(channel) == SWITCH_CALL_DIRECTION_OUTBOUND) {
             switch_channel_set_variable(channel, "rtp_has_crypto", "AES_CM_128_NULL_AUTH");
@@ -6262,7 +6304,11 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
                  (rtp_session->recv_msg.header.pt == 13))) {
                 //if (rtp_session->flags[SWITCH_RTP_FLAG_SECURE_RECV] && (!rtp_session->ice.ice_user || rtp_session->recv_msg.header.version == 2)) {
                 int sbytes = (int) ebytes;
-                srtp_err_status_t stat = 0;
+#ifdef SRTP2
+				srtp_err_status_t stat = 0;
+#else
+				err_status_t stat = 0;
+#endif
 
                 if (rtp_session->flags[SWITCH_RTP_FLAG_SECURE_RECV_RESET]) {
                     switch_rtp_clear_flag(rtp_session, SWITCH_RTP_FLAG_SECURE_RECV_RESET);
@@ -6286,11 +6332,17 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
                 if (stat && rtp_session->recv_msg.header.pt != rtp_session->recv_te && rtp_session->recv_msg.header.pt != rtp_session->cng_pt &&
                     rtp_session->recv_msg.header.pt != 13) {
                     if (++rtp_session->srtp_errs[rtp_session->srtp_idx_rtp] >= MAX_SRTP_ERRS && stat != 10) {
-
+#ifdef SRTP2
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR,
                                           "Error: SRTP %s unprotect failed with code %d%s %ld\n", rtp_type(rtp_session), stat,
                                           stat == srtp_err_status_replay_fail ? " (replay check failed)" : stat ==
                                           srtp_err_status_auth_fail ? " (auth check failed)" : "", (long)sbytes);
+#else
+						switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR,
+										  "Error: SRTP %s unprotect failed with code %d%s %ld\n", rtp_type(rtp_session), stat,
+										  stat == err_status_replay_fail ? " (replay check failed)" : stat ==
+										  err_status_auth_fail ? " (auth check failed)" : "", (long)sbytes);
+#endif
                         return SWITCH_STATUS_GENERR;
                     } else {
                         sbytes = 0;
@@ -6607,8 +6659,11 @@ static switch_status_t read_rtcp_packet(switch_rtp_t *rtp_session, switch_size_t
     if (rtp_session->flags[SWITCH_RTP_FLAG_SECURE_RECV] && rtp_session->rtcp_recv_msg_p->header.version == 2) {
         //if (rtp_session->flags[SWITCH_RTP_FLAG_SECURE_RECV] && (!rtp_session->ice.ice_user || rtp_session->rtcp_recv_msg_p->header.version == 2)) {
         int sbytes = (int) *bytes;
-        srtp_err_status_t stat = 0;
-
+#ifdef SRTP2
+		srtp_err_status_t stat = 0;
+#else
+		err_status_t stat = 0;
+#endif
 
         if ((stat = srtp_unprotect_rtcp(rtp_session->recv_ctx[rtp_session->srtp_idx_rtcp], &rtp_session->rtcp_recv_msg_p->header, &sbytes))) {
             //++rtp_session->srtp_errs[rtp_session->srtp_idx_rtp]++;
@@ -8498,7 +8553,11 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 #ifdef ENABLE_SRTP
         if (rtp_session->flags[SWITCH_RTP_FLAG_SECURE_SEND]) {
             int sbytes = (int) bytes;
-            srtp_err_status_t stat;
+#ifdef SRTP2
+			srtp_err_status_t stat;
+#else
+			err_status_t stat;
+#endif
 
 
             if (rtp_session->flags[SWITCH_RTP_FLAG_SECURE_SEND_RESET]) {
@@ -8528,10 +8587,14 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 #if 0
                     uint64_t srtp_index;
                     srtp_index = srtp_protect_get_index(rtp_session->send_ctx[rtp_session->srtp_idx_rtp],  &send_msg->header);
-#endif
+					switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "Error: %s SRTP protection failed on pkt=%u with code (%u) %d idx=%llu\n",
+									  rtp_session->rtp_conn_name, rtp_session->write_count, ntohs(send_msg->header.seq), stat, (long long unsigned int)srtp_index);
+
+#else
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR,
                                       "Error: %s SRTP protection failed on pkt=%u with code (%u) %d\n",// idx=%llu\n",
                                       rtp_session->rtp_conn_name, rtp_session->write_count, ntohs(send_msg->header.seq), stat);
+#endif
                     rtp_session->srtp_protect_error = SWITCH_TRUE;
                 }
             } else if (rtp_session->srtp_protect_error) {
@@ -9031,7 +9094,11 @@ SWITCH_DECLARE(int) switch_rtp_write_manual(switch_rtp_t *rtp_session,
     if (rtp_session->flags[SWITCH_RTP_FLAG_SECURE_SEND]) {
 
         int sbytes = (int) bytes;
-        srtp_err_status_t stat;
+#ifdef SRTP2
+		srtp_err_status_t stat;
+#else
+		err_status_t stat;
+#endif
 
         if (rtp_session->flags[SWITCH_RTP_FLAG_SECURE_SEND_RESET]) {
             switch_rtp_clear_flag(rtp_session, SWITCH_RTP_FLAG_SECURE_SEND_RESET);

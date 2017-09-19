@@ -8,7 +8,7 @@
  */
 /*
  *	
- * Copyright (c) 2001-2017 Cisco Systems, Inc.
+ * Copyright (c) 2001-2005 Cisco Systems, Inc.
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -59,82 +59,96 @@
  *
  */
 
-#ifndef SRTP_EKT_H
-#define SRTP_EKT_H
-
-// left in commented out as reminder to not include private headers
-//#include "srtp_priv.h"
+#ifndef EKT_H
+#define EKT_H
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define SRTP_EKT_CIPHER_DEFAULT           1
-#define SRTP_EKT_CIPHER_AES_128_ECB       1
-#define SRTP_EKT_CIPHER_AES_192_KEY_WRAP  2
-#define SRTP_EKT_CIPHER_AES_256_KEY_WRAP  3
+#include "srtp_priv.h"
 
-typedef uint16_t srtp_ekt_spi_t;
+#define EKT_CIPHER_DEFAULT           1
+#define EKT_CIPHER_AES_128_ECB       1
+#define EKT_CIPHER_AES_192_KEY_WRAP  2
+#define EKT_CIPHER_AES_256_KEY_WRAP  3
+
+typedef uint16_t ekt_spi_t;
 
 
-unsigned srtp_ekt_octets_after_base_tag(srtp_ekt_stream_t ekt);
+unsigned
+ekt_octets_after_base_tag(ekt_stream_t ekt);
 
 /*
  * an srtp_policy_t structure can contain a pointer to an
- * srtp_ekt_policy_t structure
+ * ekt_policy_t structure
  *
  * this structure holds all of the high level EKT information, and it
  * is passed into libsrtp to indicate what policy should be in effect
  */
 
-typedef struct srtp_ekt_policy_ctx_t {
-  srtp_ekt_spi_t  spi;     /* security parameter index */
+typedef struct ekt_policy_ctx_t {
+  ekt_spi_t  spi;     /* security parameter index */
   uint8_t    ekt_cipher_type;
   uint8_t   *ekt_key;
-  struct srtp_ekt_policy_ctx_t *next_ekt_policy;
-} srtp_ekt_policy_ctx_t;
+  struct ekt_policy_ctx_t *next_ekt_policy;
+} ekt_policy_ctx_t;
 
 
 /*
- * an srtp_ekt_data_t structure holds the data corresponding to an ekt key,
+ * an ekt_data_t structure holds the data corresponding to an ekt key,
  * spi, and so on
  */
 
-typedef struct srtp_ekt_data_t {
-  srtp_ekt_spi_t spi;
+typedef struct ekt_data_t {
+  ekt_spi_t spi;
   uint8_t ekt_cipher_type;
-  srtp_aes_expanded_key_t ekt_enc_key;
-  srtp_aes_expanded_key_t ekt_dec_key;
+  aes_expanded_key_t ekt_enc_key;
+  aes_expanded_key_t ekt_dec_key;
   struct ekt_data_t *next_ekt_data;
-} srtp_ekt_data_t;
+} ekt_data_t;
 
 /*
- * an srtp_stream_ctx_t can contain an srtp_ekt_stream_ctx_t
+ * an srtp_stream_ctx_t can contain an ekt_stream_ctx_t
  *
- * an srtp_ekt_stream_ctx_t structure holds all of the EKT information for
+ * an ekt_stream_ctx_t structure holds all of the EKT information for
  * a specific SRTP stream
  */
 
-typedef struct srtp_ekt_stream_ctx_t {
-  srtp_ekt_data_t   *data;    
-  uint16_t	    isn;     /* initial sequence number  */
-  uint8_t	    encrypted_master_key[SRTP_MAX_KEY_LEN];
-} srtp_ekt_stream_ctx_t;
+typedef struct ekt_stream_ctx_t {
+  ekt_data_t *data;    
+  uint16_t    isn;     /* initial sequence number  */
+  uint8_t     encrypted_master_key[SRTP_MAX_KEY_LEN];
+} ekt_stream_ctx_t;
 
 
 
-srtp_err_status_t srtp_ekt_alloc(srtp_ekt_stream_t *stream_data, srtp_ekt_policy_t policy);
+err_status_t 
+ekt_alloc(ekt_stream_t *stream_data, ekt_policy_t policy);
 
-srtp_err_status_t srtp_ekt_stream_init(srtp_ekt_stream_t e, srtp_ekt_spi_t spi, void *ekt_key, unsigned ekt_cipher_type);
+err_status_t
+ekt_stream_init(ekt_stream_t e, 
+		ekt_spi_t spi,
+		void *ekt_key,
+		unsigned ekt_cipher_type);
 
-srtp_err_status_t srtp_ekt_stream_init_from_policy(srtp_ekt_stream_t e, srtp_ekt_policy_t p);
+err_status_t
+ekt_stream_init_from_policy(ekt_stream_t e, ekt_policy_t p);
   
 
 
-srtp_err_status_t srtp_stream_init_from_ekt(srtp_stream_t stream, const void *srtcp_hdr, unsigned pkt_octet_len);
+err_status_t
+srtp_stream_init_from_ekt(srtp_stream_t stream,			  
+			  const void *srtcp_hdr,
+			  unsigned pkt_octet_len);
 		
 
-void srtp_ekt_write_data(srtp_ekt_stream_t ekt, uint8_t *base_tag, unsigned base_tag_len, int *packet_len, srtp_xtd_seq_num_t pkt_index);		
+void
+ekt_write_data(ekt_stream_t ekt,
+	       uint8_t *base_tag, 
+	       unsigned base_tag_len, 
+	       int *packet_len,
+	       xtd_seq_num_t pkt_index);		
 
 /*
  * We handle EKT by performing some additional steps before
@@ -144,9 +158,16 @@ void srtp_ekt_write_data(srtp_ekt_stream_t ekt, uint8_t *base_tag, unsigned base
  * With EKT, the tag_len parameter is actually the base tag
  * length
  */
-srtp_err_status_t srtp_ekt_tag_verification_preproces(uint8_t *pkt_tag, uint8_t *pkt_tag_copy, unsigned tag_len);
 
-srtp_err_status_t srtp_ekt_tag_verification_postproces(uint8_t *pkt_tag, uint8_t *pkt_tag_copy, unsigned tag_len);
+err_status_t
+ekt_tag_verification_preproces(uint8_t *pkt_tag, 
+			       uint8_t *pkt_tag_copy, 
+			       unsigned tag_len);
+
+err_status_t
+ekt_tag_verification_postproces(uint8_t *pkt_tag,
+				uint8_t *pkt_tag_copy,
+				unsigned tag_len);
 
 
 /*
@@ -161,14 +182,20 @@ srtp_err_status_t srtp_ekt_tag_verification_postproces(uint8_t *pkt_tag, uint8_t
  * When EKT is not used, this function is a no-op.
  * 
  */
-srtp_err_status_t srtp_stream_srtcp_auth_tag_generation_preprocess(const srtp_stream_t *s, uint8_t *pkt_tag, unsigned pkt_octet_len);
+
+err_status_t
+srtp_stream_srtcp_auth_tag_generation_preprocess(const srtp_stream_t *s,
+						 uint8_t *pkt_tag,
+						 unsigned pkt_octet_len);
 
 /* it's not clear that a tag_generation_postprocess function is needed */
-srtp_err_status_t srtcp_auth_tag_generation_postprocess(void);
+
+err_status_t
+srtcp_auth_tag_generation_postprocess(void);
 
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* SRTP_EKT_H */
+#endif /* EKT_H */

@@ -9,6 +9,9 @@
 /* Define if building for a RISC machine (assume slow byte access). */
 #undef CPU_RISC
 
+/* Path to random device */
+#undef DEV_URANDOM
+
 /* Define to compile in dynamic debugging system. */
 #undef ENABLE_DEBUGGING
 
@@ -84,6 +87,9 @@
 /* Define to 1 if you have the <string.h> header file. */
 #undef HAVE_STRING_H
 
+/* Define to 1 if you have the <syslog.h> header file. */
+#undef HAVE_SYSLOG_H
+
 /* Define to 1 if you have the <sys/int_types.h> header file. */
 #undef HAVE_SYS_INT_TYPES_H
 
@@ -129,9 +135,6 @@
 /* Define this to use OpenSSL crypto. */
 #undef OPENSSL
 
-/* Define this to use OpenSSL KDF for SRTP. */
-#undef OPENSSL_KDF
-
 /* Define to the address where bug reports for this package should be sent. */
 #undef PACKAGE_BUGREPORT
 
@@ -156,11 +159,23 @@
 /* The size of `unsigned long long', as computed by sizeof. */
 #undef SIZEOF_UNSIGNED_LONG_LONG
 
+/* Define to use GDOI. */
+#undef SRTP_GDOI
+
+/* Define to compile for kernel contexts. */
+#undef SRTP_KERNEL
+
+/* Define to compile for Linux kernel context. */
+#undef SRTP_KERNEL_LINUX
+
 /* Define to 1 if you have the ANSI C header files. */
 #undef STDC_HEADERS
 
 /* Write errors to this file */
 #undef USE_ERR_REPORTING_FILE
+
+/* Define to use syslog logging. */
+#undef USE_SYSLOG
 
 /* Define WORDS_BIGENDIAN to 1 if your processor stores words with the most
    significant byte first (like Motorola and SPARC, unlike Intel). */

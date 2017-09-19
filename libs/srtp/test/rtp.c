@@ -9,7 +9,7 @@
 
 /*
  *	
- * Copyright (c) 2001-2017, Cisco Systems, Inc.
+ * Copyright (c) 2001-2006, Cisco Systems, Inc.
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -43,7 +43,7 @@
  *
  */
 
-#include "rtp.h"
+#include "rtp_priv.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -59,7 +59,7 @@
 int
 rtp_sendto(rtp_sender_t sender, const void* msg, int len) {
   int octets_sent;
-  srtp_err_status_t stat;
+  err_status_t stat;
   int pkt_len = len + RTP_HEADER_LEN;
 
   /* marshal data */
@@ -99,7 +99,7 @@ rtp_sendto(rtp_sender_t sender, const void* msg, int len) {
 int
 rtp_recvfrom(rtp_receiver_t receiver, void *msg, int *len) {
   int octets_recvd;
-  srtp_err_status_t stat;
+  err_status_t stat;
   
   octets_recvd = recvfrom(receiver->socket, (void *)&receiver->message,
 			 *len, 0, (struct sockaddr *) NULL, 0);
@@ -129,8 +129,8 @@ rtp_recvfrom(rtp_receiver_t receiver, void *msg, int *len) {
   if (stat) {
     fprintf(stderr,
 	    "error: srtp unprotection failed with code %d%s\n", stat,
-	    stat == srtp_err_status_replay_fail ? " (replay check failed)" :
-	    stat == srtp_err_status_auth_fail ? " (auth check failed)" : "");
+	    stat == err_status_replay_fail ? " (replay check failed)" :
+	    stat == err_status_auth_fail ? " (auth check failed)" : "");
     return -1;
   }
   strncpy(msg, receiver->message.body, octets_recvd);

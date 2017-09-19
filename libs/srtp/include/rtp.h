@@ -16,7 +16,7 @@
 
 /*
  *	
- * Copyright (c) 2001-2017, Cisco Systems, Inc.
+ * Copyright (c) 2001-2006, Cisco Systems, Inc.
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -51,8 +51,8 @@
  */
 
 
-#ifndef SRTP_RTP_H
-#define SRTP_RTP_H
+#ifndef RTP_H
+#define RTP_H
 
 #ifdef HAVE_NETINET_IN_H
 # include <netinet/in.h>
@@ -60,44 +60,7 @@
 # include <winsock2.h>
 #endif
 
-#include "srtp_priv.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/*
- * RTP_HEADER_LEN indicates the size of an RTP header
- */
-#define RTP_HEADER_LEN   12
-
-/* 
- * RTP_MAX_BUF_LEN defines the largest RTP packet in the rtp.c implementation
- */
-#define RTP_MAX_BUF_LEN  16384
-
-
-typedef srtp_hdr_t rtp_hdr_t;
-
-typedef struct {
-  srtp_hdr_t header;        
-  char body[RTP_MAX_BUF_LEN];  
-} rtp_msg_t;
-
-typedef struct rtp_sender_ctx_t {
-  rtp_msg_t message;         
-  int socket;
-  srtp_ctx_t *srtp_ctx;
-  struct sockaddr_in addr;   /* reciever's address */
-} rtp_sender_ctx_t;
-
-typedef struct rtp_receiver_ctx_t {
-  rtp_msg_t message;
-  int socket;
-  srtp_ctx_t *srtp_ctx;
-  struct sockaddr_in addr;   /* receiver's address */
-} rtp_receiver_ctx_t;
-
+#include "srtp.h"
 
 typedef struct rtp_sender_ctx_t *rtp_sender_t;
 
@@ -124,14 +87,14 @@ rtp_sender_init(rtp_sender_t sender, int sock,
 int
 srtp_sender_init(rtp_sender_t rtp_ctx,          /* structure to be init'ed */
 		 struct sockaddr_in name,       /* socket name             */
-		 srtp_sec_serv_t security_services,  /* sec. servs. to be used  */
+		 sec_serv_t security_services,  /* sec. servs. to be used  */
 		 unsigned char *input_key       /* master key/salt in hex  */
 		 );
 
 int
 srtp_receiver_init(rtp_receiver_t rtp_ctx,       /* structure to be init'ed */
 		   struct sockaddr_in name, 	 /* socket name             */
-		   srtp_sec_serv_t security_services, /* sec. servs. to be used  */
+		   sec_serv_t security_services, /* sec. servs. to be used  */
 		   unsigned char *input_key	 /* master key/salt in hex  */
 		   );
 
@@ -162,8 +125,15 @@ void
 rtp_receiver_dealloc(rtp_receiver_t rtp_ctx);
 
 
-#ifdef __cplusplus
-}
-#endif
+/*
+ * RTP_HEADER_LEN indicates the size of an RTP header
+ */
+#define RTP_HEADER_LEN   12
 
-#endif /* SRTP_RTP_H */
+/* 
+ * RTP_MAX_BUF_LEN defines the largest RTP packet in the rtp.c implementation
+ */
+#define RTP_MAX_BUF_LEN  16384
+
+
+#endif /* RTP_H */

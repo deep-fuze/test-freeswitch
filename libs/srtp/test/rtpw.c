@@ -7,7 +7,7 @@
  * Cisco Systems, Inc.
  *
  * This app is a simple RTP application intended only for testing
- * libsrtp.  It reads one word at a time from words.txt (or
+ * libsrtp.  It reads one word at a time from /usr/dict/words (or
  * whatever file is specified as DICT_FILE), and sends one word out
  * each USEC_RATE microseconds.  Secure RTP protections can be
  * applied.  See the usage() function for more details.
@@ -16,7 +16,7 @@
 
 /*
  *	
- * Copyright (c) 2001-2017, Cisco Systems, Inc.
+ * Copyright (c) 2001-2006, Cisco Systems, Inc.
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -55,6 +55,7 @@
     #include <config.h>
 #endif
 
+#include "datatypes.h"
 #include "getopt_s.h"       /* for local getopt()  */
 
 #include <stdio.h>          /* for printf, fprintf */
@@ -87,9 +88,13 @@
 
 #include "srtp.h"           
 #include "rtp.h"
-#include "util.h"
+#include "crypto_kernel.h"
 
-#define DICT_FILE        "words.txt"
+#ifdef RTPW_USE_WINSOCK2
+# define DICT_FILE        "words.txt"
+#else
+# define DICT_FILE        "/usr/share/dict/words"
+#endif
 #define USEC_RATE        (5e5)
 #define MAX_WORD_LEN     128  
 #define ADDR_IS_MULTICAST(a) IN_MULTICAST(htonl(a))
@@ -152,7 +157,7 @@ main (int argc, char *argv[]) {
   struct sockaddr_in local;
 #endif 
   program_type prog_type = unknown;
-  srtp_sec_serv_t sec_servs = sec_serv_none;
+  sec_serv_t sec_servs = sec_serv_none;
   unsigned char ttl = 5;
   int c;
   int key_size = 128;
@@ -165,7 +170,7 @@ main (int argc, char *argv[]) {
   unsigned short port = 0;
   rtp_sender_t snd;
   srtp_policy_t policy;
-  srtp_err_status_t status;
+  err_status_t status;
   int len;
   int expected_len;
   int do_list_mods = 0;
@@ -180,8 +185,6 @@ main (int argc, char *argv[]) {
     exit(1);
   }
 #endif
-
-  memset(&policy, 0x0, sizeof(srtp_policy_t));
 
   printf("Using %s [0x%x]\n", srtp_get_version_string(), srtp_get_version());
 
@@ -238,7 +241,7 @@ main (int argc, char *argv[]) {
       prog_type = sender;
       break;
     case 'd':
-      status = srtp_set_debug_module(optarg_s, 1);
+      status = crypto_kernel_set_debug_module(optarg_s, 1);
       if (status) {
         printf("error: set debug module (%s) failed\n", optarg_s);
         exit(1);
@@ -254,7 +257,7 @@ main (int argc, char *argv[]) {
 
   if (prog_type == unknown) {
     if (do_list_mods) {
-      status = srtp_list_debug_modules();
+      status = crypto_kernel_list_debug_modules();
       if (status) {
 	printf("error: list of debug modules failed\n");
 	exit(1);
@@ -365,12 +368,12 @@ main (int argc, char *argv[]) {
 #ifdef OPENSSL
 	switch (key_size) {
 	case 128:
-	  srtp_crypto_policy_set_aes_gcm_128_8_auth(&policy.rtp);
-	  srtp_crypto_policy_set_aes_gcm_128_8_auth(&policy.rtcp);
+	  crypto_policy_set_aes_gcm_128_8_auth(&policy.rtp);
+	  crypto_policy_set_aes_gcm_128_8_auth(&policy.rtcp);
 	  break;
 	case 256:
-	  srtp_crypto_policy_set_aes_gcm_256_8_auth(&policy.rtp);
-	  srtp_crypto_policy_set_aes_gcm_256_8_auth(&policy.rtcp);
+	  crypto_policy_set_aes_gcm_256_8_auth(&policy.rtp);
+	  crypto_policy_set_aes_gcm_256_8_auth(&policy.rtcp);
 	  break;
 	}
 #else
@@ -380,12 +383,12 @@ main (int argc, char *argv[]) {
       } else {
 	switch (key_size) {
 	case 128:
-          srtp_crypto_policy_set_rtp_default(&policy.rtp);
-          srtp_crypto_policy_set_rtcp_default(&policy.rtcp);
+          crypto_policy_set_rtp_default(&policy.rtp);
+          crypto_policy_set_rtcp_default(&policy.rtcp);
 	  break;
 	case 256:
-          srtp_crypto_policy_set_aes_cm_256_hmac_sha1_80(&policy.rtp);
-          srtp_crypto_policy_set_rtcp_default(&policy.rtcp);
+          crypto_policy_set_aes_cm_256_hmac_sha1_80(&policy.rtp);
+          crypto_policy_set_rtcp_default(&policy.rtcp);
 	  break;
 	}
       }
@@ -397,12 +400,12 @@ main (int argc, char *argv[]) {
       } else {
 	switch (key_size) {
 	case 128:
-          srtp_crypto_policy_set_aes_cm_128_null_auth(&policy.rtp);
-          srtp_crypto_policy_set_rtcp_default(&policy.rtcp);      
+          crypto_policy_set_aes_cm_128_null_auth(&policy.rtp);
+          crypto_policy_set_rtcp_default(&policy.rtcp);      
 	  break;
 	case 256:
-          srtp_crypto_policy_set_aes_cm_256_null_auth(&policy.rtp);
-          srtp_crypto_policy_set_rtcp_default(&policy.rtcp);      
+          crypto_policy_set_aes_cm_256_null_auth(&policy.rtp);
+          crypto_policy_set_rtcp_default(&policy.rtcp);      
 	  break;
 	}
       }
@@ -412,12 +415,12 @@ main (int argc, char *argv[]) {
 #ifdef OPENSSL
 	switch (key_size) {
 	case 128:
-	  srtp_crypto_policy_set_aes_gcm_128_8_only_auth(&policy.rtp);
-	  srtp_crypto_policy_set_aes_gcm_128_8_only_auth(&policy.rtcp);
+	  crypto_policy_set_aes_gcm_128_8_only_auth(&policy.rtp);
+	  crypto_policy_set_aes_gcm_128_8_only_auth(&policy.rtcp);
 	  break;
 	case 256:
-	  srtp_crypto_policy_set_aes_gcm_256_8_only_auth(&policy.rtp);
-	  srtp_crypto_policy_set_aes_gcm_256_8_only_auth(&policy.rtcp);
+	  crypto_policy_set_aes_gcm_256_8_only_auth(&policy.rtp);
+	  crypto_policy_set_aes_gcm_256_8_only_auth(&policy.rtcp);
 	  break;
 	}
 #else
@@ -425,8 +428,8 @@ main (int argc, char *argv[]) {
 	return 0;
 #endif
       } else {
-        srtp_crypto_policy_set_null_cipher_hmac_sha1_80(&policy.rtp);
-        srtp_crypto_policy_set_rtcp_default(&policy.rtcp);
+        crypto_policy_set_null_cipher_hmac_sha1_80(&policy.rtp);
+        crypto_policy_set_rtcp_default(&policy.rtcp);
       }
       break;
     default:
@@ -435,7 +438,7 @@ main (int argc, char *argv[]) {
     } 
     policy.ssrc.type  = ssrc_specific;
     policy.ssrc.value = ssrc;
-    policy.key = (uint8_t *)key;
+    policy.key  = (uint8_t *) key;
     policy.ekt  = NULL;
     policy.next = NULL;
     policy.window_size = 128;
@@ -491,11 +494,21 @@ main (int argc, char *argv[]) {
      * the effect of this policy is to turn off SRTP, so that this
      * application is now a vanilla-flavored RTP application.
      */
-    srtp_crypto_policy_set_null_cipher_hmac_null(&policy.rtp);
-    srtp_crypto_policy_set_null_cipher_hmac_null(&policy.rtcp);
-    policy.key = (uint8_t *)key;
+    policy.key                 = (uint8_t *)key;
     policy.ssrc.type           = ssrc_specific;
     policy.ssrc.value          = ssrc;
+    policy.rtp.cipher_type     = NULL_CIPHER;
+    policy.rtp.cipher_key_len  = 0; 
+    policy.rtp.auth_type       = NULL_AUTH;
+    policy.rtp.auth_key_len    = 0;
+    policy.rtp.auth_tag_len    = 0;
+    policy.rtp.sec_serv        = sec_serv_none;   
+    policy.rtcp.cipher_type    = NULL_CIPHER;
+    policy.rtcp.cipher_key_len = 0; 
+    policy.rtcp.auth_type      = NULL_AUTH;
+    policy.rtcp.auth_key_len   = 0;
+    policy.rtcp.auth_tag_len   = 0;
+    policy.rtcp.sec_serv       = sec_serv_none;   
     policy.window_size         = 0;
     policy.allow_repeat_tx     = 0;
     policy.ekt                 = NULL;

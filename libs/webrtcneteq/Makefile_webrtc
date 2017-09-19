@@ -23,6 +23,8 @@ $(WEBRTC_DIR)/libwebrtc/out:
 	cd libwebrtc/out && make
 	touch .step2
 
+#	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/../third_party/libsrtp/libsrtp/srtp.o
+
 .installed_webrtc: .step2
 	mv $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation.o $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation_2.o
 	find $(WEBRTC_OBJ_DIR)/modules/audio_coding -name "*.o"	| xargs ar cru libwebrtccore.a
@@ -36,7 +38,6 @@ $(WEBRTC_DIR)/libwebrtc/out:
 	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/modules/audio_coding/neteq/*.o
 	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/system_wrappers/metrics_default/metrics_default.o
 	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation_2.o
-	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/../third_party/libsrtp/libsrtp/srtp.o
 	find $(WEBRTC_OBJ_DIR)/common_audio/ -name "*.o" | xargs ar cru libwebrtccore.a
 	ranlib libwebrtccore.a
 	touch .installed_webrtc

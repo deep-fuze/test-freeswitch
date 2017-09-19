@@ -268,7 +268,7 @@ if test "${enable_optimizer}" = "yes" ; then
 fi
 
 # set defaults for use on all platforms
-SWITCH_AM_CFLAGS="-I${switch_srcdir}/src/include -I${switch_builddir}/src/include -I${switch_srcdir}/libs/libteletone/src  -I${switch_srcdir}/libs/webrtcneteq/src -I${switch_srcdir}/libs/fuzetransport -I${switch_srcdir}/libs/Libevent/include"
+SWITCH_AM_CFLAGS="-I${switch_srcdir}/src/include -I${switch_builddir}/src/include -I${switch_srcdir}/libs/libteletone/src  -I${switch_srcdir}/libs/webrtcneteq/src -I${switch_srcdir}/libs/fuzetransport -I${switch_srcdir}/libs/Libevent/include -DOPENSSL"
 SWITCH_AM_CXXFLAGS="-I${switch_srcdir}/src/include -I${switch_builddir}/src/include -I${switch_srcdir}/libs/libteletone/src  -I${switch_srcdir}/libs/webrtcneteq/src -I${switch_srcdir}/libs/fuzetransport -I${switch_srcdir}/libs/Libevent/include"
 SWITCH_AM_LDFLAGS="-lm"
 
@@ -1631,7 +1631,7 @@ ac_configure_args="$ac_configure_args CONFIGURE_CFLAGS='$CFLAGS $CPPFLAGS' CONFI
 #	--localstatedir='$localstatedir' --datadir='$datadir'"
 
 # Run configure in all the subdirs
-AC_CONFIG_SUBDIRS([libs/srtp])
+ AC_CONFIG_SUBDIRS([libs/srtp])
 if test "$use_system_apr" != "yes"; then
    AC_CONFIG_SUBDIRS([libs/apr])
 fi

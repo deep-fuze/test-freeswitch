@@ -9,7 +9,7 @@
 
 /*
  *	
- * Copyright (c) 2001-2017, Cisco Systems, Inc.
+ * Copyright (c) 2001-2006, Cisco Systems, Inc.
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -48,6 +48,12 @@
 #define INTEGERS_H
 
 
+#ifdef SRTP_KERNEL
+
+#include "kernel_compat.h"
+
+#else /* SRTP_KERNEL */
+
 /* use standard integer definitions, if they're available  */
 #ifdef HAVE_STDLIB_H
 # include <stdlib.h>
@@ -66,10 +72,6 @@
 #endif
 #ifdef HAVE_MACHINE_TYPES_H
 # include <machine/types.h>
-#endif
-
-#ifdef __cplusplus
-extern "C" {
 #endif
 
 /* Can we do 64 bit integers? */
@@ -94,9 +96,6 @@ typedef unsigned short int	uint16_t;
 #ifndef HAVE_UINT32_T
 typedef unsigned int		uint32_t;
 #endif
-#ifndef HAVE_INT32_T
-typedef int int32_t;
-#endif
 
 
 #if defined(NO_64BIT_MATH) && defined(HAVE_CONFIG_H)
@@ -107,6 +106,7 @@ extern uint32_t high32(uint64_t value);
 extern uint32_t low32(uint64_t value);
 #endif
 
+#endif /* SRTP_KERNEL */
 
 /* These macros are to load and store 32-bit values from un-aligned
    addresses.  This is required for processors that do not allow unaligned
@@ -141,10 +141,6 @@ extern uint32_t low32(uint64_t value);
 #else
 #define PUT_32(addr,value) *(((uint32_t *) (addr)) = (value)
 #define GET_32(addr) (*(((uint32_t *) (addr)))
-#endif
-
-#ifdef __cplusplus
-}
 #endif
 
 #endif /* INTEGERS_H */

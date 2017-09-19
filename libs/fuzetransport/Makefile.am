@@ -1,11 +1,11 @@
 EXTRA_DIST =
 SUBDIRS = 
-AUTOMAKE_OPTIONS = gnu subdir-objects
+AUTOMAKE_OPTIONS = gnu
 PREFIX=$(prefix)
 NAME = fuzetransport 
 
-AM_CFLAGS    = -std=c++0x $(new_AM_CFLAGS) -Wno-deprecated -I./src -I./src/core -I./src/polling -I./src/msg -I./include -I../Libevent/include -I../srtp/include -I../srtp/crypto/include -fPIC
-AM_CPPFLAGS  = $(AM_CFLAGS) -fPIC
+AM_CFLAGS    = -std=c++0x $(new_AM_CFLAGS) -Wno-deprecated -I./src -I./src/core -I./src/polling -I./src/msg -I./include -I../Libevent/include -I../srtp/include -I../srtp/crypto/include
+AM_CPPFLAGS  = $(AM_CFLAGS)
 AM_LDFLAGS   = $(new_AM_LDFLAGS) -L.
 
 DEFS = @DEFS@ -DSTD_SHARED_PTR -DNO_FUZECORE -DFREE_SWITCH
