@@ -6199,39 +6199,41 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
         }
 
         if (rtp_session->last_read_time && rtp_session->last_ts && (ts > rtp_session->last_ts)) {
-            uint32_t samples_diff;
-            int32_t drift, drift_ms;
+            if (rtp_session->samples_per_interval == 160) {
+                uint32_t samples_diff;
+                int32_t drift, drift_ms;
 
-            samples_diff = ((now - rtp_session->last_read_time) * rtp_session->samples_per_second) / 1000000;
-            drift = samples_diff - (ts - rtp_session->last_ts);
-            if (drift < 0)
-                drift = -1 * drift;
+                samples_diff = ((now - rtp_session->last_read_time) * rtp_session->samples_per_second) / 1000000;
+                drift = samples_diff - (ts - rtp_session->last_ts);
+                if (drift < 0)
+                    drift = -1 * drift;
 
-            drift_ms = (drift * 1000) / rtp_session->samples_per_second;
-            if (drift_ms > RTP_EVENT_DRIFT_THRESHOLD_MS) {
-                rtp_session->stats.rtcp.last_drift = drift_ms;
-                *flags |= SFF_RTP_EVENT;
-                rtp_session->stats.last_event |= RTP_EVENT_HIGH_DRIFT;
-                
-                rtp_session->high_drift_packets += 1;
+                drift_ms = (drift * 1000) / rtp_session->samples_per_second;
+                if (drift_ms > RTP_EVENT_DRIFT_THRESHOLD_MS) {
+                    rtp_session->stats.rtcp.last_drift = drift_ms;
+                    *flags |= SFF_RTP_EVENT;
+                    rtp_session->stats.last_event |= RTP_EVENT_HIGH_DRIFT;
 
-                if (rtp_session->high_drift_log_suppress == 0) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
-                                      "High drift cnt:%u ms:%u ssrc=%#x samples_diff=%u now=%lu last=%lu ts=%u last_ts=%u jitter=%u seq=%u.\n",
-                                      rtp_session->high_drift_packets, drift_ms, ntohl(rtp_session->recv_msg.header.ssrc), samples_diff, now,
-                                      rtp_session->last_read_time, ts, rtp_session->last_ts, rtp_session->stats.rtcp.jitter, seq);
-                    rtp_session->high_drift_log_suppress = 50;
+                    rtp_session->high_drift_packets += 1;
+
+                    if (rtp_session->high_drift_log_suppress == 0) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+                                          "High drift cnt:%u ms:%u ssrc=%#x samples_diff=%u now=%lu last=%lu ts=%u last_ts=%u jitter=%u seq=%u.\n",
+                                          rtp_session->high_drift_packets, drift_ms, ntohl(rtp_session->recv_msg.header.ssrc), samples_diff, now,
+                                          rtp_session->last_read_time, ts, rtp_session->last_ts, rtp_session->stats.rtcp.jitter, seq);
+                        rtp_session->high_drift_log_suppress = 50;
+                    }
+                } else if (!(rtp_session->stats.last_event & RTP_EVENT_HIGH_DRIFT)) {
+                    rtp_session->stats.rtcp.last_drift = drift_ms;
                 }
-            } else if (!(rtp_session->stats.last_event & RTP_EVENT_HIGH_DRIFT)) {
-                rtp_session->stats.rtcp.last_drift = drift_ms;
-            }
-            if (drift_ms > rtp_session->stats.rtcp.max_drift)
-                rtp_session->stats.rtcp.max_drift = drift_ms;
+                if (drift_ms > rtp_session->stats.rtcp.max_drift)
+                    rtp_session->stats.rtcp.max_drift = drift_ms;
 
-            rtp_session->stats.rtcp.jitter += (1.0/16.0) * ((double)drift - rtp_session->stats.rtcp.jitter);
-            if (rtp_session->stats.rtcp.jitter > rtp_session->stats.rtcp.max_jitter)
-                rtp_session->stats.rtcp.max_jitter = rtp_session->stats.rtcp.jitter;
-        }
+                rtp_session->stats.rtcp.jitter += (1.0/16.0) * ((double)drift - rtp_session->stats.rtcp.jitter);
+                if (rtp_session->stats.rtcp.jitter > rtp_session->stats.rtcp.max_jitter)
+                    rtp_session->stats.rtcp.max_jitter = rtp_session->stats.rtcp.jitter;
+            }
+        } // opus
 
         if (!rtp_session->time_of_first_rx_ts || (abs(ts - rtp_session->last_ts) > 16000)) {
             rtp_session->time_of_first_rx_ts = now;
@@ -6305,9 +6307,9 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
                 //if (rtp_session->flags[SWITCH_RTP_FLAG_SECURE_RECV] && (!rtp_session->ice.ice_user || rtp_session->recv_msg.header.version == 2)) {
                 int sbytes = (int) ebytes;
 #ifdef SRTP2
-				srtp_err_status_t stat = 0;
+                srtp_err_status_t stat = 0;
 #else
-				err_status_t stat = 0;
+                err_status_t stat = 0;
 #endif
 
                 if (rtp_session->flags[SWITCH_RTP_FLAG_SECURE_RECV_RESET]) {
@@ -6338,10 +6340,10 @@ static switch_status_t read_rtp_packet(switch_rtp_t *rtp_session, switch_size_t 
                                           stat == srtp_err_status_replay_fail ? " (replay check failed)" : stat ==
                                           srtp_err_status_auth_fail ? " (auth check failed)" : "", (long)sbytes);
 #else
-						switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR,
-										  "Error: SRTP %s unprotect failed with code %d%s %ld\n", rtp_type(rtp_session), stat,
-										  stat == err_status_replay_fail ? " (replay check failed)" : stat ==
-										  err_status_auth_fail ? " (auth check failed)" : "", (long)sbytes);
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR,
+                                          "Error: SRTP %s unprotect failed with code %d%s %ld\n", rtp_type(rtp_session), stat,
+                                          stat == err_status_replay_fail ? " (replay check failed)" : stat ==
+                                          err_status_auth_fail ? " (auth check failed)" : "", (long)sbytes);
 #endif
                         return SWITCH_STATUS_GENERR;
                     } else {
@@ -6660,9 +6662,9 @@ static switch_status_t read_rtcp_packet(switch_rtp_t *rtp_session, switch_size_t
         //if (rtp_session->flags[SWITCH_RTP_FLAG_SECURE_RECV] && (!rtp_session->ice.ice_user || rtp_session->rtcp_recv_msg_p->header.version == 2)) {
         int sbytes = (int) *bytes;
 #ifdef SRTP2
-		srtp_err_status_t stat = 0;
+        srtp_err_status_t stat = 0;
 #else
-		err_status_t stat = 0;
+        err_status_t stat = 0;
 #endif
 
         if ((stat = srtp_unprotect_rtcp(rtp_session->recv_ctx[rtp_session->srtp_idx_rtcp], &rtp_session->rtcp_recv_msg_p->header, &sbytes))) {
@@ -8554,9 +8556,9 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
         if (rtp_session->flags[SWITCH_RTP_FLAG_SECURE_SEND]) {
             int sbytes = (int) bytes;
 #ifdef SRTP2
-			srtp_err_status_t stat;
+            srtp_err_status_t stat;
 #else
-			err_status_t stat;
+            err_status_t stat;
 #endif
 
 
@@ -8587,8 +8589,8 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
 #if 0
                     uint64_t srtp_index;
                     srtp_index = srtp_protect_get_index(rtp_session->send_ctx[rtp_session->srtp_idx_rtp],  &send_msg->header);
-					switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "Error: %s SRTP protection failed on pkt=%u with code (%u) %d idx=%llu\n",
-									  rtp_session->rtp_conn_name, rtp_session->write_count, ntohs(send_msg->header.seq), stat, (long long unsigned int)srtp_index);
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "Error: %s SRTP protection failed on pkt=%u with code (%u) %d idx=%llu\n",
+                                      rtp_session->rtp_conn_name, rtp_session->write_count, ntohs(send_msg->header.seq), stat, (long long unsigned int)srtp_index);
 
 #else
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR,
@@ -8696,7 +8698,7 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
          * Only check conf timestamps here.  Bridging timestamps are checked separately across both
          * channels.
          */
-        if (rtp_session->last_write_ts_set && rtp_session->use_webrtc_neteq) {
+        if (rtp_session->samples_per_interval == 160 && rtp_session->last_write_ts_set && rtp_session->use_webrtc_neteq) {
             switch_time_t now = switch_time_now();
             if ((now - rtp_session->time_of_last_ts_check) > 10000000) {
                 switch_time_t delta = (now - rtp_session->time_of_first_ts)/1000; // ms
@@ -8709,11 +8711,6 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                                       difference, delta_ts, delta, rtp_session->first_ts, this_ts);
                 }
                 if (abs(difference) < (abs(rtp_session->ts_delta)-20)) {
-#if 0
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
-                                      "Timestamp delta %" PRId64 " decreased from %d\n",
-                                      difference, rtp_session->ts_delta);
-#endif
                     rtp_session->ts_delta = difference;
                 }
                 if (abs(difference) > abs(rtp_session->ts_delta)) {
@@ -9095,9 +9092,9 @@ SWITCH_DECLARE(int) switch_rtp_write_manual(switch_rtp_t *rtp_session,
 
         int sbytes = (int) bytes;
 #ifdef SRTP2
-		srtp_err_status_t stat;
+        srtp_err_status_t stat;
 #else
-		err_status_t stat;
+        err_status_t stat;
 #endif
 
         if (rtp_session->flags[SWITCH_RTP_FLAG_SECURE_SEND_RESET]) {

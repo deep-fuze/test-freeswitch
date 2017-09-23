@@ -409,7 +409,16 @@ WebRtcNetEQ_status_t WebRtcNetEQ_GetNetworkStatistics(void *inst, NetEqNetworkSt
   if (neteq_inst->receiving) {
     ret = neteq->NetworkStatistics(&stats);
     if (!ret) {
-      memcpy(ret_stats, &stats, sizeof(NetEqNetworkStatistics));
+      ret_stats->currentBufferSize = stats.current_buffer_size_ms;
+      ret_stats->preferredBufferSize = stats.preferred_buffer_size_ms;
+      ret_stats->jitterPeaksFound = stats.jitter_peaks_found;
+      ret_stats->currentPacketLossRate = stats.packet_loss_rate;
+      ret_stats->clockDriftPPM = stats.clockdrift_ppm;
+      ret_stats->meanWaitingTimeMs = stats.mean_waiting_time_ms;
+      ret_stats->medianWaitingTimeMs = stats.median_waiting_time_ms;
+      ret_stats->minWaitingTimeMs = stats.min_waiting_time_ms;
+      ret_stats->maxWaitingTimeMs = stats.max_waiting_time_ms;
+      // memcpy(ret_stats, &stats, sizeof(NetEqNetworkStatistics));
     }
   }
 
