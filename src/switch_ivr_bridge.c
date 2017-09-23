@@ -754,8 +754,8 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
                     if (neteq_inst) {
                         NetEqNetworkStatistics nwstats;
 						if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
-							if (nwstats.current_buffer_size_ms > RTP_EVENT_JB_SIZE_THRESHOLD_MS) {
-								int val = nwstats.current_buffer_size_ms;
+							if (nwstats.currentBufferSize > RTP_EVENT_JB_SIZE_THRESHOLD_MS) {
+								int val = nwstats.currentBufferSize;
                                 switch_core_ioctl_stats(session_a, SET_JB_SIZE, &val);
                                 switch_core_ioctl_stats(session_a, SET_EVENT_LONG_JB, NULL);
                             }

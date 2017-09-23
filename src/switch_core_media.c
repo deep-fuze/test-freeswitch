@@ -1457,7 +1457,7 @@ static void set_stats(switch_core_session_t *session, switch_media_type_t type, 
                 //add_signed_stat(stat.total_insert_errors, "neteq_total_insert_errors");
                 //add_signed_stat(stat.total_extract_errors, "neteq_total_extract_errors");
 
-				add_stat(nwstats.current_buffer_size_ms, "cur_jb_size");
+				add_stat(nwstats.currentBufferSize, "cur_jb_size");
 				add_stat(current_num_packets, "current_num_packets");
 				add_stat(max_num_packets, "max_num_packets");
 

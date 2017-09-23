@@ -36,33 +36,44 @@ void WebRtcNetEQ_RegisterLogCB(log_cb_fp log_cb);
 WebRtcNetEQ_status_t WebRtcNetEQ_Purge(void *inst);
 WebRtcNetEQ_status_t WebRtcNetEQ_CurrentPacketBufferStatistics(void *inst, int* current_num_packets, int* max_num_packets);
 
+// from libwebrtc/out/webrtc/src/webrtc/common_types.h
 typedef struct {
-  uint16_t current_buffer_size_ms;  // Current jitter buffer size in ms.                                                                                                            
-  uint16_t preferred_buffer_size_ms;  // Target buffer size in ms.                                                                                                                  
-  uint16_t jitter_peaks_found;  // 1 if adding extra delay due to peaky                                                                                                             
-                                // jitter; 0 otherwise.                                                                                                                             
-  uint16_t packet_loss_rate;  // Loss rate (network + late) in Q14.                                                                                                                 
-  uint16_t packet_discard_rate;  // Late loss rate in Q14.                                                                                                                          
-  uint16_t expand_rate;  // Fraction (of original stream) of synthesized                                                                                                            
-                         // audio inserted through expansion (in Q14).                                                                                                              
-  uint16_t speech_expand_rate;  // Fraction (of original stream) of synthesized                                                                                                     
-                                // speech inserted through expansion (in Q14).                                                                                                      
-  uint16_t preemptive_rate;  // Fraction of data inserted through pre-emptive                                                                                                       
-                             // expansion (in Q14).                                                                                                                                 
-  uint16_t accelerate_rate;  // Fraction of data removed through acceleration                                                                                                       
-                             // (in Q14).                                                                                                                                           
-  uint16_t secondary_decoded_rate;  // Fraction of data coming from secondary                                                                                                       
-                                    // decoding (in Q14).                                                                                                                           
-  int32_t clockdrift_ppm;  // Average clock-drift in parts-per-million                                                                                                              
-                           // (positive or negative).                                                                                                                               
-  size_t added_zero_samples;  // Number of zero samples added in "off" mode.                                                                                                        
-  // Statistics for packet waiting times, i.e., the time between a packet                                                                                                           
-  // arrives until it is decoded.                                                                                                                                                   
-  int mean_waiting_time_ms;
-  int median_waiting_time_ms;
-  int min_waiting_time_ms;
-  int max_waiting_time_ms;
-} NetEqNetworkStatistics;
+  // current jitter buffer size in ms
+  uint16_t currentBufferSize;
+  // preferred (optimal) buffer size in ms
+  uint16_t preferredBufferSize;
+  // adding extra delay due to "peaky jitter"
+  uint32_t jitterPeaksFound;
+  // Loss rate (network + late); fraction between 0 and 1, scaled to Q14.
+  uint16_t currentPacketLossRate;
+  // Late loss rate; fraction between 0 and 1, scaled to Q14.
+  uint16_t currentDiscardRate;
+  // fraction (of original stream) of synthesized audio inserted through
+  // expansion (in Q14)
+  uint16_t currentExpandRate;
+  // fraction (of original stream) of synthesized speech inserted through
+  // expansion (in Q14)
+  uint16_t currentSpeechExpandRate;
+  // fraction of synthesized speech inserted through pre-emptive expansion
+  // (in Q14)
+  uint16_t currentPreemptiveRate;
+  // fraction of data removed through acceleration (in Q14)
+  uint16_t currentAccelerateRate;
+  // fraction of data coming from secondary decoding (in Q14)
+  uint16_t currentSecondaryDecodedRate;
+  // clock-drift in parts-per-million (negative or positive)
+  int32_t clockDriftPPM;
+  // average packet waiting time in the jitter buffer (ms)
+  int meanWaitingTimeMs;
+  // median packet waiting time in the jitter buffer (ms)
+  int medianWaitingTimeMs;
+  // min packet waiting time in the jitter buffer (ms)
+  int minWaitingTimeMs;
+  // max packet waiting time in the jitter buffer (ms)
+  int maxWaitingTimeMs;
+  // added samples in off mode due to packet loss
+  size_t addedSamples;
+  } NetEqNetworkStatistics;
 
 WebRtcNetEQ_status_t WebRtcNetEQ_GetNetworkStatistics(void *inst, NetEqNetworkStatistics *ret_stats);
 WebRtcNetEQ_status_t WebRtcNetEQ_SetMaximumDelay(void *inst, int delay);

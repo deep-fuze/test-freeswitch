@@ -599,7 +599,7 @@ read_again:
                         void *neteq_internal = switch_core_get_neteq_inst(session);
 
                         if (neteq_internal && WebRtcNetEQ_GetNetworkStatistics(neteq_internal, &nwstats) == 0) {
-                            val = nwstats.current_buffer_size_ms;
+                            val = nwstats.currentBufferSize;
                             switch_core_ioctl_stats(session, SET_JB_SIZE, &val);
                         }
                     }
@@ -732,7 +732,7 @@ read_again:
                             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
                                               "get_frame stats: read/skip=%d/%d insert/skip=%d/%d jbsize=%dms jfpref=%d peaks=%d\n",
                                               session->read, session->skip_read, session->insert, session->skip_insert,
-                                              nwstats.current_buffer_size_ms, nwstats.preferred_buffer_size_ms, nwstats.jitter_peaks_found);
+                                              nwstats.currentBufferSize, nwstats.preferredBufferSize, nwstats.jitterPeaksFound);
                             read_frame->m = 1;
                         }
 
@@ -1268,7 +1268,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
                         NetEqNetworkStatistics nwstats;
                         void *neteq_internal = switch_core_get_neteq_inst(session);
                         if (neteq_internal && WebRtcNetEQ_GetNetworkStatistics(neteq_internal, &nwstats) == 0) {
-                            val = nwstats.current_buffer_size_ms;
+                            val = nwstats.currentBufferSize;
                             switch_core_ioctl_stats(session, SET_JB_SIZE, &val);
                         }
                     }
@@ -1422,7 +1422,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
                                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
                                                   "get_frame stats: read/skip=%d/%d insert/skip=%d/%d jbsize=%dms jfpref=%d peaks=%d\n",
                                                   session->read, session->skip_read, session->insert, session->skip_insert,
-                                                  nwstats.current_buffer_size_ms, nwstats.preferred_buffer_size_ms,nwstats.jitter_peaks_found);
+                                                  nwstats.currentBufferSize, nwstats.preferredBufferSize,nwstats.jitterPeaksFound);
                                 read_frame->m = 1;
                             }
                             if (WebRtcNetEQ_Insert(session->neteq_inst, read_frame->data,

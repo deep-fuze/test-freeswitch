@@ -9307,27 +9307,27 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
         WebRtcNetEQ_CurrentPacketBufferStatistics(neteq_inst, &current_num_packets, &max_num_packets);
 
         if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
-            jbuf = nwstats.current_buffer_size_ms;
+            jbuf = nwstats.currentBufferSize;
 
             /* ignore loss after muted periods */
             if (rtp_session->ignore_loss_after_muted <= 0) {
-                loss = (short)((float)nwstats.packet_loss_rate/2.56);
+                loss = (short)((float)nwstats.currentPacketLossRate/2.56);
             }
 
-            max_proc_time = nwstats.max_waiting_time_ms;
+            max_proc_time = nwstats.maxWaitingTimeMs;
 
             if ((jbuf > 250 && rtp_session->stats.last_jitter < 250) ||
                 (jbuf < 250 && rtp_session->stats.last_jitter > 250) ||
-                (nwstats.preferred_buffer_size_ms > 250 && rtp_session->stats.last_pref_jbuf < 250) ||
-                (nwstats.preferred_buffer_size_ms < 250 && rtp_session->stats.last_pref_jbuf > 250) ||
-                abs(jbuf - nwstats.preferred_buffer_size_ms) > 100 ||
+                (nwstats.preferredBufferSize > 250 && rtp_session->stats.last_pref_jbuf < 250) ||
+                (nwstats.preferredBufferSize < 250 && rtp_session->stats.last_pref_jbuf > 250) ||
+                abs(jbuf - nwstats.preferredBufferSize) > 100 ||
                 (max_proc_time > 250 && rtp_session->stats.last_proc_time < 250) ||
                 (max_proc_time < 250 && rtp_session->stats.last_proc_time > 250)) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
                                   "jitter buffer stats: curr:%dms pref:%dms pkts:%d wait_times [mean:%d median:%d min:%d max:%d]\n",
-                                  jbuf, nwstats.preferred_buffer_size_ms,
-                                  current_num_packets, nwstats.mean_waiting_time_ms, nwstats.median_waiting_time_ms,
-                                  nwstats.min_waiting_time_ms, nwstats.max_waiting_time_ms);
+                                  jbuf, nwstats.preferredBufferSize,
+                                  current_num_packets, nwstats.meanWaitingTimeMs, nwstats.medianWaitingTimeMs,
+                                  nwstats.minWaitingTimeMs, nwstats.maxWaitingTimeMs);
             }
         }
     } else {
@@ -9343,7 +9343,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "jitter buffer size:%d\n", jbuf);
         }
         if (neteq_inst) {
-            rtp_stat_add_value(rtp_session, RTP_PREF_JBUF, "%d", nwstats.preferred_buffer_size_ms, rtp_session->stats.last_pref_jbuf);
+            rtp_stat_add_value(rtp_session, RTP_PREF_JBUF, "%d", nwstats.preferredBufferSize, rtp_session->stats.last_pref_jbuf);
             rtp_stat_add_value(rtp_session, RTP_JBUF_PKTS, "%d", current_num_packets, rtp_session->stats.last_jbuf_pkts);
             rtp_stat_add_value(rtp_session, RTP_MAX_PROC_TIME, "%d", max_proc_time, rtp_session->stats.last_proc_time);
             rtp_stat_add_value(rtp_session, RTP_PER_LOST, "%d", loss, rtp_session->stats.last_lost_percent);
