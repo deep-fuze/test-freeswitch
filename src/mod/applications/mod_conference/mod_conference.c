@@ -2300,7 +2300,15 @@ static switch_status_t conference_add_event_member_data(conference_member_t *mem
     if (strlen(member->contactive_name) > 0) {
         switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Contactive-Name", "%s", member->contactive_name);
     }
-
+    if (strlen(member->contactive_userid) > 0) {
+        switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Contactive-Userid", "%s", member->contactive_userid);
+    }
+    if (strlen(member->contactive_email) > 0) {
+        switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Contactive-Email", "%s", member->contactive_email);
+    }
+    if (strlen(member->corp_name) > 0) {
+        switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Corp-Name", "%s", member->corp_name);
+    }
     return status;
 }
 
