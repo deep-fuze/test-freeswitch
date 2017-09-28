@@ -4514,7 +4514,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                 member_set_cwc(conference->last_active_talkers[i], loss);
                 ceo_set_listener_count_incr(&conference->ceo, codec, loss, 1);
             } else {
-                ceo_set_listener_count_incr(&conference->ceo, codec, 0, 1);
+                ceo_set_listener_count_incr(&conference->ceo, codec, -1, 1);
             }
 
             for (j = 0; j < MAX_ACTIVE_TALKERS; ++j) {

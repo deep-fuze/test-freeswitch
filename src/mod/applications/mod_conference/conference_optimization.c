@@ -219,7 +219,8 @@ void ceo_set_listener_count(conf_encoder_optimization_t *ceo, int ianacode, int 
     for (conference_write_codec_t *wp_ptr = ceo->cwc[0];
          wp_ptr != NULL;
          wp_ptr = wp_ptr->next) {
-        if (wp_ptr->ianacode == ianacode && wp_ptr->loss_percent == loss_percent) {
+        if (wp_ptr->ianacode == ianacode &&
+            (wp_ptr->loss_percent == loss_percent || loss_percent == -1)) {
             wp_ptr->listener_count = count;
             return;
         }
@@ -230,7 +231,8 @@ void ceo_set_listener_count_incr(conf_encoder_optimization_t *ceo, int ianacode,
     for (conference_write_codec_t *wp_ptr = ceo->cwc[0];
          wp_ptr != NULL;
          wp_ptr = wp_ptr->next) {
-        if (wp_ptr->ianacode == ianacode && wp_ptr->loss_percent >= loss_percent) {
+        if (wp_ptr->ianacode == ianacode &&
+            (wp_ptr->loss_percent >= loss_percent || loss_percent == -1)) {
             wp_ptr->listener_count += count;
             return;
         }
