@@ -660,8 +660,10 @@ SWITCH_DECLARE(switch_status_t) switch_core_codec_init_with_bitrate(switch_codec
 	if (!ms) {
 		for (iptr = codec_interface->implementations; iptr; iptr = iptr->next) {
 			uint32_t crate = !strcasecmp(codec_name, "g722") ? iptr->samples_per_second : iptr->actual_samples_per_second;
+			int channels_ = !strcasecmp(codec_name, "opus") ? 1 : channels;
+
 			if ((!rate || rate == crate) && (!bitrate || bitrate == (uint32_t)iptr->bits_per_second) &&
-				(20 == (iptr->microseconds_per_packet / 1000)) && (!channels || channels == iptr->number_of_channels)) {
+				(20 == (iptr->microseconds_per_packet / 1000)) && (!channels || channels_ == iptr->number_of_channels)) {
 				implementation = iptr;
 				goto found;
 			}
@@ -671,8 +673,10 @@ SWITCH_DECLARE(switch_status_t) switch_core_codec_init_with_bitrate(switch_codec
 	/* Either looking for a specific interval or there was no interval specified and there wasn't one @20ms available */
 	for (iptr = codec_interface->implementations; iptr; iptr = iptr->next) {
 		uint32_t crate = !strcasecmp(codec_name, "g722") ? iptr->samples_per_second : iptr->actual_samples_per_second;
+		int channels_ = !strcasecmp(codec_name, "opus") ? 1 : channels;
+
 		if ((!rate || rate == crate) && (!bitrate || bitrate == (uint32_t)iptr->bits_per_second) &&
-			(!ms || ms == (iptr->microseconds_per_packet / 1000)) && (!channels || channels == iptr->number_of_channels)) {
+			(!ms || ms == (iptr->microseconds_per_packet / 1000)) && (!channels || channels_ == iptr->number_of_channels)) {
 			implementation = iptr;
 			break;
 		}
