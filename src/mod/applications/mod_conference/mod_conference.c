@@ -342,8 +342,8 @@ typedef struct {
 
 /* Some things are different for Opus */
 #define OPUS_CHECK_FREQ 10
-#define OPUS_MIN_LOSS 5
-#define OPUS_MAX_LOSS 45
+#define OPUS_MIN_LOSS 10
+#define OPUS_MAX_LOSS 50
 #define OPUS_LOSS_CNT (1+(OPUS_MAX_LOSS-OPUS_MIN_LOSS)/10)
 #define OPUS_IANACODE 116
 
@@ -691,7 +691,7 @@ typedef struct conference_obj {
     uint16_t stop_entry_tone_participants;
 
     uint32_t participants_per_thread[N_CWC];
-    uint32_t g711acnt, g711ucnt, g722cnt, opuscnt;
+    uint32_t g711acnt, g711ucnt, g722cnt, opuscnt, opuslosscnt[OPUS_LOSS_CNT];
     int lineno;
 
     int check_opus_loss_cnt;
@@ -853,7 +853,9 @@ struct conference_member {
     float loss;
     float loss_target;
     int loss_idx;
-
+#ifdef SIMULATE_LOSS
+    int loss_count;
+#endif
     switch_bool_t contactive;
     char contactive_name[1024];
     char contactive_userid[1024];
@@ -2149,13 +2151,13 @@ switch_bool_t is_muted(conference_member_t *member) {
 
 static void update_mute_state(conference_member_t *member, mute_event_t event)
 {
-	int ms_cnt_threshold = MS_CNT_THRESHOLD;
+    int ms_cnt_threshold = MS_CNT_THRESHOLD;
     if (!member)
         return;
 
-	if (member->ianacode == OPUS_IANACODE) {
-		ms_cnt_threshold = MS_CNT_THRESHOLD*4;
-	}
+    if (member->ianacode == OPUS_IANACODE) {
+        ms_cnt_threshold = MS_CNT_THRESHOLD*4;
+    }
 
     switch (member->ms) {
     case MS_UNMUTED:
@@ -2799,7 +2801,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     member->last_pin_time = switch_time_now();
     member->authenticate = 0;
     if (!switch_test_flag(member,MFLAG_NOCHANNEL)){
-        int loss = 0;
+        int loss = 1;
         /* Does any of this need to change for OPUS? */
         /* get a pointer to the codec implementation */
         impl = member->orig_read_impl;
@@ -2815,7 +2817,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             member->skip_accumulation = SWITCH_TRUE;
             member->variable_encoded_length = SWITCH_TRUE;
             member->ianacode = OPUS_IANACODE;
-            loss = OPUS_MAX_LOSS;
+            loss = OPUS_LOSS_CNT;
         } else {
             member->individual_codec = SWITCH_FALSE;
             member->skip_accumulation = SWITCH_FALSE;
@@ -3303,7 +3305,16 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     return status;
 }
 
-static int opus_loss_cal(conference_member_t *member, int loss) {
+static int opus_loss_calc(conference_member_t *member, int loss) {
+#ifdef SIMULATE_LOSS
+    if (member->loss_count > 0) {
+        member->loss_count -= 1;
+    } else {
+        member->loss_count = 50;
+        loss = rand() % 60;
+        member->loss = 0;
+    }
+#endif
     if (loss > member->loss) {
         member->loss = loss;
     } else if (loss < member->loss) {
@@ -3325,14 +3336,14 @@ static int opus_loss_cal(conference_member_t *member, int loss) {
     return (int)member->loss;
 }
 
-static void member_set_cwc(conference_member_t *member, int loss)
+static void member_set_cwc(conference_member_t *member)
 {
     if (member->meo.cwc) {
         member->meo.cwc = cwc_get(member->conference->ceo.cwc[member->meo.cwc->cwc_idx],
-                                  member->codec_id, member->impl_id, loss);
+                                  member->codec_id, member->impl_id, member->loss_idx);
     } else {
         member->meo.cwc = cwc_get(member->conference->ceo.cwc[0],
-                                  member->codec_id, member->impl_id, loss);
+                                  member->codec_id, member->impl_id, member->loss_idx);
     }
 }
 
@@ -3385,7 +3396,7 @@ static void conference_opus_loss_adjust(conference_obj_t *conference) {
             }
 
             loss = switch_rtp_get_lost_percent(member->channel);
-            loss = opus_loss_cal(member, loss);
+            loss = opus_loss_calc(member, loss);
 
             if (loss != prev_loss) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
@@ -3393,7 +3404,7 @@ static void conference_opus_loss_adjust(conference_obj_t *conference) {
                 if (switch_core_codec_ready(&member->write_codec)) {
                     switch_core_ctl(&member->write_codec, 1, &loss);
                 }
-                member_set_cwc(member, loss);
+                member_set_cwc(member);
             }
         }
     }
@@ -3406,6 +3417,7 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
     conference_member_t *member = NULL, *last = NULL;
     uint32_t g722cnt = 0, g711ucnt = 0, g711acnt = 0, othercnt = 0, opuscnt[OPUS_LOSS_CNT], opustotalcnt = 0;
     int count;
+    switch_bool_t changed = SWITCH_FALSE;
 
     for (int i = 0; i < OPUS_LOSS_CNT; i++) {
         opuscnt[i] = 0;
@@ -3537,8 +3549,15 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
         }
     }
 
+    for (int i = 0; i < OPUS_LOSS_CNT; i++) {
+        if (opuscnt[i] != conference->opuslosscnt[i]) {
+            changed = SWITCH_TRUE;
+            conference->opuslosscnt[i] = opuscnt[i];
+        }
+    }
+
     if ((conference->g711ucnt != g711ucnt) || (conference->g711acnt != g711acnt) ||
-        (conference->g722cnt != g722cnt) || (conference->opuscnt != opustotalcnt)) {
+        (conference->g722cnt != g722cnt) || (conference->opuscnt != opustotalcnt) || changed) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
                           "Conference (%s) listener counts changed 0:%u -> %u 8:%u -> %u 9:%u -> %u opus:%u -> %u [%u,%u,%u,%u,%u] othercnt:%u\n",
                           conference->meeting_id, conference->g711ucnt, g711ucnt, conference->g711acnt, g711acnt,
@@ -3556,7 +3575,7 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
     ceo_set_listener_count(&conference->ceo, 0, -1, g711ucnt);
     ceo_set_listener_count(&conference->ceo, 8, -1, g711acnt);
     for (int i = 0; i < OPUS_LOSS_CNT; i++) {
-        ceo_set_listener_count(&conference->ceo, OPUS_IANACODE, i*10+OPUS_MIN_LOSS, opuscnt[i]);
+        ceo_set_listener_count(&conference->ceo, OPUS_IANACODE, i, opuscnt[i]);
     }
 
     switch_mutex_unlock(conference->member_mutex);
@@ -4508,11 +4527,15 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             conference->last_active_talkers[i]->last_time_active = now;
             codec = conference->last_active_talkers[i]->ianacode;
 
+            if (codec > 95) {
+                codec = OPUS_IANACODE;
+            }
+
             if (conference->last_active_talkers[i]->ianacode > 95) {
                 int loss = conference->last_active_talkers[i]->loss_idx;
                 loss = loss*10 + OPUS_MIN_LOSS;
-                member_set_cwc(conference->last_active_talkers[i], loss);
-                ceo_set_listener_count_incr(&conference->ceo, codec, loss, 1);
+                member_set_cwc(conference->last_active_talkers[i]);
+                ceo_set_listener_count_incr(&conference->ceo, codec, conference->last_active_talkers[i]->loss_idx, 1);
             } else {
                 ceo_set_listener_count_incr(&conference->ceo, codec, -1, 1);
             }

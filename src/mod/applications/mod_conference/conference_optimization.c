@@ -215,26 +215,38 @@ void ceo_start_write(conf_encoder_optimization_t *ceo) {
     }
 }
 
-void ceo_set_listener_count(conf_encoder_optimization_t *ceo, int ianacode, int loss_percent, uint32_t count) {
+void ceo_set_listener_count(conf_encoder_optimization_t *ceo, int ianacode, int loss_idx, uint32_t count) {
     for (conference_write_codec_t *wp_ptr = ceo->cwc[0];
          wp_ptr != NULL;
          wp_ptr = wp_ptr->next) {
-        if (wp_ptr->ianacode == ianacode &&
-            (wp_ptr->loss_percent == loss_percent || loss_percent == -1)) {
-            wp_ptr->listener_count = count;
-            return;
+        if (wp_ptr->ianacode == ianacode) {
+            if (loss_idx < 0) {
+                wp_ptr->listener_count = count;
+                return;
+            } else {
+                if (wp_ptr->loss_idx == loss_idx) {
+                    wp_ptr->listener_count = count;
+                    return;
+                }
+            }
         }
     }
 }
 
-void ceo_set_listener_count_incr(conf_encoder_optimization_t *ceo, int ianacode, int loss_percent, uint32_t count) {
+void ceo_set_listener_count_incr(conf_encoder_optimization_t *ceo, int ianacode, int loss_idx, uint32_t count) {
     for (conference_write_codec_t *wp_ptr = ceo->cwc[0];
          wp_ptr != NULL;
          wp_ptr = wp_ptr->next) {
-        if (wp_ptr->ianacode == ianacode &&
-            (wp_ptr->loss_percent >= loss_percent || loss_percent == -1)) {
-            wp_ptr->listener_count += count;
-            return;
+        if (wp_ptr->ianacode == ianacode) {
+            if (loss_idx < 0) {
+                wp_ptr->listener_count += count;
+                return;
+            } else {
+                if (wp_ptr->loss_idx == loss_idx) {
+                    wp_ptr->listener_count += count;
+                    return;
+                }
+            }
         }
     }
 }
@@ -325,31 +337,35 @@ switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, 
 }
 
 switch_status_t ceo_write_new_wc(conf_encoder_optimization_t *ceo, switch_codec_t *frame_codec, switch_codec_t *write_codec,
-                                 int codec_id, int impl_id, int ianacode, int loss_percent) {
+                                 int codec_id, int impl_id, int ianacode, int loss_buckets) {
     conference_write_codec_t *new_write_codec;
 #ifdef SIMULATE_LOAD
     loss_percent += SIMULATE_LOAD;
 #endif
 
     for (int i = 0; i < N_CWC; i++) {
-        for (int j = loss_percent; j >= 0; j -= 10) {
+        for (int j = loss_buckets; j >= 0; j--) {
             if ((new_write_codec = switch_core_alloc(ceo->write_codecs_pool, sizeof(*new_write_codec))) == 0) {
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "no memory for new codec\n");
                 return SWITCH_STATUS_FALSE;
             } else {
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, " created new codec_id=%d impl_id=%d ianacode=%d loss=%d%%\n",
-                                  codec_id, impl_id, ianacode, j);
+                                  codec_id, impl_id, ianacode, (j+1)*10);
                 memset(new_write_codec, 0, sizeof(*new_write_codec));
 
                 cwc_initialize(new_write_codec, ceo->write_codecs_pool, ceo->enc_frame_pool, (i == 0), frame_codec);
                 if (new_write_codec->encoder) {
-                    switch_core_conference_encode_init(new_write_codec->encoder, write_codec, ceo->enc_frame_pool, j);
+                    int loss = 0;
+                    if (ianacode > 95) {
+                        loss = (j+1)*10;
+                    }
+                    switch_core_conference_encode_init(new_write_codec->encoder, write_codec, ceo->enc_frame_pool, loss);
                 }
 
                 new_write_codec->ianacode = ianacode;
                 new_write_codec->codec_id = codec_id;
                 new_write_codec->impl_id = impl_id;
-                new_write_codec->loss_percent = j;
+                new_write_codec->loss_idx = j;
                 new_write_codec->next = ceo->cwc[i];
                 new_write_codec->cwc_idx = i;
                 ceo->cwc[i] = new_write_codec;
@@ -662,13 +678,19 @@ filelist_t *filelist_get(filelist_t *pl, int codec_id, int impl_id) {
     return NULL;
 }
 
-conference_write_codec_t *cwc_get(conference_write_codec_t *cwc, int codec_id, int impl_id, int loss_percent) {
+conference_write_codec_t *cwc_get(conference_write_codec_t *cwc, int codec_id, int impl_id, int loss_idx) {
     for (conference_write_codec_t *ret = cwc; ret != NULL; ret = ret->next) {
-        if (ret->codec_id == codec_id && ret->impl_id == impl_id &&
-            (loss_percent == -1 || (loss_percent == ret->loss_percent))) {
-            return ret;
+        if (ret->codec_id == codec_id && ret->impl_id == impl_id) {
+            if (loss_idx == -1) {
+                return ret;
+            }
+            if (loss_idx == ret->loss_idx) {
+                return ret;
+            }
         }
     }
+    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "cwc_get failed to find codec id:%d impl:%d loss:%d\n",
+                      codec_id, impl_id, loss_idx); 
     return NULL;
 }
 

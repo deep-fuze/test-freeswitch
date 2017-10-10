@@ -84,7 +84,7 @@ typedef struct conference_write_codec {
     uint32_t codec_id;
     uint32_t impl_id;
     uint32_t ianacode;
-    int loss_percent;
+    int loss_idx;
 
     uint32_t write_idx;
     
