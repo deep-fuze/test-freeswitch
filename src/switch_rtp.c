@@ -8459,13 +8459,15 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
             }
 
             if (*flags & SFF_CNG) {
-                if (rtp_session->cng_pt) {
-                    if (send_msg->header.pt != rtp_session->cng_pt) {
-                        send_msg->header.pt = rtp_session->cng_pt;
-                    }
-                } else {
-                    if (send_msg->header.pt != 13) {
-                        send_msg->header.pt = 13;
+                if (rtp_session->samples_per_interval == 160) {
+                    if (rtp_session->cng_pt) {
+                        if (send_msg->header.pt != rtp_session->cng_pt) {
+                            send_msg->header.pt = rtp_session->cng_pt;
+                        }
+                    } else {
+                        if (send_msg->header.pt != 13) {
+                            send_msg->header.pt = 13;
+                        }
                     }
                 }
 
@@ -8940,24 +8942,17 @@ SWITCH_DECLARE(int) switch_rtp_write_frame(switch_rtp_t *rtp_session, switch_fra
     switch_assert(frame != NULL);
 
     if (switch_test_flag(frame, SFF_CNG)) {
-        if (rtp_session->cng_pt) {
-            payload = rtp_session->cng_pt;
+        if (rtp_session->samples_per_interval == 160) {
+            if (rtp_session->cng_pt) {
+                payload = rtp_session->cng_pt;
+            } else {
+                payload = 13;
+            }
         } else {
-            payload = 13;
-            // return (int) frame->packetlen;
+            payload = rtp_session->payload;
         }
     } else {
         payload = rtp_session->payload;
-#if 0
-        if (rtp_session->pmaps && *rtp_session->pmaps) {
-            payload_map_t *pmap;
-            for (pmap = *rtp_session->pmaps; pmap; pmap = pmap->next) {
-                if (pmap->current) {
-                    payload = pmap->pt;
-                }
-            }
-        }
-#endif
     }
 
     if (switch_test_flag(frame, SFF_RTP_HEADER)) {
