@@ -37,6 +37,8 @@
 SWITCH_MODULE_LOAD_FUNCTION(mod_opus_load);
 SWITCH_MODULE_DEFINITION(mod_opus, mod_opus_load, NULL, NULL);
 
+#define DEFAULT_BITRATE 24000
+
 /*! \brief Various codec settings */
 struct opus_codec_settings {
     int useinbandfec;
@@ -56,7 +58,7 @@ typedef struct opus_codec_settings opus_codec_settings_t;
 static opus_codec_settings_t default_codec_settings = {
     /*.useinbandfec */ 1,
     /*.usedtx */ 1,
-    /*.maxaveragebitrate */ 16000,
+    /*.maxaveragebitrate */ DEFAULT_BITRATE,
     /*.stereo*/ 0,
     /*.cbr*/ 0,
     /*.sprop_maxcapturerate*/ 0,
@@ -184,7 +186,7 @@ static switch_status_t switch_opus_fmtp_parse(const char *fmtp, switch_codec_fmt
                                     
                                 default:
                                     /* this should never happen but 20000 is common among all rates */
-                                    codec_settings->maxaveragebitrate = 16000;
+                                    codec_settings->maxaveragebitrate = DEFAULT_BITRATE;
                                     break;
                             }
                             
@@ -266,7 +268,7 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
     
     if (encoding) {
         /* come up with a way to specify these */
-        int bitrate_bps = 16000 /*opus_prefs.bitrate*/;
+        int bitrate_bps = DEFAULT_BITRATE /*opus_prefs.bitrate*/;
         int use_vbr = opus_prefs.use_vbr;
         int complexity = 10 /*opus_prefs.complexity*/;
         int err;
@@ -275,7 +277,7 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
 
         context->bitrate_target = bitrate_bps;
         context->bitrate_current = context->bitrate_target;
-        context->loss_target = 5.0;
+        context->loss_target = 10.0;
         context->loss_current = context->loss_target;
         context->complexity = complexity;
 
@@ -402,8 +404,8 @@ static switch_status_t switch_opus_ctl(switch_codec_t *codec,
             int16_t *loss = (int16_t *)data;
             int br_factor;
             int br;
-            if (*loss < 5) {
-                *loss = 5;
+            if (*loss < 10) {
+                *loss = 10;
                 context->loss_current = *loss;
             } else if (*loss > 50) {
                 *loss = 50;
@@ -414,7 +416,7 @@ static switch_status_t switch_opus_ctl(switch_codec_t *codec,
             if (br_factor < 0) {
                 br_factor = 0;
             }
-            br = context->bitrate_target + br_factor*2700;
+            br = context->bitrate_target + br_factor*1000;
             context->bitrate_current = br;
             opus_encoder_ctl(context->encoder_object, OPUS_SET_BITRATE(context->bitrate_current));
         }
