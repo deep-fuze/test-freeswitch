@@ -2811,10 +2811,15 @@ static int add_rx_congestion(switch_rtp_t *rtp_session, void *body, switch_rtcp_
         rx_congestion->lost_percent = 0;
     }
 
-#if 0
+    if (rx_congestion->lost_percent > 0) {
+        rx_congestion->lost_percent = 0;
+    }
+
+#if 1
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
-                      "RTCP app specific lost=%u%% jitter=%ums\n",
-                      rtp_session->stats.last_lost_percent, rtp_session->stats.last_jitter);
+                      "RTCP app specific lost=%u%% jitter=%ums degraded=%d active=%d muted=%d cn=%d\n",
+                      rtp_session->stats.last_lost_percent, rtp_session->stats.last_jitter,
+                      rx_congestion->degraded, rx_congestion->active, rx_congestion->muted, rx_congestion->cn);
 #endif
 
     for (i = 0; i < APP_RX_NUM_STATS; i++) {
@@ -9316,8 +9321,8 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
                 (max_proc_time > 250 && rtp_session->stats.last_proc_time < 250) ||
                 (max_proc_time < 250 && rtp_session->stats.last_proc_time > 250)) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
-                                  "jitter buffer stats: curr:%dms pref:%dms pkts:%d wait_times [mean:%d median:%d min:%d max:%d]\n",
-                                  jbuf, nwstats.preferredBufferSize,
+                                  "jitter buffer stats: loss:%d curr:%dms pref:%dms pkts:%d wait_times [mean:%d median:%d min:%d max:%d]\n",
+                                  loss, jbuf, nwstats.preferredBufferSize,
                                   current_num_packets, nwstats.meanWaitingTimeMs, nwstats.medianWaitingTimeMs,
                                   nwstats.minWaitingTimeMs, nwstats.maxWaitingTimeMs);
             }
@@ -9332,7 +9337,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
     if (jbuf != -1) {
         rtp_stat_add_value(rtp_session, RTP_JITTER_BUFFER, "%d", jbuf, rtp_session->stats.last_jitter);
         if (rtp_session->stats.duration % 10 == 0) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "jitter buffer size:%d\n", jbuf);
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "jitter buffer size:%d loss:%d\n", jbuf, loss);
         }
         if (neteq_inst) {
             rtp_stat_add_value(rtp_session, RTP_PREF_JBUF, "%d", nwstats.preferredBufferSize, rtp_session->stats.last_pref_jbuf);
