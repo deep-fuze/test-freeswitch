@@ -387,7 +387,7 @@ WebRtcNetEQ_status_t WebRtcNetEQ_CurrentPacketBufferStatistics(void *inst, int* 
   return CONVERT_STATUS(0);
 }
 
-WebRtcNetEQ_status_t WebRtcNetEQ_GetNetworkStatistics(void *inst, NetEqNetworkStatistics *ret_stats)
+WebRtcNetEQ_status_t WebRtcNetEQ_GetNetworkStatistics(void *inst, FuzeNetEqNetworkStatistics *ret_stats)
 {
   neteq_inst_t *neteq_inst = (neteq_inst_t *)inst;
 
@@ -418,7 +418,6 @@ WebRtcNetEQ_status_t WebRtcNetEQ_GetNetworkStatistics(void *inst, NetEqNetworkSt
       ret_stats->medianWaitingTimeMs = stats.median_waiting_time_ms;
       ret_stats->minWaitingTimeMs = stats.min_waiting_time_ms;
       ret_stats->maxWaitingTimeMs = stats.max_waiting_time_ms;
-      // memcpy(ret_stats, &stats, sizeof(NetEqNetworkStatistics));
     }
   }
 

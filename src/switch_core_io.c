@@ -595,7 +595,7 @@ read_again:
                 } else if (++session->total_reads % session->rtcp_interval == 0) {
                     uint32_t val;
                     if (session->neteq_inst) {
-                        NetEqNetworkStatistics nwstats;
+                        FuzeNetEqNetworkStatistics nwstats;
                         void *neteq_internal = switch_core_get_neteq_inst(session);
 
                         if (neteq_internal && WebRtcNetEQ_GetNetworkStatistics(neteq_internal, &nwstats) == 0) {
@@ -723,7 +723,7 @@ read_again:
                     
                     if (!(flags & SWITCH_IO_FLAG_CANT_SPEAK) && session->audio_level_low_count < 50) {
                         if (wasskipping) {
-                            NetEqNetworkStatistics nwstats;
+                            FuzeNetEqNetworkStatistics nwstats;
                             void *neteq_internal = switch_core_get_neteq_inst(session);
                             if (neteq_internal) {
                                 WebRtcNetEQ_GetNetworkStatistics(neteq_internal, &nwstats);
@@ -1265,7 +1265,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
                 } else if (++session->total_reads % session->rtcp_interval == 0) {
                     int val;
                     if (session->neteq_inst) {
-                        NetEqNetworkStatistics nwstats;
+                        FuzeNetEqNetworkStatistics nwstats;
                         void *neteq_internal = switch_core_get_neteq_inst(session);
                         if (neteq_internal && WebRtcNetEQ_GetNetworkStatistics(neteq_internal, &nwstats) == 0) {
                             val = nwstats.currentBufferSize;
@@ -1413,7 +1413,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
 
                         if (!(flags & SWITCH_IO_FLAG_CANT_SPEAK) && session->audio_level_low_count < 50) {
                             if (wasskipping) {
-                                NetEqNetworkStatistics nwstats;
+                                FuzeNetEqNetworkStatistics nwstats;
                                 void *neteq_internal = switch_core_get_neteq_inst(session);
                                 if (neteq_internal) {
                                     WebRtcNetEQ_GetNetworkStatistics(neteq_internal, &nwstats);

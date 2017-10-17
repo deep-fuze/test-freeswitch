@@ -9283,7 +9283,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
     switch_rtp_t *rtp_session;
     void *neteq_inst;
     int current_num_packets = 0, max_num_packets = 0;
-    NetEqNetworkStatistics nwstats;
+    FuzeNetEqNetworkStatistics nwstats;
     int jbuf = -1;
     uint16_t local_send = 0, local_recv = 0;
     int max_proc_time = 0;

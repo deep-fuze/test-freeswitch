@@ -1440,7 +1440,7 @@ static void set_stats(switch_core_session_t *session, switch_media_type_t type, 
         if (switch_rtp_get_webrtc_neteq(engine->rtp_session)) {
             void *neteq_inst = switch_core_get_neteq_inst(session);
             if (neteq_inst) {
-                NetEqNetworkStatistics nwstats;
+                FuzeNetEqNetworkStatistics nwstats;
 				int current_num_packets = 0, max_num_packets = 0;
 
 				WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats);
