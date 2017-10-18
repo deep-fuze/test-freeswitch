@@ -2815,7 +2815,7 @@ static int add_rx_congestion(switch_rtp_t *rtp_session, void *body, switch_rtcp_
         rx_congestion->lost_percent = 0;
     }
 
-#if 1
+#if 0
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
                       "RTCP app specific lost=%u%% jitter=%ums degraded=%d active=%d muted=%d cn=%d\n",
                       rtp_session->stats.last_lost_percent, rtp_session->stats.last_jitter,
@@ -7770,7 +7770,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtcp_zerocopy_read_frame(switch_rtp_t *rt
             frame->reports[i].lsr = ntohl(report->lsr);
             frame->reports[i].dlsr = ntohl(report->dlsr);
 			/* convert from q14 */
-            rtp_session->remote_lost = (int16_t)(((float)report->fraction)/163.84);
+            rtp_session->remote_lost = (int16_t)(((float)report->fraction)/2.56);
 
             if (rtp_session->remote_lost > 5) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "LOST %d\n", rtp_session->remote_lost);
