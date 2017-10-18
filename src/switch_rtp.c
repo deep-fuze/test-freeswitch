@@ -7769,8 +7769,8 @@ SWITCH_DECLARE(switch_status_t) switch_rtcp_zerocopy_read_frame(switch_rtp_t *rt
             frame->reports[i].jitter = ntohl(report->jitter);
             frame->reports[i].lsr = ntohl(report->lsr);
             frame->reports[i].dlsr = ntohl(report->dlsr);
-
-            rtp_session->remote_lost = (int16_t)(((float)report->fraction)/2.56);
+			/* convert from q14 */
+            rtp_session->remote_lost = (int16_t)(((float)report->fraction)/163.84);
 
             if (rtp_session->remote_lost > 5) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "LOST %d\n", rtp_session->remote_lost);
@@ -9308,7 +9308,8 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
 
             /* ignore loss after muted periods */
             if (rtp_session->ignore_loss_after_muted <= 0) {
-                loss = (short)((float)nwstats.currentPacketLossRate/2.56);
+			/* convert from q14 */
+                loss = (short)((float)nwstats.currentPacketLossRate/163.84);
             }
 
             max_proc_time = nwstats.maxWaitingTimeMs;
