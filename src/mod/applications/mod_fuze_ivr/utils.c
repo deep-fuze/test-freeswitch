@@ -118,20 +118,24 @@ fuze_status_t fuze_curl_execute(switch_core_session_t *session, ivrc_profile_t *
                 item = cJSON_GetObjectItem(body, "corp_name");
                 if (item) {
                     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: message corp_name: %s\n", item->valuestring);
+#if 1
                     if (!strncmp(item->valuestring, "TPN.", 4)) {
-                      switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: corp name (%s) matches required TPN pattern\n", item->valuestring);
-                      profile->corp_name = fuze_session_encode(session, switch_core_session_strdup(session, item->valuestring+4));
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: corp name (%s) matches required TPN pattern\n", item->valuestring);
+                        profile->corp_name = fuze_session_encode(session, switch_core_session_strdup(session, item->valuestring+4));
                     } else {
-                      switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: corp name (%s) doesn't match required TPN pattern. Contactive lookup disabled\n", item->valuestring);
-                      profile->number_auth_is_allowed = SWITCH_FALSE;
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+					  "IVRC: corp name (%s) doesn't match required TPN pattern. Contactive lookup disabled\n", item->valuestring);
+			profile->number_auth_is_allowed = SWITCH_FALSE;
                     }
+#endif
                 } else {
                   profile->number_auth_is_allowed = SWITCH_FALSE;
                 }
                 item = cJSON_GetObjectItem(body, "number_auth_is_allowed");
                 if (item) {
                   profile->number_auth_is_allowed = ((item->type&255) == cJSON_True) ? SWITCH_TRUE : SWITCH_FALSE;
-                  switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: curl: message profile->number_auth_is_allowed: %s\n", profile->number_auth_is_allowed ? "true" : "false");
+                  switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+				    "IVRC: curl: message profile->number_auth_is_allowed: %s\n", profile->number_auth_is_allowed ? "true" : "false");
                 }
                 item = cJSON_GetObjectItem(body, "meeting_instance_id");
                 if (item && item->valuestring && !zstr(item->valuestring)) {
@@ -225,11 +229,6 @@ fuze_status_t fuze_contactive_execute(switch_core_session_t *session, ivrc_profi
     if (item) {
         int x = cJSON_GetArraySize(item);
 
-        if (x > 0) {
-            profile->caller_contactive_found = 1;
-            status = FUZE_STATUS_SUCCESS;
-        }
-
         for (int i = 0; i < x; i++) {
             cJSON *data_item = cJSON_GetArrayItem(item, i);
 
@@ -244,6 +243,7 @@ fuze_status_t fuze_contactive_execute(switch_core_session_t *session, ivrc_profi
                             cJSON *name = cJSON_GetObjectItem(oitem, "name");
                             cJSON *email = cJSON_GetObjectItem(oitem, "email");
                             cJSON *userid = cJSON_GetObjectItem(oitem, "originItemId");
+			    cJSON *originName = cJSON_GetObjectItem(oitem, "originName");
 
                             if (name && name->type == cJSON_Object) {
                                 cJSON *first = cJSON_GetObjectItem(name, "firstName");
@@ -257,10 +257,18 @@ fuze_status_t fuze_contactive_execute(switch_core_session_t *session, ivrc_profi
                             if (userid && userid->type == cJSON_String && userid->valuestring) {
                                 const char *uid = strstr(userid->valuestring, ":");
                                 if (uid) {
-                                  profile->caller_userid = fuze_session_encode(session, switch_core_session_strdup(session, uid+1));
-                                  switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "userid %s\n", profile->caller_userid);
+                                    profile->caller_userid = fuze_session_encode(session, switch_core_session_strdup(session, uid+1));
+                                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "userid %s\n", profile->caller_userid);
                                 }
                             }
+
+			    if (originName && originName->type == cJSON_String && originName->valuestring) {
+			        if (!strcmp(originName->valuestring, "tpn")) {
+				    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "tpn origin\n");
+				    profile->caller_contactive_found = 1;
+				    status = FUZE_STATUS_SUCCESS;
+				}
+			    }
 
                             if (email && email->type == cJSON_Array) {
                               int esize = cJSON_GetArraySize(email);
