@@ -11,6 +11,7 @@
 #include "include/webrtc/modules/audio_coding/neteq/neteq_decoder_enum.h"
 #include "include/webrtc/api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "include/webrtc/modules/audio_coding/neteq/neteq_decoder_enum.h"
+#include "webrtc/src/webrtc/modules/audio_processing/low_cut_filter.h"
 
 #define CONVERT_STATUS(ret) ((ret) == 0 ? WebRtcNetEQ_SUCCESS : \
                                 ((ret == -2) ? WebRtcNetEQ_NOT_STARTED : WebRtcNetEQ_ERROR))
@@ -66,12 +67,15 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Init_inst(void **inst, app_memory_alloc_t alloc
   neteq_inst = new neteq_inst_t();
   *inst = neteq_inst;
 
+  neteq_inst->config.max_packets_in_buffer = (MAX_DELAY)/20;
+  neteq_inst->config.max_delay_ms = MAX_DELAY;
+
   /*
    * new memory (outside of FS memory allocation)
    */
   
   webrtc::NetEq *neteq;
- 
+
   neteq = webrtc::NetEq::Create(neteq_inst->config, g_WebRTC.decoder_factory);
   neteq_inst->main_inst = neteq;
 
