@@ -4170,6 +4170,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
     switch_time_t delta; //, delta2;
     int count;
     int16_t max_mix;
+    int prev_active_speaker_cnt;
 
 #define CTR_DEBUG_STR_LEN 4096
 
@@ -4311,9 +4312,35 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
     }
 
     /* Fuze Step 2: Find max active talkers */
+
+    /* count active speakers */
+    prev_active_speaker_cnt = 0;
+    for (i = 0; i < MAX_ACTIVE_TALKERS;) {
+        if (conference->last_active_talkers[i] != NULL) {
+            conference_member_t *cmember = conference->last_active_talkers[i];
+            if (is_muted(cmember) ||
+                (!switch_test_flag(cmember, MFLAG_TALKING) && !switch_test_flag(cmember, MFLAG_ACTIVE_TALKER))) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(cmember->session), SWITCH_LOG_INFO,
+                                  "removing active speaker (act_talkers %d -> %d)\n",
+                                  prev_active_speaker_cnt+1, prev_active_speaker_cnt);
+                conference->last_active_talkers[i] = NULL;
+                for (int j = i+1; j < MAX_ACTIVE_TALKERS; ++j) {
+                    conference->last_active_talkers[j-1] = conference->last_active_talkers[j];
+                }
+            } else {
+                prev_active_speaker_cnt += 1;
+                i += 1;
+            }
+        } else {
+            break;
+        }
+    }
+
     count = 0;
     for (imember = conference->member_lists[eMemberListTypes_Speakers]; imember; imember = imember->next) {
         int min_score_index = -1;
+        switch_bool_t prev_speaker = SWITCH_FALSE;
+        switch_bool_t skip_speaker = SWITCH_FALSE;
         count += 1;
         switch_clear_flag(imember, MFLAG_NOTIFY_ACTIVITY);
         if (!switch_test_flag(imember, MFLAG_HAS_AUDIO) &&
@@ -4324,20 +4351,57 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             continue;
         }
 
+        /* was this an active speaker before? */
+        for (int j = 0; j < MAX_ACTIVE_TALKERS; ++j) {
+            if (conference->last_active_talkers[j] == NULL)
+                break;
+            if (imember == conference->last_active_talkers[j]) {
+                prev_speaker = SWITCH_TRUE;
+                break;
+            }
+        }
+
         for (i = 0; i < MAX_ACTIVE_TALKERS; ++i) {
+            /* this person is talking, isn't muted, etc */
+
+            if (!prev_speaker) {
+                /* if we had active speakers before then check threshold 1 */
+                if (prev_active_speaker_cnt > 0) {
+                    if (imember->score_iir < SCORE_IIR_SPEAKING_MAX) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(imember->session), SWITCH_LOG_INFO, "skipping too low: prev_cnt:%d level:%d\n",
+                                          prev_active_speaker_cnt, imember->score_iir);
+                        skip_speaker = SWITCH_TRUE;
+                        break;
+                    }
+                } else {
+                    /* if we didn't have active speakers before then check threshold 2 */
+                    if (imember->score_iir < SCORE_IIR_SPEAKING_MIN) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(imember->session), SWITCH_LOG_INFO, "skipping too low: level:%d\n",
+                                          imember->score_iir);
+                        skip_speaker = SWITCH_TRUE;
+                        break;
+                    }
+                }
+            }
+
+            /* we have an open slot!  insert */
             if (temp_active_talkers[i] == NULL) {
                 temp_active_talkers[i] = imember;
                 break;
             }
 
+            /* find the lowest index score in the list while we
+             * look for an empty slot */
             if (min_score_index == -1 ||
                 (temp_active_talkers[min_score_index] &&
                  temp_active_talkers[i]->score_iir <
-                    temp_active_talkers[min_score_index]->score_iir))
+                 temp_active_talkers[min_score_index]->score_iir)) {
                 min_score_index = i;
+            }
         }
 
-        if (min_score_index != -1 && i == MAX_ACTIVE_TALKERS) {
+        /* insert */
+        if (!skip_speaker && min_score_index != -1 && i == MAX_ACTIVE_TALKERS) {
             if (temp_active_talkers[min_score_index]->score_iir < imember->score_iir)
                 temp_active_talkers[min_score_index] = imember;
         }
@@ -4459,13 +4523,16 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         (conference->async_fnode && conference->async_fnode->leadin)) {
         count += 1;
         for (i = 0; i < MAX_ACTIVE_TALKERS; ++i) {
+            /* no more talkers */
             if (temp_active_talkers[i] == NULL)
                 break;
 
             for (j = 0; j < MAX_ACTIVE_TALKERS; ++j) {
+                /* didn't find this talker: i.e. this is a new talker */
                 if (conference->last_active_talkers[j] == NULL)
                     break;
 
+                /* this is an existing talker */
                 if (temp_active_talkers[i] == conference->last_active_talkers[j]) {
                     break;
                 }
@@ -4476,7 +4543,8 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                  * New Active Member
                  */
                 if (strlen(temp_active_talkers[i]->mname) > 0) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(temp_active_talkers[i]->session), SWITCH_LOG_INFO, "Meeting Id: %s Instance Id: %s start speaking %s/%u score %u energy %u\n",
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(temp_active_talkers[i]->session), SWITCH_LOG_INFO,
+                                      "Meeting Id: %s Instance Id: %s start speaking %s/%u score %u energy %u\n",
                                       conference->meeting_id, conference->instance_id,
                                       temp_active_talkers[i]->mname, temp_active_talkers[i]->id,
                                       temp_active_talkers[i]->score_iir, temp_active_talkers[i]->score);
@@ -6732,6 +6800,9 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
             member->score_iir = SCORE_MAX_IIR;
         }
 
+
+        /* FUZE-TALKING */
+        /* noise_gate_check: (int32_t)member->score > member->energy_level; */
         if (noise_gate_check(member)) {
             uint32_t diff = member->score - member->energy_level;
             if (il->hangover_hits) {
