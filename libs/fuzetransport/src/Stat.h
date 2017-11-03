@@ -41,6 +41,7 @@ struct Stat
     static const uint8_t  TYPE_RECV   = 1;
     
     uint32_t  count_;
+    uint32_t  totalCount_;
     int64_t   bytes_;
     int64_t   bytes2_;      // track intermittent usage
     int64_t   totalBytes_;
@@ -48,6 +49,7 @@ struct Stat
     char      log_[64];
     
     StatData  local_;       // local bandwidth
+    StatData  cntStat_;     // count stat
     StatData  remote_;      // remote bandwidth
     StatData  sendQ_;       // sendQ_ size
     StatData  sendBuf_;     // buffer size to send
@@ -65,9 +67,9 @@ struct Stat
     void Clear();
     
     // Add bytes so that we can measure usage
-    // returns rate in kbps if available
-    // -1 means rate is not calculated yet
-    int AddBytes(uint32_t bytes, int64_t currTime);
+    // returns true when rate and count are available
+    bool AddBytes(uint32_t  bytes, int64_t   currTime,
+                  uint16_t& rRate, uint16_t& rCount);
 };
 
 } // namespace fuze

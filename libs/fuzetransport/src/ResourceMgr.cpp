@@ -22,10 +22,10 @@
 namespace fuze {
 
 void fuze_transport_at_exit();
-    
+
 ResourceMgr* ResourceMgr::spInstance_;
 MutexLock    ResourceMgr::sLock_;
-    
+
 ResourceMgr* ResourceMgr::GetInstance()
 {
     if (!spInstance_) {
@@ -37,14 +37,14 @@ ResourceMgr* ResourceMgr::GetInstance()
             spInstance_ = p;
         }
     }
-    
+
     return spInstance_;
 }
 
 ResourceMgr::ResourceMgr()
 {
 }
-    
+
 ResourceMgr::~ResourceMgr()
 {
 #if 0
@@ -67,7 +67,7 @@ ResourceMgr::~ResourceMgr()
 void ResourceMgr::ReserveConnections(int num)
 {
     Resource::Type type = Resource::CONNECTION;
-    
+
     for (int i = 0; i < num; ++i) {
         Resource* p = 0;
         {
@@ -79,29 +79,29 @@ void ResourceMgr::ReserveConnections(int num)
                 p->type_ = type;
             }
         }
-        
+
         if (p) {
             MutexLock scoped(&lock_[type]);
             idle_[type].push(p);
         }
     }
 }
-    
+
 Resource* ResourceMgr::GetNewResource(Resource::Type type)
 {
     Resource* p = 0;
-    
+
     using std::nothrow;
-    
+
     {
         MutexLock scoped(&lock_[type]);
-        
+
         if (idle_[type].empty() == false) {
             p = idle_[type].front();
             idle_[type].pop();
         }
     }
-    
+
     if (!p) {
         WriteLock scoped(&rwLock_[type]);
 
@@ -123,6 +123,9 @@ Resource* ResourceMgr::GetNewResource(Resource::Type type)
         case Resource::UDP_TRANSCEIVER:
             p = new (nothrow) UdpTransceiver(new_id);
             break;
+        case Resource::BULK_UDP_TRANSCEIVER:
+            p = new (nothrow) BulkUdpTransceiver(new_id);
+            break;
         case Resource::DTLS_TRANSCEIVER:
             p = new (nothrow) DtlsTransceiver(new_id);
             break;
@@ -133,25 +136,25 @@ Resource* ResourceMgr::GetNewResource(Resource::Type type)
         default:
             ELOG("Wrong input type");
         }
-        
+
         if (p) {
             resources_[type].push_back(p);
             p->type_ = type;
         }
     }
-    
+
     if (p) {
         p->status_ = Resource::ACTIVE;
     }
-    
+
     return p;
 }
-    
+
 TransportBaseImpl* ResourceMgr::GetNewBase()
 {
     return dynamic_cast<TransportBaseImpl*>(GetNewResource(Resource::BASE));
 }
-    
+
 ConnectionImpl* ResourceMgr::GetNewConnection()
 {
     return dynamic_cast<ConnectionImpl*>(GetNewResource(Resource::CONNECTION));
@@ -160,11 +163,14 @@ ConnectionImpl* ResourceMgr::GetNewConnection()
 Transceiver* ResourceMgr::GetNewTransceiver(ConnectionType eType)
 {
     Transceiver* p = 0;
-    
+
     switch (eType)
     {
     case CT_UDP:
         p = dynamic_cast<Transceiver*>(GetNewResource(Resource::UDP_TRANSCEIVER));
+        break;
+    case CT_BULK_UDP:
+        p = dynamic_cast<Transceiver*>(GetNewResource(Resource::BULK_UDP_TRANSCEIVER));
         break;
     case CT_TLS:
     case CT_TCP:
@@ -185,35 +191,35 @@ Transceiver* ResourceMgr::GetNewTransceiver(ConnectionType eType)
     default:
         ELOG("Unexpected transceiver type " << toStr(eType))
     }
-    
+
     return p;
-}    
-    
+}
+
 ServerCore* ResourceMgr::GetNewServerCore()
 {
     return dynamic_cast<ServerCore*>(GetNewResource(Resource::SERVERCORE));
 }
-    
+
 Resource* ResourceMgr::GetResource(Resource::Type type, int ID)
 {
     Resource* p = 0;
-    
+
     ReadLock scoped(&rwLock_[type]);
-    
+
     if ((0 <= ID) && (ID < (int)resources_[type].size())) {
         if (resources_[type][ID]->status_ == Resource::ACTIVE) {
             p = resources_[type][ID];
         }
     }
-    
+
     return p;
 }
-    
+
 TransportBaseImpl* ResourceMgr::GetBase(int baseID)
 {
     return dynamic_cast<TransportBaseImpl*>(GetResource(Resource::BASE, baseID));
 }
-    
+
 ConnectionImpl* ResourceMgr::GetConnection(int connID)
 {
     return dynamic_cast<ConnectionImpl*>(GetResource(Resource::CONNECTION, connID));
@@ -223,7 +229,7 @@ Transceiver* ResourceMgr::GetTransceiver(Resource::Type type, int tranID)
 {
     return dynamic_cast<Transceiver*>(GetResource(type, tranID));
 }
-    
+
 ServerCore* ResourceMgr::GetServerCore(int coreID)
 {
     return dynamic_cast<ServerCore*>(GetResource(Resource::SERVERCORE, coreID));
@@ -242,7 +248,7 @@ void ResourceMgr::Release(Resource* p)
 
     p->status_ = Resource::IDLE;
     DLOG(p->GetTypeString() << ": " << p->ID());
-    
+
     MutexLock scoped(&lock_[p->type_]);
     idle_[p->type_].push(p);
 }
@@ -272,5 +278,5 @@ const char* Resource::GetTypeString() const
     default:               return "Invalid";
     }
 }
-    
+
 } // namespace fuze

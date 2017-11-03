@@ -33,8 +33,9 @@ public:
     ~ResolverImpl();
     
     virtual void SetQuery(const string& rDomain,
-                          Record::Type  type);
-    virtual Record::List Query(int timeout = 30);
+                          Record::Type  type,
+                          bool          bVoip = false);
+    virtual Record::List Query(int timeout = 10);
     
 private:
     
@@ -44,7 +45,7 @@ private:
                         uint8_t* pBuf,
                         int      len);
     
-    void SetReplies(Record::List newReplies);
+    void SetReplies(Record::List& newReplies);
     
     // for parallel queries
     struct QueryData
@@ -52,11 +53,13 @@ private:
         string         domain_;
         Record::Type   type_;
         ResolverImpl*  pResolver_;
+        bool           bVoip_;
     };
     
     ares_channel       channel_;
     Record::List       replies_;
     vector<QueryData>  queries_;
+    string             nameServer_;
 };
 
 class AsyncResolver : public Runnable
@@ -70,7 +73,8 @@ public:
     void SetQuery(const string& rDomain,
                   Record::Type  type_,
                   DnsObserver*  pObserver,
-                  void*         pArg);
+                  void*         pArg,
+                  bool          bVoip);
     
 private:
     
@@ -88,6 +92,9 @@ private:
         Record::Type  type_;
         DnsObserver*  pObserver_;
         void*         pArg_;
+        bool          bVoip_;
+        void*         pMyself_;
+        string        nameServer_;
     };
     
     static void DnsFallback(QueryData* pData);
@@ -100,6 +107,7 @@ private:
     ares_channel       channel_;
     
     bool               running_;
+    bool               bReset_;
     
     Thread             thread_;
     Semaphore          semaphore_;
@@ -109,6 +117,7 @@ private:
     
     string             localIP_;
     int64_t            lastTime_;
+    string             nameServer_;
 };
     
 } // namespace dns

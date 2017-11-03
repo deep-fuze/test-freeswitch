@@ -100,6 +100,13 @@ void PrintAttribute(uint16_t attrId, const char* pAttr, uint32_t len)
         }
     }
     
+    std::string value;
+    if (is_val_str)
+    {
+        // We can't assume that pAttr is null-terminated.
+        value.assign(pAttr, len);
+    }
+
     switch (attrId)
     {
     case XOR_MAPPED_ADDRESS:
@@ -129,12 +136,12 @@ void PrintAttribute(uint16_t attrId, const char* pAttr, uint32_t len)
     case ICE_CONTROLLED:
     case ICE_CONTROLLING:
         _MLOG_(toStr((Attribute)attrId) << " (" << len <<
-               "B): " << (is_val_str ? pAttr : "") << " [" <<
+               "B): " << (is_val_str ? value.c_str() : "") << " [" <<
                (is_val_str ? Hex(0, 0) : Hex((uint8_t*)pAttr, len)) << "]");
         break;
     default:
         _WLOG_("Unknown ID: " << Hex((uint8_t*)&attrId, MSG_TYPE) <<
-               " (" << len << "B): " << (is_val_str ? pAttr : "") << " [" <<
+               " (" << len << "B): " << (is_val_str ? value.c_str() : "") << " [" <<
                Hex((uint8_t*)pAttr, len) << "]");
     }
 }

@@ -25,12 +25,19 @@ class Transceiver : public NotCopyable
 {
 public:
     virtual bool Start() = 0;
+    
     virtual bool Send(Buffer::Ptr spBuffer)  = 0;
     virtual bool Send(const uint8_t* buf, size_t size) = 0;
-    virtual bool Send(const uint8_t* buf, size_t size, const fuze::Address& rRemote) {return false;}
+    virtual bool Send(const uint8_t* buf, size_t size,
+                      const fuze::Address& rRemote)
+    {
+        return false;
+    }
+    
     virtual void SetConnectionID(int connID) = 0;
     virtual ConnectionType ConnType()  = 0;
-    
+    virtual void GetSendQInfo(size_t& rNum, uint32_t& rBufSize) {}
+
     explicit Transceiver(int ID) : Resource(ID), flowID_(0) {}
 
 protected:
@@ -38,5 +45,5 @@ protected:
 };
 
 } // namespace fuze
-    
+
 #endif

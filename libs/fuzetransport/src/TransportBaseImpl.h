@@ -21,7 +21,6 @@ public:
     explicit TransportBaseImpl(int baseID);
 
     // TransportBase Interface
-    virtual void Initialize(int numOfThreads = 1);
     virtual void RegisterObserver(BaseObserver* pObserver);
     virtual void RegisterObserver(BaseObserver::WPtr wPtr);
     virtual void DeregisterObserver();

@@ -260,11 +260,11 @@ void StateSetupTls::OnConnected(TcpTransceiver* p)
     if (p->bConnected_ == false) {
         // first create TLS core and start handshake
         p->spTlsCore_.reset(new TlsCore(*p));
-        p->spTlsCore_->Init();
         
         // copy the debug info
-        strcpy(p->spTlsCore_->log_, p->tcpCore_.log_);
-        
+        strncpy(p->spTlsCore_->log_, p->tcpCore_.log_, 64);
+
+        p->spTlsCore_->Init();
         p->spTlsCore_->TriggerHandshake();
     }
     else {
@@ -290,6 +290,11 @@ uint32_t StateSetupTls::OnDataReceived(TcpTransceiver* p,
         p->spTlsCore_->TriggerHandshake();
     }
     else {
+        
+        // in some corner case, tcp transceiver is already cleaned up
+        // after handshake failure in the end MQT-6339
+        if (!p->pConn_) return read;
+        
         ConnectionType orig = p->pConn_->GetOriginalConnectionType();
         
         MLOG("TLS handshake is done [" << p->spTlsCore_->GetVersion() <<

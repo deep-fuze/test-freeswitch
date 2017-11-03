@@ -82,6 +82,7 @@ bool StatData::Display(ostringstream& rLog,
 Stat::Stat(ConnectionImpl* pConn)
     : pConn_(pConn)
     , local_(" kbps")
+    , cntStat_(" cnts")
     , remote_(" kbps")
     , sendQ_("")
     , sendBuf_(" B")
@@ -95,6 +96,7 @@ Stat::Stat(ConnectionImpl* pConn)
 void Stat::Clear()
 {
     count_       = 0;
+    totalCount_  = 0;
     bytes_       = 0;
     bytes2_      = 0;
     totalBytes_  = 0;
@@ -109,10 +111,12 @@ void Stat::Clear()
     arrival_.Clear();
 }
 
-int Stat::AddBytes(uint32_t bytes, int64_t currTime)
+bool Stat::AddBytes(uint32_t  bytes, int64_t   currTime,
+                    uint16_t& rRate, uint16_t& rCount)
 {
     if (bytes) {
         ++count_;
+        ++totalCount_;
         bytes_      += bytes;
         bytes2_     += bytes;
         totalBytes_ += bytes;
@@ -123,7 +127,7 @@ int Stat::AddBytes(uint32_t bytes, int64_t currTime)
     // skip the first time
     if (lastTime_ == 0) {
         lastTime_ = currTime;
-        return -1;
+        return false;
     }
     
     if (diff > PERIOD) {
@@ -131,11 +135,12 @@ int Stat::AddBytes(uint32_t bytes, int64_t currTime)
         // When application is using direct send API, two threads will
         // have race condition in this area. Let only one go thru this
         //
-        if (lock_.Trylock() == false) return -1;
+        if (lock_.Trylock() == false) return false;
         
         uint16_t rate = (uint16_t)(diff ? (bytes_*8)/(diff) : 0);
         
         local_.SetData(rate);
+        cntStat_.SetData(count_);
 
         bool tcp_based = false;
         
@@ -160,9 +165,10 @@ int Stat::AddBytes(uint32_t bytes, int64_t currTime)
             std::ostringstream log;
             log << "local seq # " << local_.seq_-local_.index_
                 << " ~ " << local_.seq_-1 << " (" << bytes2_ << "B, total "
-                << totalBytes_ << "B, cnt " << count_<< ")";
+                << totalBytes_ << "B, cnt " << totalCount_ << ")";
             
             local_.Display(log, log_, "Local  ");
+            cntStat_.Display(log, log_, "Count  ");
             bytes2_ = 0;
             
             if (tcp_based) {
@@ -174,16 +180,20 @@ int Stat::AddBytes(uint32_t bytes, int64_t currTime)
             }
             DEBUG_OUT(LEVEL_MSG, AREA_COM, log_ << log.str());
         }
-        
+
+        // store the result and reset the stat variables
+        rRate     = rate;
+        rCount    = count_;
         bytes_    = 0;
+        count_    = 0;
         lastTime_ = currTime;
-        
+
         lock_.Unlock();
         
-        return rate;
+        return true;
     }
     
-    return -1;
+    return false;
 }
 
 } // namespace fuze

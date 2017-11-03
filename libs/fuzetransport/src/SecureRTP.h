@@ -20,7 +20,7 @@
 // The hubs still use libsrtp 1.x because opal still depends on it.
 #include <srtp/srtp.h>
 #else
-#include "srtp.h"
+#include <srtp.h>
 #endif
 #define srtp_crypto_policy_set_aes_cm_128_hmac_sha1_80 crypto_policy_set_aes_cm_128_hmac_sha1_80
 #define srtp_crypto_policy_set_aes_cm_128_hmac_sha1_32 crypto_policy_set_aes_cm_128_hmac_sha1_32

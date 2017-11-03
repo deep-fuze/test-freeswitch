@@ -9,7 +9,7 @@
 #include <TlsCore.h>
 #include <Log.h>
 
-#define _LOG_(A,B) DEBUG_OUT(A, AREA_COM, log_ << log2_ << __FUZE_FUNC__ << ": " << B)
+#define _LOG_(A,B) DEBUG_OUT(A, AREA_COM, log_ << __FUZE_FUNC__ << ": " << B)
 
 #include <openssl/bio.h>
 #include <openssl/rand.h>
@@ -56,7 +56,7 @@ const int CERTIFICATE_WINDOW   = -60*60*24;        // validity window.
 
 EVP_PKEY* MakeKey()
 {
-    _MLOG_("Making key pair");
+    _DLOG_("Making key pair");
     EVP_PKEY* pkey = EVP_PKEY_new();
     // RSA_generate_key is deprecated. Use _ex version.
     BIGNUM* exponent = BN_new();
@@ -72,7 +72,7 @@ EVP_PKEY* MakeKey()
     }
     // ownership of rsa struct was assigned, don't free it.
     BN_free(exponent);
-    _MLOG_("Key pair created");
+    _DLOG_("Key pair created");
     return pkey;
 }
 
@@ -80,7 +80,7 @@ EVP_PKEY* MakeKey()
 // given key pair. Caller is responsible for freeing the returned object.
 X509* MakeCertificate(EVP_PKEY* pkey)
 {
-    _MLOG_("Making Fuze certificate");
+    _DLOG_("Making Fuze certificate");
     X509* x509 = NULL;
     BIGNUM* serial_number = NULL;
     X509_NAME* name = NULL;
@@ -144,7 +144,7 @@ int ssl_verify_peer(int preverify_ok, X509_STORE_CTX* pCtx)
         int err = X509_STORE_CTX_get_error(pCtx);
         int depth = X509_STORE_CTX_get_error_depth(pCtx);
         
-        _MLOG_(X509_verify_cert_error_string(err) <<
+        _DLOG_(X509_verify_cert_error_string(err) <<
                " (depth: " << depth << ")");
     }
     
@@ -153,7 +153,7 @@ int ssl_verify_peer(int preverify_ok, X509_STORE_CTX* pCtx)
         char issuer[256];
         X509_NAME_oneline(X509_get_subject_name(p_cert), subject, 256);
         X509_NAME_oneline(X509_get_issuer_name(p_cert), issuer, 256);
-        _MLOG_("[" << subject << "] (Issuer: " << issuer << ")");
+        _DLOG_("[" << subject << "] (Issuer: " << issuer << ")");
     }
     else {
         _WLOG_("No certificate from peer");
@@ -180,7 +180,7 @@ int generate_cookie(SSL* pSSL, unsigned char* cookie, unsigned int* cookie_len)
     HMAC(EVP_sha1(), g_cookie_, COOKIE_LEN, (uint8_t*)buf, buf_len, result, &result_len);
     memcpy(cookie, result, result_len);
     
-    _MLOG_(p->log_ << p->log2_ << "cookie generated with ID " << p->cookieID_ <<
+    _MLOG_(p->log_ << "cookie generated with ID " << p->cookieID_ <<
           " (cookie len: " << result_len << ", buf len: " << *cookie_len << ")");
     
     *cookie_len = result_len;
@@ -207,11 +207,11 @@ int verify_cookie(SSL* pSSL, unsigned char* cookie, unsigned int cookie_len)
     int matched = 0;
 
     if (cookie_len == result_len && memcmp(result, cookie, result_len) == 0) {
-        _MLOG_(p->log_ << p->log2_ << "cookie " << p->cookieID_ << " matched");
+        _MLOG_(p->log_ << "cookie " << p->cookieID_ << " matched");
         matched = 1;
     }
     else {
-        _ELOG_(p->log_ << p->log2_ << "cookie " << p->cookieID_ << " mismatched");
+        _ELOG_(p->log_ << "cookie " << p->cookieID_ << " mismatched");
     }
     
     return matched;
@@ -222,17 +222,17 @@ void ssl_state(const SSL* pSSL, int type, int val)
 {
     std::ostringstream log;
 
-    if (type & SSL_ST_CONNECT) log << "CONNECT";
-    if (type & SSL_ST_ACCEPT) log << "ACCEPT";
-    if (type & SSL_CB_LOOP) log << " LOOP";
-    if (type & SSL_CB_EXIT) log << " EXIT";
-    if (type & SSL_CB_HANDSHAKE_START) log << "HANDSHAKE START";
-    if (type & SSL_CB_HANDSHAKE_DONE) log << "HANDSHAKE STOP";
+    if (type & SSL_ST_CONNECT) log << "connect";
+    if (type & SSL_ST_ACCEPT) log << "accept";
+    if (type & SSL_CB_LOOP) log << " loop";
+    if (type & SSL_CB_EXIT) log << " exit";
+    if (type & SSL_CB_HANDSHAKE_START) log << "handshake start";
+    if (type & SSL_CB_HANDSHAKE_DONE) log << "handshake done";
 
     TlsCore* p = (TlsCore*)SSL_get_ex_data(pSSL, 0);
     
-    _MLOG_(p->log_ << p->log2_ << SSL_state_string_long(pSSL) <<
-          " (" << log.str() << " [0x" << Hex(type) << "], val: " << val << ")");
+    _MLOG_(p->log_ << SSL_state_string_long(pSSL) <<
+           " - " << log.str());
 }
     
 TlsCore::TlsCore(TlsCoreUser& rUser, bool bServer)
@@ -244,8 +244,6 @@ TlsCore::TlsCore(TlsCoreUser& rUser, bool bServer)
     , pBioIO_(0)
 {
     log_[0] = 0;
- 
-    strcpy(log2_, (bServer_ ? "TLS_S " : "TLS_C "));
 }
     
 void TlsCore::Init()
@@ -388,7 +386,7 @@ void TlsCore::InitCertificate(SSL_CTX* pCtx, bool makeCerticate)
             }
             fingerPrint_[index] = '\0';
             
-            _MLOG_("Certificate Fingerprint (" << md_len << "B): " << fingerPrint_);
+            _DLOG_("Certificate Fingerprint (" << md_len << "B): " << fingerPrint_);
         }
         
 #ifdef COOKIE_ENABLED
@@ -555,7 +553,6 @@ DtlsCore::DtlsCore(TlsCoreUser& rUser, bool bServer)
     , cookieID_(0)
 #endif
 {
-    strcpy(log2_, (bServer_ ? "DTLS_S " : "DTLS_C "));
 }
 
 const char* DtlsCore::GetFingerPrint()

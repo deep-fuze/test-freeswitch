@@ -77,6 +77,7 @@ public:
     virtual bool Send(const uint8_t* buf, size_t size);
     virtual void SetConnectionID(int connID);
     virtual ConnectionType ConnType();
+    virtual void GetSendQInfo(size_t& rNum, uint32_t& rBufSize);
 
     // Implement Resource Interface
     virtual void Reset();
@@ -124,8 +125,6 @@ public:
     void EnableTcpFramer();
     void SendMapData(); // send mapping message to client for debugging purpose
     
-    // query for current send queue size
-    void     GetSendQInfo(size_t& rNum, uint32_t& rBufSize);
     uint32_t GetSendRetryCount();
     
     // available only for framing mode

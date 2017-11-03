@@ -45,7 +45,7 @@ void Connection::GenerateIceCredentials(string& ufrag, string& pwd)
 
     // http://c-faq.com/lib/randrange.html
     static int divisor = RAND_MAX / (sizeof(iceChar) - 1) + 1;
-    
+
     char ufragBuf[ICE_UFRAG_LEN];
     char pwdBuf[ICE_PWD_LEN];
 
@@ -61,7 +61,7 @@ void Connection::GenerateIceCredentials(string& ufrag, string& pwd)
     pwdBuf[ICE_PWD_LEN-1] = 0;
     pwd = pwdBuf;
 }
-    
+
 ConnectionImpl::ConnectionImpl(int connID)
     : Resource(connID)
     , baseID_(-1)
@@ -83,10 +83,11 @@ ConnectionImpl::ConnectionImpl(int connID)
     , bRemotePerBuf_(false)
     , workerId_(0)
 	, bReservePort_(false)
+    , processDataSync_(false)
     , bufNum_(0)
 {
     SetName("");
-    
+
     for (int i = 0; i < MAX_QUEUE_SIZE; ++i) {
         bufAlloc[i] = 0;
     }
@@ -100,7 +101,7 @@ void ConnectionImpl::SetBaseID(int baseID)
 {
     baseID_ = baseID;
 }
-    
+
 int ConnectionImpl::BaseID()
 {
     return baseID_;
@@ -112,17 +113,18 @@ bool ConnectionImpl::Start(ConnectionType eType, int mode)
         ELOG(GetStatusString());
         return false;
     }
-    
+
     // assign worker thread
     spWorker_ = TransportImpl::GetInstance()->GetWorker(this);
     workerId_ = spWorker_->ID();
-    
+
     MLOG("Assigned with thread [" << spWorker_->Name() << "]");
-    
+
     // validate eType
     switch (eType)
     {
     case CT_UDP:
+    case CT_BULK_UDP:
     case CT_DTLS_CLIENT:
     case CT_DTLS_SERVER:
     case CT_TCP:
@@ -133,26 +135,26 @@ bool ConnectionImpl::Start(ConnectionType eType, int mode)
         ELOG("ConnectionType " << toStr(eType) << " is not allowed");
         return false;
     }
-    
+
     MLOG("Requested connection type: " << toStr(eType));
-    
+
     // remember the original type so that we correctly set
     // firewall traversal state machine per type
     origType_ = eType;
-    
+
     // set default behavior for TCP if used
     TcpTxrxState::Type state_type = TcpTxrxState::SETUP_TCP;
     if (eType == CT_TLS) {
         state_type = TcpTxrxState::SETUP_TLS;
     }
-    
+
     // if app is client then check network status and type
     if (TransportImpl::GetInstance()->IsAppServer() == false) {
 
         string proxy, credential;
         proxy::Type proxy_type;
         proxy::GetInfo(proxy, credential, proxy_type);
-        
+
         // check if we have proxy setup and remote is not
         // IP address due to blocked DNS in some corporate environment
         if (!proxy.empty()
@@ -183,26 +185,26 @@ bool ConnectionImpl::Start(ConnectionType eType, int mode)
                 OnEvent(ET_IN_PROGRESS, toStr(state_type));
             }
         }
-        
+
         bFallback_ = ((mode & NO_FALLBACK) == 0);
-        
+
         // For DTLS, disable fallback for now
         if (eType & CT_DTLS_TYPE) {
             bFallback_ = false;
         }
     }
-    
+
     MLOG("Final type: " << toStr(eType) << " (fallback " <<
          (bFallback_ ? "en" : "dis") << "abled" <<
          ((mode & FORCE_FUZE_TLS) ? ", ForceFuzeTLS" : "") << ")");
-    
+
     bool bResult = false;
-    
+
     if (Transceiver* p_conn = ResourceMgr::GetInstance()->GetNewTransceiver(eType)) {
         pTransceiver_.store(p_conn, std::memory_order_relaxed);
         p_conn->SetConnectionID(ID());
         connType_ = p_conn->ConnType();
-        
+
         // if this is TcpTransceiver then set TcpTxrxState
         if (eType & CT_STREAM_TYPE) {
             if (TcpTransceiver* p = GetTcpTransceiver()) {
@@ -214,12 +216,12 @@ bool ConnectionImpl::Start(ConnectionType eType, int mode)
                 }
             }
         }
-        
+
         sprintf(sendStat_.log_, "Con[b%d:c%d:%s] Tx rate: ", baseID_, ID(), name_);
         sprintf(recvStat_.log_, "Con[b%d:c%d:%s] Rx rate: ", baseID_, ID(), name_);
 
         MLOG("Starting " << toStr(connType_));
-        
+
         // check if we are starting HTTP proxy traversal
         if ((state_type != TcpTxrxState::SETUP_HTTP) &&
             (state_type != TcpTxrxState::SETUP_HTTP_TLS)) {
@@ -229,11 +231,11 @@ bool ConnectionImpl::Start(ConnectionType eType, int mode)
             p->PrepareProxyConnect();
             bResult = true;
         }
-        
+
         if (bResult && TransportImpl::GetInstance()->IsAppServer()) {
             // register this connection to firewall traversal server
             // if this is UDP server or TCP listener
-            if ((eType == CT_UDP && local_.Valid()) ||
+            if (((eType == CT_UDP || eType == CT_BULK_UDP) && local_.Valid()) ||
                 eType == CT_TCP_LISTENER) {
                 if (Server::Ptr sp_server =
                     TransportImpl::GetInstance()->GetServer()) {
@@ -243,7 +245,7 @@ bool ConnectionImpl::Start(ConnectionType eType, int mode)
             }
         }
     }
-    
+
     return bResult;
 }
 
@@ -251,7 +253,7 @@ void ConnectionImpl::Reset()
 {
     if (IsActive() == true) {
         DLOG("ACTIVE -> ZOMBIE");
-        
+
         // Remove the binding first if we need to as it
         // requires to access valid types of data below
         if (removeBinding_) {
@@ -260,9 +262,9 @@ void ConnectionImpl::Reset()
                 sp_server->RemoveConnectionBinding(ID());
             }
         }
-        
+
         SetZombie();
-        
+
         if (spWorker_) {
             spWorker_.reset();
             workerId_ = 0;
@@ -274,21 +276,21 @@ void ConnectionImpl::Reset()
             swap(eventQ_, empty_e);
             swap(rateQ_, empty_r);
         }
-        
+
         MLOG("SendStat: " << sendStat_.totalBytes_ <<
-             " bytes sent, count(" << sendStat_.count_ << ")");
+             " bytes sent, count(" << sendStat_.totalCount_ << ")");
         sendStat_.Clear();
-        
+
         MLOG("RecvStat: " << recvStat_.totalBytes_ <<
-             " bytes received, count(" << recvStat_.count_ << ")");
+             " bytes received, count(" << recvStat_.totalCount_ << ")");
         recvStat_.Clear();
-        
+
         // release all the buffer used
         int buf_free[MAX_QUEUE_SIZE];
         int buf_cnt = 0;
         {
             memset(buf_free, 0, sizeof(buf_free));
-            
+
             MutexLock scoped(&poolLock_);
             for (int i = 0; i < MAX_QUEUE_SIZE; ++i) {
                 while (!bufPool_[i].empty()) {
@@ -304,7 +306,7 @@ void ConnectionImpl::Reset()
                 }
             }
         }
-        
+
         MLOG("MemoryStat: " <<
              "shallow (" << buf_free[BUFFER_SHELL] << "/" << bufAlloc[BUFFER_SHELL] <<
              ") 64 (" << buf_free[SIZE_64] << "/" << bufAlloc[SIZE_64] <<
@@ -315,22 +317,22 @@ void ConnectionImpl::Reset()
              ") 65000 (" << buf_free[SIZE_65000] << "/" << bufAlloc[SIZE_65000] <<
              ") 262000 (" << buf_free[SIZE_262000] << "/" << bufAlloc[SIZE_262000] <<
              ") buf count: " << buf_cnt << "/" << bufNum_);
-        
+
         bufNum_ = 0;
 
         for (int i = 0; i < MAX_QUEUE_SIZE; ++i) {
             bufAlloc[i] = 0;
         }
-        
+
         timeStat_.Clear();
         delayStat_.Clear();
         lastDelayStat_  = 0;
-        
+
         removeBinding_  = false;
         baseID_         = -1;
         pAppContext_    = 0;
         state_          = 0;
-        
+
         name_[0] = 0;
         local_.Clear();
         remote_.Clear();
@@ -349,15 +351,15 @@ void ConnectionImpl::Reset()
         ReplaceTransceiver(NoTransceiver::GetInstance());
     }
 }
-    
+
 void ConnectionImpl::RegisterObserver(ConnectionObserver* pObserver)
 {
     if (IsActive() == false) {
         ELOG(GetStatusString());
         return;
     }
-    
-    MutexLock scoped(&conLock_);    
+
+    MutexLock scoped(&conLock_);
     pObserver_ = pObserver;
 }
 
@@ -367,10 +369,10 @@ void ConnectionImpl::RegisterObserver(ConnectionObserver::WPtr wPtr)
         ELOG(GetStatusString());
         return;
     }
-    
+
     wpObserver_ = wPtr;
 }
-    
+
 void ConnectionImpl::DeregisterObserver()
 {
     if (pObserver_) {
@@ -382,7 +384,7 @@ void ConnectionImpl::DeregisterObserver()
         MLOG("end");
     }
 }
-    
+
 void ConnectionImpl::SetName(const char* pName)
 {
     memset(name_, 0, 16); // init name
@@ -395,30 +397,30 @@ void ConnectionImpl::SetName(const char* pName)
                 break;
             }
         }
-        
+
         snprintf(sendStat_.log_, 64, "Con[b%d:c%d:%s] Tx rate: ",
                 baseID_, ID(), name_);
         snprintf(recvStat_.log_, 64, "Con[b%d:c%d:%s] Rx rate: ",
                 baseID_, ID(), name_);
     }
 }
-    
+
 const char* ConnectionImpl::GetName()
 {
     return name_;
 }
-    
+
 bool ConnectionImpl::SetAppContext(void* pContext)
 {
     if (IsActive() == false) {
         ELOG(GetStatusString());
         return false;
     }
-    
+
     MLOG("App context set to " << pContext);
-    
+
     pAppContext_ = pContext;
-    
+
     return true;
 }
 
@@ -428,11 +430,11 @@ bool ConnectionImpl::SetLocalAddress(const string& IP, uint16_t port)
         ELOG(GetStatusString());
         return false;
     }
-    
+
     bool result = false;
-    
+
     string local_addr = IP;
-    
+
     // check local ip type and correct if needed
     const string& local_ip = GetLocalIPAddress();
     if (!local_ip.empty() &&
@@ -440,40 +442,40 @@ bool ConnectionImpl::SetLocalAddress(const string& IP, uint16_t port)
         MLOG("adjusting IP " << local_addr << " -> " << local_ip);
         local_addr = local_ip;
     }
-    
+
     MLOG(local_ << " -> " << local_addr << " (" << port << ")");
-    
+
     if (local_.SetIP(local_addr.c_str()) && local_.SetPort(port)) {
         result = true;
     }
     else {
         ELOG("Invalid IP address: " << local_addr);
     }
-    
+
     return result;
 }
-    
+
 bool ConnectionImpl::SetRemoteAddress(const string& IP, uint16_t port)
 {
     if (IsActive() == false) {
         ELOG(GetStatusString());
         return false;
     }
-    
+
     MLOG(remote_ << " -> " << IP << " (" << port << ")");
 
     // application may have used domain name instead
     string remote_addr = IP;
-    
+
     remote_.SetPort(port);
-    
+
     // check if remote is set as domain not IP
     if (remote_.SetIP(remote_addr.c_str()) == false) {
 
         // check if HTTP proxy is configured as some company won't even
         // allow DNS lookup in this network setting
         string mapped_ip = TranslateToIP(remote_addr.c_str());
-        
+
         if (mapped_ip.empty()) {
             // this is case where some corporate won't allow DNS at all
             domainRemote_ = remote_addr;
@@ -494,7 +496,7 @@ bool ConnectionImpl::SetRemoteAddress(const string& IP, uint16_t port)
             remote_.SetIP(remote_addr.c_str());
         }
     }
-    
+
     // if client, check if remote IP has Akamai mapping
     if (TransportImpl::GetInstance()->IsAppServer() == false) {
         string mapped = TransportImpl::GetInstance()->GetAkamaiMapping(remote_addr);
@@ -507,7 +509,7 @@ bool ConnectionImpl::SetRemoteAddress(const string& IP, uint16_t port)
             }
         }
     }
-    
+
     return true;
 }
 
@@ -517,14 +519,26 @@ void ConnectionImpl::SetWYSWYGMode()
         ELOG(GetStatusString());
         return;
     }
-    
+
     bWYSWYG_ = true;
-    
+
     if (connType_ == CT_TCP) {
         if (TcpTransceiver* p_tcp = GetTcpTransceiver()) {
             p_tcp->EnableTcpFramer();
         }
     }
+}
+
+void ConnectionImpl::SetProcessDataSync()
+{
+#if defined(__linux__) && !defined(ANDROID)
+    if (IsActive() == false) {
+        ELOG(GetStatusString());
+        return;
+    }
+
+    processDataSync_ = true;
+#endif
 }
 
 void ConnectionImpl::SetLocalIceCredential(const string& rUser, const string& rPwd)
@@ -533,31 +547,31 @@ void ConnectionImpl::SetLocalIceCredential(const string& rUser, const string& rP
         ELOG(GetStatusString());
         return;
     }
-    
+
     MutexLock scoped(&lock_);
     localUser_     = rUser;
     localPassword_ = rPwd;
 }
-    
+
 void ConnectionImpl::SetRemoteIceCredential(const string& rUser, const string& rPwd)
 {
     if (IsActive() == false) {
         ELOG(GetStatusString());
         return;
     }
-    
+
     MutexLock scoped(&lock_);
     remoteUser_     = rUser;
     remotePassword_ = rPwd;
 }
-    
+
 void ConnectionImpl::SetPayloadType(uint32_t flag)
 {
     if (IsActive() == false) {
         ELOG(GetStatusString());
         return;
     }
-    
+
     if (flag & Connection::STUN)  MLOG("Setting payload as STUN");
     if (flag & Connection::RTP)   MLOG("Setting payload as RTP");
     if (flag & Connection::RTCP)  MLOG("Setting payload as RTCP");
@@ -565,7 +579,7 @@ void ConnectionImpl::SetPayloadType(uint32_t flag)
     if (flag & Connection::AUDIO) MLOG("Setting payload as AUDIO");
     if (flag & Connection::VIDEO) MLOG("Setting payload as VIDEO");
     if (flag & Connection::SS)    MLOG("Setting payload as SS");
-    
+
     payloadType_ |= flag;
 }
 
@@ -573,14 +587,14 @@ bool ConnectionImpl::IsFallback()
 {
     return bFallback_;
 }
-    
+
 void ConnectionImpl::GetLocalIceCredential(string& rUser, string& rPwd)
 {
     if (IsActive() == false) {
         ELOG(GetStatusString());
         return;
     }
-    
+
     MutexLock scoped(&lock_);
     rUser = localUser_;
     rPwd  = localPassword_;
@@ -597,12 +611,12 @@ void ConnectionImpl::GetRemoteIceCredential(string& rUser, string& rPwd)
         ELOG(GetStatusString());
         return;
     }
-    
+
     MutexLock scoped(&lock_);
     rUser = remoteUser_;
     rPwd  = remotePassword_;
 }
-    
+
 bool ConnectionImpl::Send(Buffer::Ptr spBuffer)
 {
     if (IsActive() == false) {
@@ -615,11 +629,11 @@ bool ConnectionImpl::Send(Buffer::Ptr spBuffer)
     }
 
     bool result = false;
-    
+
     if (Transceiver* p = pTransceiver_.load(std::memory_order_relaxed)) {
         result = p->Send(spBuffer);
     }
-    
+
     return result;
 }
 
@@ -635,7 +649,7 @@ bool ConnectionImpl::Send(const uint8_t* buf, size_t size, uint16_t remotePort)
     }
 
     bool result = false;
-    
+
     if (Transceiver* p = pTransceiver_.load(std::memory_order_relaxed)) {
         if (!remotePort) {
             result = p->Send(buf, size);
@@ -646,7 +660,7 @@ bool ConnectionImpl::Send(const uint8_t* buf, size_t size, uint16_t remotePort)
             result = p->Send(buf, size, remoteAddr);
         }
     }
-    
+
     return result;
 }
 
@@ -656,39 +670,39 @@ bool ConnectionImpl::GetConnectedType(ConnectionType& rType)
         ELOG(GetStatusString());
         return false;
     }
-    
+
     rType = connType_;
-    
+
     return true;
 }
 
 bool ConnectionImpl::GetLocalAddress(string& rIP, uint16_t& rPort)
 {
     bool bResult = false;
-    
+
     if (IsActive() == false) {
         ELOG(GetStatusString());
         return false;
     }
-    
+
     if (local_.Valid()) {
         rIP     = local_.IPString();
         rPort   = local_.Port();
         bResult = true;
     }
-    
+
     return bResult;
 }
 
 bool ConnectionImpl::GetRemoteAddress(string& rIP, uint16_t& rPort)
 {
     bool bResult = false;
-    
+
     if (IsActive() == false) {
         ELOG(GetStatusString());
         return false;
     }
-    
+
     if (remote_.Valid()) {
         rIP     = remote_.IPString();
         rPort   = remote_.Port();
@@ -699,20 +713,14 @@ bool ConnectionImpl::GetRemoteAddress(string& rIP, uint16_t& rPort)
         rPort   = remote_.Port();
         bResult = true;
     }
-    
+
     return bResult;
 }
 
 void ConnectionImpl::GetSendQInfo(size_t& rNum, uint32_t& rBufSize)
 {
-    if (connType_ & CT_STREAM_TYPE) {
-        if (TcpTransceiver* p = GetTcpTransceiver()) {
-            p->GetSendQInfo(rNum, rBufSize);
-        }
-    }
-    else {
-        rNum = 0;
-        rBufSize = 0;
+    if (Transceiver* p = pTransceiver_.load(std::memory_order_relaxed)) {
+        p->GetSendQInfo(rNum, rBufSize);
     }
 }
 
@@ -722,22 +730,22 @@ void ConnectionImpl::EnableRateReport(bool flag)
         ELOG(GetStatusString());
         return;
     }
-    
+
     bRateReport_ = flag;
 }
 
 void ConnectionImpl::GetSendStat(uint32_t &rCount, int64_t &rBytes)
 {
-    rCount = sendStat_.count_;
+    rCount = sendStat_.totalCount_;
     rBytes = sendStat_.totalBytes_;
 }
 
 void ConnectionImpl::GetRecvStat(uint32_t &rCount, int64_t &rBytes)
 {
-    rCount = recvStat_.count_;
+    rCount = recvStat_.totalCount_;
     rBytes = recvStat_.totalBytes_;
 }
-    
+
 void ConnectionImpl::GetSendQInfo2(size_t& rNum, uint32_t& rBufSize, uint32_t& rRetry)
 {
     if (connType_ == CT_TCP || connType_ == CT_TLS) {
@@ -747,7 +755,7 @@ void ConnectionImpl::GetSendQInfo2(size_t& rNum, uint32_t& rBufSize, uint32_t& r
         }
     }
 }
-    
+
 const Address& ConnectionImpl::GetLocalAddress()
 {
     return local_;
@@ -757,7 +765,7 @@ const Address& ConnectionImpl::GetRemoteAddress()
 {
     return remote_;
 }
-    
+
 bool ConnectionImpl::Initialize(ConnectionType  eType,
                                 evutil_socket_t sock,
                                 bool            overTLS)
@@ -766,23 +774,23 @@ bool ConnectionImpl::Initialize(ConnectionType  eType,
         ELOG(GetStatusString());
         return false;
     }
-    
+
     // assign worker thread
     spWorker_ = TransportImpl::GetInstance()->GetWorker(this);
     workerId_ = spWorker_->ID();
-    
+
     MLOG("Assigned with thread [" << spWorker_->Name() << "]");
-    
+
     sprintf(sendStat_.log_, "Con[b%d:c%d] Tx rate: ", baseID_, ID());
     sprintf(recvStat_.log_, "Con[b%d:c%d] Rx rate: ", baseID_, ID());
-    
+
     bool bResult = false;
-    
+
     if (Transceiver* p_conn = ResourceMgr::GetInstance()->GetNewTransceiver(eType)) {
         pTransceiver_.store(p_conn, std::memory_order_relaxed);
         p_conn->SetConnectionID(ID());
         connType_ = p_conn->ConnType();
-        
+
         if (eType == CT_TCP) {
             if (TcpTransceiver* p = GetTcpTransceiver()) {
                 // flag to set different TcpTxrxState
@@ -792,12 +800,12 @@ bool ConnectionImpl::Initialize(ConnectionType  eType,
                 else {
                     p->SetState(TcpTxrxState::TCP);
                 }
-                
+
                 bResult = p->Start(sock);
             }
         }
     }
-    
+
     return bResult;
 }
 
@@ -806,7 +814,7 @@ bool ConnectionImpl::ServiceQueue(ThreadID_t workerID)
     if (workerId_ != workerID) {
         return false;
     }
-    
+
     if (!workQ_.empty()) {
         Buffer::Ptr sp_buf;
         {
@@ -820,7 +828,7 @@ bool ConnectionImpl::ServiceQueue(ThreadID_t workerID)
             DeliverData(sp_buf);
         }
     }
-    
+
     if (!eventQ_.empty()) {
         bool report_event = false;
         EventData event_data;
@@ -836,7 +844,7 @@ bool ConnectionImpl::ServiceQueue(ThreadID_t workerID)
             DeliverEventData(event_data);
         }
     }
-    
+
     if (!rateQ_.empty()) {
         bool report_rate = false;
         RateData rate_data;
@@ -852,33 +860,40 @@ bool ConnectionImpl::ServiceQueue(ThreadID_t workerID)
             DeliverRateData(rate_data);
         }
     }
-    
+
     return true;
 }
-    
+
 void ConnectionImpl::OnData(Buffer::Ptr spBuffer)
 {
-    if (!IsActive() || !spWorker_)  return;
-    
+    if (!IsActive())  return;
+
+    if (processDataSync_)
+    {
+        return DeliverData(spBuffer);
+    }
+
+    if (!spWorker_)  return;
+
     {
         MutexLock scoped(&qLock_);
         size_t q_size = workQ_.size();
         if (q_size && (q_size % 1000) == 0) {
             WLOG("WorkQ reached " << q_size);
         }
-        
+
         workQ_.push(spBuffer);
     }
-    
+
     spWorker_->SetWork(this);
 }
-    
+
 void ConnectionImpl::DeliverData(Buffer::Ptr spBuffer)
 {
     DLOG("Sending data to App: " << spBuffer->size() << " bytes");
-    
+
 	uint64_t start_time = GetTimeMs();
-    
+
     try {
         if (wpObserver_.expired()) {
             MutexLock scoped(&conLock_);
@@ -898,23 +913,23 @@ void ConnectionImpl::DeliverData(Buffer::Ptr spBuffer)
     catch (...) {
         ELOG("unknown exception");
     }
-    
+
     // it's possible that while we were in app callback, connection
     // has been reset by application
     if (!IsActive()) return;
-    
+
 	int64_t diff = GetTimeMs() - start_time;
 	if (diff > 5) {
         timeStat_.SetData((uint16_t)diff);
-        
+
         if (lastDelayStat_ == 0) {
             lastDelayStat_ = start_time;
         }
-        
+
         uint16_t time_gap = uint16_t(start_time - lastDelayStat_);
         lastDelayStat_ = start_time;
         delayStat_.SetData(time_gap);
-        
+
         // every 20 events print it
         if ((timeStat_.seq_ % 20) == 0) {
             ostringstream log;
@@ -924,11 +939,11 @@ void ConnectionImpl::DeliverData(Buffer::Ptr spBuffer)
         }
 	}
 }
-    
+
 void ConnectionImpl::OnEvent(EventType eType, const char* pReason)
 {
     MLOG(toStr(eType) << " (" << pReason << ")");
-    
+
     // hack to avoid retry when mapping failed -
     // need more elegant solution
     bool map_failed = (strcmp(pReason, "Failed to map connection") == 0);
@@ -940,7 +955,7 @@ void ConnectionImpl::OnEvent(EventType eType, const char* pReason)
     // 2. All failures with TCP setup phase
     if (is_end_event(eType) && !map_failed &&
         TransportImpl::GetInstance()->IsAppServer() == false) {
-    
+
         // if we are connected and got this error and check if network changed
         if (InState(CONNECTED)) {
             WLOG("Network ended during connected state - check network change");
@@ -948,8 +963,8 @@ void ConnectionImpl::OnEvent(EventType eType, const char* pReason)
                 return;
             }
         }
-        
-        if (connType_ == CT_UDP) {
+
+        if (connType_ == CT_UDP || connType_ == CT_BULK_UDP) {
             // Usually UDP won't fail unless it is connected-udp
             // however, os firewall or anti-virus may still do
             // the un-thinkable thing.
@@ -997,7 +1012,7 @@ void ConnectionImpl::OnEvent(EventType eType, const char* pReason)
     if (eType == ET_CONNECTED) {
         SetState(CONNECTED); // mark that we are conneceted now
     }
-    
+
     // for app server, set transceiver to NoTransceiver pointer
     // to prevent sending from application as socket layer is
     // useless to use anymore.  However, we are keeping this
@@ -1012,16 +1027,21 @@ void ConnectionImpl::OnEvent(EventType eType, const char* pReason)
     if (is_end_event(eType) && TransportImpl::GetInstance()->IsAppServer()) {
         ReplaceTransceiver(NoTransceiver::GetInstance());
     }
-    
+
     EventData event_data;
     event_data.type_ = eType;
     event_data.reason_ = pReason;
+
+    if (processDataSync_)
+    {
+        return DeliverEventData(event_data);
+    }
 
     {
         MutexLock scoped(&qLock_);
         eventQ_.push(event_data);
     }
-    
+
     if (spWorker_) {
         spWorker_->SetWork(this);
     }
@@ -1039,9 +1059,9 @@ void ConnectionImpl::DeliverEventData(EventData &rEvent)
             SetState(TERMINATED);
         }
     }
-    
+
     uint64_t start_time = GetTimeMs();
-    
+
     try {
         if (wpObserver_.expired()) {
             MutexLock scoped(&conLock_);
@@ -1061,12 +1081,12 @@ void ConnectionImpl::DeliverEventData(EventData &rEvent)
     catch (...) {
         ELOG("unknown exception");
     }
-    
+
     int64_t diff = GetTimeMs() - start_time;
     if (diff > 5) {
         WLOG("App delayed libevent thread " << diff << " ms");
     }
-    
+
     // when end event is detected then reset the connection
     if (is_end_event(rEvent.type_)) {
         TransportImpl* p = TransportImpl::GetInstance();
@@ -1075,19 +1095,25 @@ void ConnectionImpl::DeliverEventData(EventData &rEvent)
         }
     }
 }
-    
-void ConnectionImpl::OnRateData(RateType type, uint16_t rate, uint16_t delta)
+
+void ConnectionImpl::OnRateData(RateType type, uint16_t rate, uint16_t count, uint16_t delta)
 {
     RateData rate_data;
     rate_data.type_  = type;
     rate_data.rate_  = rate;
+    rate_data.count_ = count;
     rate_data.delta_ = delta;
-    
+
+    if (processDataSync_)
+    {
+        return DeliverRateData(rate_data);
+    }
+
     {
         MutexLock scoped(&qLock_);
         rateQ_.push(rate_data);
     }
-    
+
     if (spWorker_) {
         spWorker_->SetWork(this);
     }
@@ -1100,13 +1126,15 @@ void ConnectionImpl::DeliverRateData(fuze::ConnectionImpl::RateData &rRate)
             MutexLock scoped(&conLock_);
             if (pObserver_) {
                 pObserver_->OnRateData(pAppContext_,
-                                       rRate.type_, rRate.rate_, rRate.delta_);
+                                       rRate.type_, rRate.rate_,
+                                       rRate.count_, rRate.delta_);
             }
         }
         else {
             if (ConnectionObserver::Ptr sp = wpObserver_.lock()) {
                 sp->OnRateData(pAppContext_,
-                               rRate.type_, rRate.rate_, rRate.delta_);
+                               rRate.type_, rRate.rate_,
+                               rRate.count_, rRate.delta_);
             }
         }
     }
@@ -1117,61 +1145,59 @@ void ConnectionImpl::DeliverRateData(fuze::ConnectionImpl::RateData &rRate)
         ELOG("unknown exception");
     }
 }
-    
+
 uint32_t ConnectionImpl::OnBytesSent(uint32_t bytesSent)
 {
     int64_t curr_time = GetTimeMs();
 
     AddSendStat(bytesSent, curr_time);
     AddRecvStat(0, curr_time); // check recv stat in case not active
-    
-    if (sendStat_.count_ <= 5) {
-        MLOG(bytesSent << "B (count: " << sendStat_.count_ << ")");
+
+    if (sendStat_.totalCount_ <= 5) {
+        MLOG(bytesSent << "B (count: " << sendStat_.totalCount_ << ")");
     }
-    
-    return sendStat_.count_;
+
+    return sendStat_.totalCount_;
 }
 
 uint32_t ConnectionImpl::OnBytesRecv(uint32_t bytesRecv)
 {
     int64_t curr_time = GetTimeMs();
-    
+
     AddRecvStat(bytesRecv, curr_time);
     AddSendStat(0, curr_time); // check send stat in case not active
-    
-    if (recvStat_.count_ == 1) {
-        if (connType_ == CT_UDP) {
+
+    if (recvStat_.totalCount_ == 1) {
+        if (connType_ == CT_UDP || connType_ == CT_BULK_UDP) {
             OnEvent(ET_CONNECTED, "received first packet");
         }
     }
-    
-    if (recvStat_.count_ <= 5) {
-        MLOG(bytesRecv << "B (count: " << recvStat_.count_ << ")");
+
+    if (recvStat_.totalCount_ <= 5) {
+        MLOG(bytesRecv << "B (count: " << recvStat_.totalCount_ << ")");
     }
-    
-    return recvStat_.count_;
+
+    return recvStat_.totalCount_;
 }
 
 void ConnectionImpl::AddSendStat(uint32_t bytesSent, int64_t currTime)
 {
-    int rate = sendStat_.AddBytes(bytesSent, currTime);
-    
-    if (rate != -1) {
-        uint16_t send_rate = (uint16_t)rate;
-        
+    uint16_t send_rate = 0, count = 0;
+
+    if (sendStat_.AddBytes(bytesSent, currTime, send_rate, count)) {
         if (bWYSWYG_) {
             if (TcpTransceiver* p = GetTcpTransceiver()) {
-                p->SendStat(Stat::TYPE_SEND,send_rate,
+                p->SendStat(Stat::TYPE_SEND, send_rate,
                             sendStat_.local_.seq_);
             }
         }
-        
+
         if (bRateReport_) {
             if (!sendStat_.lastSent_) {
                 sendStat_.lastSent_ = currTime;
             }
             uint16_t diff = uint16_t(currTime - sendStat_.lastSent_);
-            OnRateData(RT_LOCAL_SEND, send_rate, diff);
+            OnRateData(RT_LOCAL_SEND, send_rate, count, diff);
             sendStat_.lastSent_ = currTime;
         }
     }
@@ -1179,43 +1205,41 @@ void ConnectionImpl::AddSendStat(uint32_t bytesSent, int64_t currTime)
 
 void ConnectionImpl::AddRecvStat(uint32_t bytesRecv, int64_t currTime)
 {
-    int rate = recvStat_.AddBytes(bytesRecv, currTime);
-    
-    if (rate != -1) {
-        uint16_t recv_rate = (uint16_t)rate;
-        
+    uint16_t recv_rate = 0, count = 0;
+
+    if (recvStat_.AddBytes(bytesRecv, currTime, recv_rate, count)) {
         if (bWYSWYG_) {
             if (TcpTransceiver* p = GetTcpTransceiver()) {
                 p->SendStat(Stat::TYPE_RECV, recv_rate,
                             recvStat_.local_.seq_);
             }
         }
-        
+
         if (bRateReport_) {
             if (!recvStat_.lastSent_) {
                 recvStat_.lastSent_ = currTime;
             }
             uint16_t diff = uint16_t(currTime - recvStat_.lastSent_);
-            OnRateData(RT_LOCAL_RECV, recv_rate, diff);
+            OnRateData(RT_LOCAL_RECV, recv_rate, count, diff);
             recvStat_.lastSent_ = currTime;
         }
     }
 }
-    
+
 void ConnectionImpl::ClearStat()
 {
     // Once we are connected, clear data stat used
     // to be connected to reflect application data only
     //
     MLOG("SendStat: " << sendStat_.totalBytes_ <<
-         " bytes sent, count(" << sendStat_.count_ << ")");
+         " bytes sent, count(" << sendStat_.totalCount_ << ")");
     sendStat_.Clear();
-    
+
     MLOG("RecvStat: " << recvStat_.totalBytes_ <<
-         " bytes received, count(" << recvStat_.count_ << ")");
+         " bytes received, count(" << recvStat_.totalCount_ << ")");
     recvStat_.Clear();
 }
-    
+
 void ConnectionImpl::OnStatReceived(Buffer::Ptr spStat)
 {
     if (spStat->size() < 7) {
@@ -1235,7 +1259,7 @@ void ConnectionImpl::OnStatReceived(Buffer::Ptr spStat)
     seq = ntohl(seq);
 
     Stat& r_stat = (type == Stat::TYPE_SEND ? recvStat_ : sendStat_);
-    
+
     StatData& r_data = r_stat.remote_;
     r_data.SetData(rate);
     if (r_data.seq_ != seq) {
@@ -1243,7 +1267,7 @@ void ConnectionImpl::OnStatReceived(Buffer::Ptr spStat)
              r_data.seq_ << ", received: " << seq);
         r_data.seq_ = seq+1;
     }
-    
+
     // measure the time of jitter
     int64_t curr_time = GetTimeMs();
     uint16_t diff = 0;
@@ -1252,13 +1276,13 @@ void ConnectionImpl::OnStatReceived(Buffer::Ptr spStat)
     }
     r_stat.arrival_.SetData(diff);
     r_stat.lastArrival_ = curr_time;
-    
+
     if (bRateReport_) {
         if (type == Stat::TYPE_SEND) {
-            OnRateData(RT_REMOTE_SEND, rate, diff);
+            OnRateData(RT_REMOTE_SEND, rate, 0, diff);
         }
         else {
-            OnRateData(RT_REMOTE_RECV, rate, diff);
+            OnRateData(RT_REMOTE_RECV, rate, 0, diff);
         }
     }
 }
@@ -1269,26 +1293,26 @@ void ConnectionImpl::OnMapReceived(Buffer::Ptr spMap)
         ELOG("lack of size: " << spMap->size());
         return;
     }
-    
+
     uint8_t* p_map = spMap->getBuf();
-    
+
     in_addr  mapped_ip;
     uint16_t mapped_port = 0;
     uint32_t rand_num    = 0;
 
     memcpy(&mapped_ip, p_map, sizeof(uint32_t));
     p_map += sizeof(uint32_t);
-    
+
     memcpy(&mapped_port, p_map, sizeof(uint16_t));
     mapped_port = ntohs(mapped_port);
     p_map += sizeof(uint16_t);
-    
+
     memcpy(&rand_num, p_map, sizeof(uint32_t));
     rand_num = ntohl(rand_num);
-    
+
     MLOG(toStr(mapped_ip) << ":" << mapped_port << " key: " << rand_num);
 }
-    
+
 void ConnectionImpl::OnTransceiverTimeout()
 {
     //
@@ -1298,14 +1322,14 @@ void ConnectionImpl::OnTransceiverTimeout()
         ELOG("Received timeout for server connection");
         return;
     }
-    
-    MLOG("recv packet # " << recvStat_.count_ <<
+
+    MLOG("recv packet # " << recvStat_.totalCount_ <<
          (bFallback_ ? "" : " - ignored as fallback disabled"));
-    
+
     if (!bFallback_) {
         return;
     }
-    
+
     if (InState(CONNECTED) == false) {
         if (Failover() == false) {
             OnEvent(ET_FAILED, "Network failure");
@@ -1314,11 +1338,11 @@ void ConnectionImpl::OnTransceiverTimeout()
     else {
         if (RetryIfNetworkChanged() == false) {
             // filter this event for other service like screen sharing and vidyo
-            if (origType_ == CT_UDP) {
+            if (origType_ == CT_UDP || origType_ == CT_BULK_UDP) {
                 // try the same transport type again if not udp
-                bool retry_same_type = (connType_ == CT_UDP ? false : true);
+                bool retry_same_type = ((connType_ == CT_UDP || connType_ == CT_BULK_UDP) ? false : true);
                 if (Failover(retry_same_type)) {
-                    if (connType_ == CT_UDP) {
+                    if (connType_ == CT_UDP || connType_ == CT_BULK_UDP) {
                         ClearStat();
                     }
                 }
@@ -1339,13 +1363,13 @@ bool ConnectionImpl::Failover(bool bRetrySameType)
     }
 
     MLOG("RetrySameType: " << (bRetrySameType ? "true" : "false"));
-    
+
     bool bResult = false;
 
     ConnectionType     type = connType_;
     TcpTxrxState::Type state_type = TcpTxrxState::SETUP_TLS;
     string             event_str(toStr(connType_));
-    
+
     if (bRetrySameType) {
         if ((connType_ == CT_TCP) || (connType_ == CT_TLS)) {
             if (TcpTransceiver* p = GetTcpTransceiver()) {
@@ -1359,8 +1383,8 @@ bool ConnectionImpl::Failover(bool bRetrySameType)
         if (origRemote_.Valid() == false) {
             origRemote_ = remote_;
         }
-        
-        if (connType_ == CT_UDP) {
+
+        if (connType_ == CT_UDP || connType_ == CT_BULK_UDP) {
             type = CT_TCP;
             state_type = TcpTxrxState::SETUP_TLS;
             remote_.SetPort(Server::PORT);
@@ -1372,9 +1396,9 @@ bool ConnectionImpl::Failover(bool bRetrySameType)
                 ELOG("No TcpTransceiver");
                 return false;
             }
-            
+
             TcpTxrxState::Type curr_state = p->GetSetupMethodType();
-            
+
             switch (curr_state)
             {
             case TcpTxrxState::SETUP_TCP:
@@ -1421,7 +1445,7 @@ bool ConnectionImpl::Failover(bool bRetrySameType)
                 MLOG("can't failover on " << toStr(curr_state));
                 return false;
             }
-            
+
             MLOG("transition " << toStr(p->GetSetupMethodType()) <<
                  " -> " << toStr(state_type));
         }
@@ -1429,23 +1453,23 @@ bool ConnectionImpl::Failover(bool bRetrySameType)
             ELOG("can't failover connection type: " << toStr(connType_));
             return false;
         }
-        
+
         event_str = toStr(state_type);
     }
-    
+
     OnEvent(ET_IN_PROGRESS, event_str.c_str());
-    
+
     if (Transceiver* p =
             ResourceMgr::GetInstance()->GetNewTransceiver(type)) {
-        
+
         // set tcp state to deal with connection setup
         if (TcpTransceiver* p_tcp = dynamic_cast<TcpTransceiver*>(p)) {
-            
+
             p_tcp->SetConnectionID(ID());
             p_tcp->SetState(state_type, true); // set as setup method
-            
+
             ReplaceTransceiver(p_tcp);
-            
+
             if ((state_type != TcpTxrxState::SETUP_HTTP) &&
                 (state_type != TcpTxrxState::SETUP_HTTP_TLS)) {
                 bResult = p_tcp->Start();
@@ -1459,19 +1483,19 @@ bool ConnectionImpl::Failover(bool bRetrySameType)
             // local address is not valid anymore so clear it
             // this will force our UDP to be used as connected mode
             local_.Clear();
-            
+
             p->SetConnectionID(ID());
             ReplaceTransceiver(p);
             bResult = p->Start();
         }
-        
+
         if (bResult == false) {
             TransportImpl::GetInstance()->RequestReset(p->ResourceType(),
                                                        p->ID(),
                                                        p);
         }
     }
-    
+
     return bResult;
 }
 
@@ -1480,21 +1504,21 @@ bool ConnectionImpl::RetryIfNetworkChanged()
     //
     // This is only supported for native UDP application
     //
-    if (origType_ != CT_UDP) {
+    if (origType_ != CT_UDP && origType_ != CT_BULK_UDP) {
         DLOG("not supported for " << toStr(origType_));
         return false;
     }
-    
+
     bool bResult = false;
     bool network_changed = false;
-    
+
     string local_ip = GetLocalIPAddress(remote_.IPString().c_str());
     if (local_ip.empty()) {
         MLOG("No local network interface found");
         // network disappeared wait until we have new network interface
         return true;
     }
-    
+
     if (local_ip != local_.IPString()) {
         MLOG("Network changed from " << local_.IPString() << " to " <<
              local_ip);
@@ -1503,23 +1527,23 @@ bool ConnectionImpl::RetryIfNetworkChanged()
     else {
         DLOG("Network is not changed: " << local_ip);
     }
-    
+
     if (network_changed) {
         bResult = Failover(true); // try same transceiver again
     }
-    
+
     return bResult;
 }
-    
+
 ConnectionType ConnectionImpl::GetOriginalConnectionType() const
 {
     return origType_;
 }
-    
+
 bool ConnectionImpl::GetOriginalRemoteAddress(string& rRemote, uint16_t& rPort)
 {
     bool bResult = false;
-    
+
     if (origRemote_.Valid()) {
         rRemote = origRemote_.IPString();
         rPort   = origRemote_.Port();
@@ -1535,26 +1559,26 @@ bool ConnectionImpl::GetOriginalRemoteAddress(string& rRemote, uint16_t& rPort)
         rPort   = remote_.Port();
         bResult = true;
     }
-    
+
     return bResult;
 }
-    
+
 void ConnectionImpl::ReplaceTransceiver(Transceiver* p)
 {
     Transceiver* p_conn = pTransceiver_.load(std::memory_order_relaxed);
-    
+
     if (p_conn != NoTransceiver::GetInstance()) {
         TransportImpl::GetInstance()->RequestReset(p_conn->ResourceType(),
                                                    p_conn->ID(),
                                                    p_conn);
         p_conn->SetConnectionID(INVALID_ID);
     }
-    
+
     if (InState(TERMINATED) && (p != NoTransceiver::GetInstance())) {
         MLOG("Reconnected to new transceiver " << p->ID());
         state_ = CONNECTED;
     }
-    
+
     pTransceiver_.store(p, std::memory_order_relaxed);
     connType_ = p->ConnType();
 
@@ -1567,12 +1591,12 @@ void ConnectionImpl::ReplaceTransceiver(Transceiver* p)
         }
     }
 }
-       
+
 void ConnectionImpl::EnablePortReservation(bool flag)
 {
     bReservePort_ = flag;
 }
-    
+
 bool ConnectionImpl::UsePortReservation()
 {
     return bReservePort_;
@@ -1582,7 +1606,7 @@ bool ConnectionImpl::InState(ConnectionImpl::State flag)
 {
     return ((state_ & flag) == flag);
 }
-    
+
 void ConnectionImpl::SetState(ConnectionImpl::State flag)
 {
     state_ |= flag;
@@ -1611,18 +1635,18 @@ ConnectionImpl::QueueSizeType ConnectionImpl::GetSizeType(uint32_t bufSize)
     else if (bufSize <= 262000) {
         return SIZE_262000;
     }
-    
+
     return MAX_QUEUE_SIZE;
 }
 
 uint32_t ConnectionImpl::SizeArray[ConnectionImpl::MAX_QUEUE_SIZE]
     = { 0, 64, 256, 1024, 2048, 32000, 65000, 262000 };
-    
+
 NetworkBuffer::Ptr ConnectionImpl::GetBufferShell()
 {
     NetworkBuffer::Ptr sp_buf;
     NetworkBuffer*     p_buf = 0;
-    
+
     {
         MutexLock scoped(&poolLock_);
         if (!bufPool_[BUFFER_SHELL].empty()) {
@@ -1630,25 +1654,25 @@ NetworkBuffer::Ptr ConnectionImpl::GetBufferShell()
             bufPool_[BUFFER_SHELL].pop();
         }
     }
-    
+
     if (!p_buf) {
         p_buf = new NetworkBuffer; // create empty buffer shell
         p_buf->appID_ = ID(); // mark the connection ID for release
         bufAlloc[BUFFER_SHELL]++;
     }
-    
+
     sp_buf.reset(p_buf, HandleReleasedBuffer);
-    
+
     return sp_buf;
 }
-    
+
 NetworkBuffer::Ptr ConnectionImpl::GetBuffer(uint32_t bufSize)
 {
     RawMemory::Ptr sp_mem;
     RawMemory* p_mem = 0;
-    
+
     QueueSizeType size_type = GetSizeType(bufSize);
-    
+
     if (size_type != MAX_QUEUE_SIZE) {
         MutexLock scoped(&poolLock_);
         if (!bufPool_[size_type].empty()) {
@@ -1656,7 +1680,7 @@ NetworkBuffer::Ptr ConnectionImpl::GetBuffer(uint32_t bufSize)
             bufPool_[size_type].pop();
         }
     }
-    
+
     if (!p_mem) {
         uint32_t real_size =
             (size_type != MAX_QUEUE_SIZE ? SizeArray[size_type] : bufSize);
@@ -1671,12 +1695,12 @@ NetworkBuffer::Ptr ConnectionImpl::GetBuffer(uint32_t bufSize)
     else {
         p_mem->setSize(bufSize);
     }
-    
+
     sp_mem.reset(p_mem, HandleReleasedMemory);
 
     NetworkBuffer::Ptr sp_buf = GetBufferShell();
     sp_buf->init(sp_mem);
-    
+
     return sp_buf;
 }
 
@@ -1686,14 +1710,14 @@ NetworkBuffer::Ptr ConnectionImpl::GetBuffer(Buffer::Ptr spBuf)
     sp_buf->setAsShallowCopy(spBuf);
     return sp_buf;
 }
-    
+
 void ConnectionImpl::AddBuffer(NetworkBuffer* pBuf)
 {
     pBuf->reset();
     MutexLock scoped(&poolLock_);
     bufPool_[BUFFER_SHELL].push(pBuf);
 }
-    
+
 void ConnectionImpl::AddMemory(RawMemory* pMem)
 {
     QueueSizeType size_type = GetSizeType(pMem->getRealSize());
@@ -1705,7 +1729,7 @@ void ConnectionImpl::AddMemory(RawMemory* pMem)
         delete pMem;
     }
 }
-    
+
 void ConnectionImpl::HandleReleasedBuffer(NetworkBuffer* pBuf)
 {
     // retrieve connection ID
@@ -1714,7 +1738,7 @@ void ConnectionImpl::HandleReleasedBuffer(NetworkBuffer* pBuf)
         delete pBuf;
         return;
     }
-    
+
     if (ConnectionImpl* p =
             ResourceMgr::GetInstance()->GetConnection(pBuf->appID_)) {
         p->AddBuffer(pBuf);
@@ -1729,13 +1753,13 @@ void ConnectionImpl::HandleReleasedMemory(RawMemory* pMem)
 {
     // retrieve connection ID
     int app_id = pMem->getAppID();
-    
+
     if (app_id == INVALID_ID) {
         _WLOG_("invalid app id");
         delete pMem;
         return;
     }
-    
+
     if (ConnectionImpl* p =
             ResourceMgr::GetInstance()->GetConnection(app_id)) {
         p->AddMemory(pMem);
@@ -1746,7 +1770,7 @@ void ConnectionImpl::HandleReleasedMemory(RawMemory* pMem)
         delete pMem;
     }
 }
-    
+
 bool is_end_event(EventType type)
 {
     return (type == ET_DISCONNECTED ||

@@ -69,8 +69,7 @@ public:
     
 public: // exceptional member variable to be exposed
     
-    char log_[32];  // debug purpose
-    char log2_[16]; // indicate TLS/DTLS Client/Server role
+    char log_[64];  // debug purpose
     
 protected:
     

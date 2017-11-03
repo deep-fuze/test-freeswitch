@@ -134,6 +134,7 @@ public:
     virtual void   SetDSCP(Connection::PayloadType type,
                            uint32_t value);
     virtual void   EnableNetServiceType(bool flag);
+    virtual void   ForceDnsCacheStore();
 
     // Register event
     bool CreateEvent(event*&           rpEvent,
@@ -198,7 +199,8 @@ public:
     void QueryDnsAsync(const string& rAddress,
                        Record::Type  type,
                        DnsObserver*  pObserver,
-                       void*         pArg);
+                       void*         pArg,
+                       bool          bVoip = false);
     
     void SetQoSTag(evutil_socket_t sock, 
                    ConnectionImpl* pConn, 
@@ -287,10 +289,8 @@ private: // DNS Cache
     DnsRecordMap           staleCache_[Record::MAX_NUM];
     MutexLock              dnsLock_;
 
-#ifdef __APPLE__
     void StoreDnsCache();
     void RetrieveDnsCache();
-#endif
     
 private: // Thread workers
     

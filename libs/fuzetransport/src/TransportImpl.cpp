@@ -229,9 +229,7 @@ TransportImpl::TransportImpl()
     // add one threads by default
     AddWorkerThread(0);
 
-#ifdef __APPLE__
     RetrieveDnsCache();
-#endif
 }
 
 TransportImpl::~TransportImpl()
@@ -282,9 +280,7 @@ TransportImpl::~TransportImpl()
         pEventBase_ = 0;
     }
 
-#ifdef __APPLE__
     StoreDnsCache();
-#endif
 
     if (spProxy_) {
         spProxy_.reset();
@@ -311,9 +307,51 @@ TransportImpl::~TransportImpl()
     }
 }
 
-#ifdef __APPLE__
 void SetDnsFileCache(std::string cache);
 void GetDnsFileCache(std::string& rCache);
+
+#if !defined(__APPLE__) && !defined(__ANDROID_API__) && !defined(WIN32)
+void SetDnsFileCache(std::string cache) {}
+void GetDnsFileCache(std::string& rCache) {}
+#endif
+
+void TransportImpl::ForceDnsCacheStore()
+{
+    DnsRecordMap cache[Record::MAX_NUM];
+    {
+        MutexLock scoped(&dnsLock_);
+        for (int i = Record::A; i < Record::MAX_NUM; ++i) {
+            for (auto& kv : staleCache_[i]) {
+                cache[i][kv.first] = kv.second;
+            }
+            for (auto& kv : dnsCache_[i]) {
+                cache[i][kv.first] = kv.second;
+            }
+        }
+    }
+
+    std::ostringstream store;
+    uint32_t cache_cnt = 0;
+    for (auto& i : cache) {
+        for (auto& kv : i) {
+            for (auto& j : kv.second) {
+                if (j->voip_) {
+                    j->Serialize(store);
+                    cache_cnt++;
+                }
+            }
+        }
+    }
+    
+    string store_str = store.str();
+    if (!store_str.empty()) {
+        MLOG("Storing " << cache_cnt << " dns file cache ");
+        SetDnsFileCache(store_str);
+    }
+    else {
+        MLOG("No DNS cache to store");
+    }
+}
     
 void TransportImpl::StoreDnsCache()
 {
@@ -337,6 +375,9 @@ void TransportImpl::StoreDnsCache()
         MLOG("Storing " << cache_cnt << " dns file cache ");
         SetDnsFileCache(store_str);
     }
+    else {
+        MLOG("No DNS cache to store");
+    }
 }
 
 void TransportImpl::RetrieveDnsCache()
@@ -345,7 +386,10 @@ void TransportImpl::RetrieveDnsCache()
     
     string cache;
     GetDnsFileCache(cache);
-    if (cache.empty()) return;
+    if (cache.empty()) {
+        MLOG("No DNS cache found");
+        return;
+    }
     
     const char* pParam = cache.c_str();
     const char* pEnd   = pParam + cache.size();
@@ -426,6 +470,7 @@ void TransportImpl::RetrieveDnsCache()
         if (sp_rec) {
             sp_rec->domain_ = name;
             sp_rec->type_   = type;
+            sp_rec->voip_   = true;
 
             DnsRecordMap::iterator it = staleCache_[type].find(name);
             if (it != staleCache_[type].end()) {
@@ -445,7 +490,6 @@ void TransportImpl::RetrieveDnsCache()
     
     MLOG("Retrieved " << cache_cnt << " dns file cache");
 }
-#endif
     
 void TransportImpl::AddWorkerThread(size_t workerId)
 {
@@ -778,7 +822,7 @@ void TransportImpl::SetLogLevel(SeverityType eType)
 void TransportImpl::RegisterTransportUser(TransportUser* pUser,
                                           TransportUser::Type type)
 {
-    MLOG(toStr(type));
+    DLOG(toStr(type));
     userList_[type] = pUser;
 }
 
@@ -1277,7 +1321,8 @@ void TransportImpl::ClearDnsCache()
 void TransportImpl::QueryDnsAsync(const string& rAddress,
                                   Record::Type  type,
                                   DnsObserver*  pObserver,
-                                  void*         pArg)
+                                  void*         pArg,
+                                  bool          bVoip)
 {
     DLOG(rAddress << " [" << toStr(type) << "] observer " << pObserver);
     
@@ -1285,7 +1330,7 @@ void TransportImpl::QueryDnsAsync(const string& rAddress,
         spResolver_.reset(new AsyncResolver);
     }
     
-    spResolver_->SetQuery(rAddress, type, pObserver, pArg);
+    spResolver_->SetQuery(rAddress, type, pObserver, pArg, bVoip);
 }
 
 void TransportImpl::SetQoSTag(int sock, ConnectionImpl* pConn, unsigned long& rFlowID)

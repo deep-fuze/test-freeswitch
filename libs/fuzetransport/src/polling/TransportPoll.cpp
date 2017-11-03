@@ -78,6 +78,7 @@ public:
     virtual void OnRateData(void*    pContext,
                             RateType type,
                             uint16_t rateKbps,
+                            uint16_t count,
                             uint16_t arrivedTime);
     static TransportPoll& GetInstance() { return inst; }
     
@@ -94,6 +95,7 @@ TransportPoll TransportPoll::inst;
 void TransportPoll::OnRateData(void*    pContext,
                                RateType type,
                                uint16_t rateKbps,
+                               uint16_t count,
                                uint16_t arrivedTime) {
     
     if (g_rate_callback) {

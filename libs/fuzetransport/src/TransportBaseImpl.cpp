@@ -31,10 +31,6 @@ TransportBaseImpl::TransportBaseImpl(int baseID)
     DLOG("Created");
 }
 
-void TransportBaseImpl::Initialize(int numOfThreads)
-{
-}
-
 void TransportBaseImpl::SetName(const char* pName)
 {
     memset(name_, 0, 10); // init name

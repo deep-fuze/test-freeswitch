@@ -35,7 +35,7 @@ Transport* Transport::GetInstance()
 {
     return TransportImpl::GetInstance();
 }
-    
+
 Transport::Transport()
 {
 }
@@ -44,7 +44,7 @@ void Transport::EnableFuzeLog()
 {
     dout().EnableFuzeLog();
 }
-    
+
 const char* toStr(TransportBase::Type eType)
 {
     switch (eType)
@@ -56,18 +56,18 @@ const char* toStr(TransportBase::Type eType)
     default:                           return "Invalid";
     }
 }
-    
+
 TransportBase::Type GetSrcBaseType(const CongestionInfo& rInfo)
 {
     TransportBase::Type src_type = TransportBase::NONE;
-    
+
     CongestionInfo::const_iterator it
         = rInfo.find(SRC_BASE_TYPE);
 
     if (it != rInfo.end()) {
-        
+
         const string& r_src = it->second;
-        
+
         if (r_src == toStr(TransportBase::AUDIO)) {
             src_type = TransportBase::AUDIO;
         }
@@ -84,17 +84,17 @@ TransportBase::Type GetSrcBaseType(const CongestionInfo& rInfo)
     else {
         ELOG("Source base type is not set!");
     }
-    
+
     return src_type;
 }
-    
+
 NetworkBuffer::NetworkBuffer()
     : remotePort_(0)
     , changed_(false)
     , appID_(INVALID_ID)
 {
 }
-    
+
 NetworkBuffer::NetworkBuffer(Buffer::Ptr spRecv)
     : Buffer(*spRecv)
     , remotePort_(0)
@@ -115,21 +115,21 @@ const char* toStr(Type type)
     default:    return "INVALID";
     }
 }
-    
+
 void SetInfo(const char* pProxyAddress,
              const char* pCredential,
              Type        type)
 {
     MLOG("Proxy: " << (pProxyAddress ? pProxyAddress : " N/A"));
-    
+
     bool enable = (pProxyAddress && (*pProxyAddress != 0));
 
 #ifdef FORCE_HTTP_PROXY
     if (!enable) return;
 #endif
-    
+
     TransportImpl::GetInstance()->EnableProxyConnector(enable);
-    
+
     if (ProxyConnector::Ptr sp_proxy =
         TransportImpl::GetInstance()->GetProxyConnector()) {
         sp_proxy->SetProxyInfo(pProxyAddress, pCredential, type);
@@ -147,13 +147,13 @@ void GetInfo(string& rProxy,
         rCrednetial = sp_proxy->GetUserCredential();
     }
 }
-    
+
 } // namespace proxy
-    
+
 string GetLocalIPAddress(const char* pRemoteAddr)
 {
     string ip_addr;
-    
+
     // static storage for google 8.8.8.8 IP for detecting
     // consistent local IP change - we want to filter out
     // any network noise wrt local ip change
@@ -161,7 +161,7 @@ string GetLocalIPAddress(const char* pRemoteAddr)
 
     // by default, lookup using ipv4 socket
     bool ipv4 = (pRemoteAddr ? IsIPv4(pRemoteAddr) : true);
-    
+
     // by using UDP connect, we can find out the best outgoing
     // network interface without actually connecting far end
     // use Remote IP address to know what network
@@ -172,7 +172,7 @@ string GetLocalIPAddress(const char* pRemoteAddr)
         ELOG("Failed to create socket")
         return ip_addr;
     }
-    
+
     // we connect the address specified
     Address remote;
     remote.SetIP(pRemoteAddr ? pRemoteAddr : "8.8.8.8");
@@ -224,7 +224,7 @@ string GetLocalIPAddress(const char* pRemoteAddr)
                 }
             }
         }
-        
+
 #ifdef WIN32 // MQT-2516
         const IPAddr dest_ip = inet_addr(pRemoteAddr ? pRemoteAddr : "8.8.8.8");
         if (INADDR_NONE != dest_ip) {
@@ -233,12 +233,12 @@ string GetLocalIPAddress(const char* pRemoteAddr)
                 std::vector<char> ip_table(sizeof(MIB_IPADDRTABLE));
                 ULONG ip_table_len = ip_table.size();
                 MIB_IPADDRTABLE* p_mib = reinterpret_cast<MIB_IPADDRTABLE*>(&ip_table[0]);
-                if (GetIpAddrTable(p_mib, &ip_table_len, false) 
+                if (GetIpAddrTable(p_mib, &ip_table_len, false)
                         == ERROR_INSUFFICIENT_BUFFER) {
                     ip_table.resize(ip_table_len);
                 }
 
-                if (GetIpAddrTable(p_mib, &ip_table_len, false) == NO_ERROR) {									   						
+                if (GetIpAddrTable(p_mib, &ip_table_len, false) == NO_ERROR) {
                     for (DWORD i = 0; i < p_mib->dwNumEntries; ++i) {
                         if (p_mib->table[i].dwIndex == if_index) {
                             in_addr* p_addr = (in_addr *)&(p_mib->table[i].dwAddr);
@@ -261,10 +261,10 @@ string GetLocalIPAddress(const char* pRemoteAddr)
     }
 
     evutil_closesocket(sock);
-    
+
     return ip_addr;
 }
-    
+
 bool IsThisIP(const char* pAddress)
 {
     Address addr;
@@ -280,11 +280,11 @@ bool IsIPv6(const char* pIP)
 {
     return (GetIPType(pIP) == AF_INET6);
 }
-    
+
 int GetIPType(const char* pIP)
 {
     if (!pIP) return AF_INET; // return default
-    
+
     addrinfo hint;
     memset(&hint, 0, sizeof(addrinfo));
     hint.ai_family = PF_UNSPEC;
@@ -293,9 +293,9 @@ int GetIPType(const char* pIP)
     addrinfo* p_res = 0;
 
     int ret = getaddrinfo(pIP, 0, &hint, &p_res);
-    
+
     int type = (ret ? AF_INET : p_res->ai_family);
-    
+
     if (p_res) freeaddrinfo(p_res);
 
     return type;
@@ -307,10 +307,10 @@ uint32_t GetIPNumber(const char* pIP)
     if (addr.SetIP(pIP)) {
         return addr.IPNum().s_addr;
     }
-    
+
     return 0;
 }
-    
+
 bool IsIPv6OnlyNetwork()
 {
     bool result = false;
@@ -319,8 +319,8 @@ bool IsIPv6OnlyNetwork()
         result = (GetIPType(local_ip.c_str()) == AF_INET6);
     }
     return result;
-}    
-    
+}
+
 vector<string> GetAddrInfo(const string& rAddress)
 {
     vector<string> result;
@@ -338,12 +338,12 @@ vector<string> GetAddrInfo(const string& rAddress)
                 if (p->ai_family == AF_INET) {
                     char buf[INET_ADDRSTRLEN];
                     sockaddr_in* sin = (sockaddr_in*)p->ai_addr;
-                    if (evutil_inet_ntop(AF_INET, &sin->sin_addr, 
-                                         buf, INET_ADDRSTRLEN)) {                                         
+                    if (evutil_inet_ntop(AF_INET, &sin->sin_addr,
+                                         buf, INET_ADDRSTRLEN)) {
                         if (std::find(result.begin(), result.end(), buf)
                                 == result.end()) {
-                            MLOG("Address " << rAddress << 
-                                 " resolved to " << buf);                                 
+                            MLOG("Address " << rAddress <<
+                                 " resolved to " << buf);
                             result.push_back(buf);
                         }
                     }
@@ -364,7 +364,7 @@ vector<string> GetAddrInfo(const string& rAddress)
             case EAI_SERVICE:  p = "servname not supported for ai_socktype"; break;
             case EAI_SOCKTYPE: p = "ai_socktype not supported"; break;
             default:;
-            }            
+            }
 #ifndef WIN32
             ELOG("Domain: " << rAddress << " (Error: " << res << ") [" <<
                  gai_strerror(res) << "] " << p);
@@ -381,7 +381,7 @@ vector<string> GetAddrInfo(const string& rAddress)
                 char ip_buf[INET_ADDRSTRLEN];
                 for (DNS_RECORD* p_a = p_rec; p_a != 0; p_a = p_a->pNext) {
                     in_addr.S_un.S_addr = p_a->Data.A.IpAddress;
-                    if (evutil_inet_ntop(AF_INET, &in_addr, 
+                    if (evutil_inet_ntop(AF_INET, &in_addr,
                                          ip_buf, INET_ADDRSTRLEN)) {
                         if (std::find(result.begin(), result.end(), ip_buf)
                                 == result.end()) {
@@ -400,17 +400,17 @@ vector<string> GetAddrInfo(const string& rAddress)
             }
 #endif
         }
-        
+
         if (ai) freeaddrinfo(ai);
     }
-    
+
     return result;
 }
-    
+
 vector<string> TranslateToIPs(const string& rAddress)
 {
     vector<string> result;
-    
+
     Resolver::Ptr sp_res = Resolver::Create();
     sp_res->SetQuery(rAddress, Record::A);
     for (auto& rec : sp_res->Query()) {
@@ -421,15 +421,15 @@ vector<string> TranslateToIPs(const string& rAddress)
             }
         }
     }
-    
+
     if (result.empty()) {
         WLOG("c-ares failed - try getaddrinfo");
         result = GetAddrInfo(rAddress);
     }
-    
+
     return result;
 }
-    
+
 string TranslateToIP(const string& rAddress)
 {
     // check if this is valid IP already
@@ -437,13 +437,13 @@ string TranslateToIP(const string& rAddress)
     if (addr.SetIP(rAddress.c_str())) {
         return rAddress;
     }
-   
+
     const vector<string>& ip_addrs = TranslateToIPs(rAddress);
-    
+
     if (!ip_addrs.empty()) {
         return ip_addrs[0];
     }
-    
+
     return "";
 }
 
@@ -454,19 +454,19 @@ void QueryDnsServer(const string&     rAddress,
 {
     TransportImpl::GetInstance()->QueryDnsAsync(rAddress, type, pObserver, pArg);
 }
-    
+
 string IPv4toIPv6(const string& rIPv4)
 {
     string ipv6;
-    
+
 #ifdef __APPLE__
     addrinfo hints;
-    
+
     memset(&hints, 0, sizeof(hints));
     hints.ai_family   = PF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags    = AI_DEFAULT;
-    
+
     addrinfo* p_res = 0;
 
     int err = getaddrinfo(rIPv4.c_str(), "http", &hints, &p_res);
@@ -490,30 +490,30 @@ string IPv4toIPv6(const string& rIPv4)
     else {
         _ELOG_("failed " << gai_strerror(err));
     }
-    
+
     if (p_res) freeaddrinfo(p_res);
 #endif
-    
+
     return ipv6;
 }
-    
+
 void dns::MarkAsBadCache(const string& rAddress)
 {
     TransportImpl::GetInstance()->MarkDnsCacheBad(rAddress);
 }
-    
+
 void dns::ClearCache()
 {
     TransportImpl::GetInstance()->ClearDnsCache();
 }
-    
+
 bool ReservePort(bool bUDP, uint16_t port, const char* pIP, uint32_t holdTime, bool logError)
 {
     bool bResult = false;
-    
+
     Address addr;
     addr.SetPort(port);
-    
+
     if (pIP) {
         addr.SetIP(pIP);
     }
@@ -527,7 +527,7 @@ bool ReservePort(bool bUDP, uint16_t port, const char* pIP, uint32_t holdTime, b
     evutil_socket_t sock = socket(addr.IPType(), SOCK_DGRAM,
                                   (bUDP ? IPPROTO_UDP : IPPROTO_TCP));
     if (sock != INVALID_SOCKET) {
-        
+
         if (::bind(sock, addr.SockAddr(), addr.SockAddrLen()) == 0) {
             bResult = true;
         }
@@ -537,7 +537,7 @@ bool ReservePort(bool bUDP, uint16_t port, const char* pIP, uint32_t holdTime, b
                 DLOG("Failed to bind to \"" << pIP << ":" << port << "\"");
             }
         }
-        
+
         if (bResult && bUDP) {
             if (holdTime == 0) {
                 evutil_closesocket(sock);
@@ -553,10 +553,10 @@ bool ReservePort(bool bUDP, uint16_t port, const char* pIP, uint32_t holdTime, b
     else {
         ELOG("Failed to create socket!!");
     }
-    
+
     return bResult;
 }
-    
+
 bool IsUdpPortAvailable(uint16_t port, const char* pIP)
 {
     return ReservePort(true, port, pIP, 0, false);
@@ -571,7 +571,7 @@ bool ReserveUdpPort(uint32_t holdTimeMs, uint16_t port, const char* pIP)
 {
     return ReservePort(true, port, pIP, holdTimeMs, true);
 }
-    
+
 void ReleaseUdpPort(uint16_t port)
 {
     if (PortReserve::Ptr sp_rsv
@@ -590,14 +590,14 @@ void HashByMD5(uint8_t* pBuf, uint32_t bufLen, uint8_t* digest)
 string MD5Hex(uint8_t* digest)
 {
     char md5_str[MD5_DIGEST_LENGTH*3] = {0};
-    
+
     for(uint32_t i = 0; i < MD5_DIGEST_LENGTH; i++) {
         sprintf(md5_str+(i*2), "%02x", digest[i]);
     }
-    
+
     return md5_str;
 }
-    
+
 const char* toStr(TransportUser::Type type)
 {
     switch (type)
@@ -608,7 +608,7 @@ const char* toStr(TransportUser::Type type)
     default:                               return "INVALID";
     }
 }
-    
+
 const char* toStr(EventType type)
 {
     switch (type)
@@ -627,6 +627,7 @@ const char* toStr(ConnectionType eType)
     switch (eType)
     {
     case CT_UDP:             return "UDP";
+    case CT_BULK_UDP:        return "CT_BULK_UDP";
     case CT_TCP:             return "TCP";
     case CT_TCP_LISTENER:    return "TCP Listener";
     case CT_TLS:             return "TLS";
@@ -638,7 +639,7 @@ const char* toStr(ConnectionType eType)
     default:                 return "INVALID";
     }
 }
-    
+
 const char* toStr(RateType type)
 {
     switch (type)
@@ -650,7 +651,7 @@ const char* toStr(RateType type)
     default:             return "INVALID";
     }
 }
-    
+
 const char* toStr(Connection::PayloadType type)
 {
     switch (type)
@@ -694,14 +695,14 @@ const char* toStrDSCP(uint32_t value)
     default:  return "?";
     }
 }
-    
+
 int64_t StartTimerEx(Timer::Ptr pTimer, int32_t ms, int32_t appData,
                      const char* pFile, int line)
 {
     TimerService::Ptr& sp_ts = TransportImpl::GetInstance()->GetTimerService();
     return sp_ts->StartTimerEx(pTimer, ms, appData, pFile, line);
 }
-    
+
 int64_t StartTimerEx(Timer* pTimer, int32_t ms, int32_t appData,
                      const char* pFile, int line)
 {
@@ -721,19 +722,19 @@ void StopTimer(Timer::Ptr pTimer, int64_t handle)
     TimerService::Ptr& sp_ts = TransportImpl::GetInstance()->GetTimerService();
     return sp_ts->StopTimer(pTimer, handle);
 }
-    
+
 void StopTimer(Timer* pTimer, int64_t handle)
 {
     TimerService::Ptr& sp_ts = TransportImpl::GetInstance()->GetTimerService();
     return sp_ts->StopTimer(pTimer, handle);
 }
-    
+
 namespace dns {
-    
+
 bool Record::operator==(const Record& rRhs)
 {
     bool result = false;
-    
+
     if (domain_ == rRhs.domain_ && type_ == rRhs.type_) {
         switch (type_)
         {
@@ -773,10 +774,10 @@ bool Record::operator==(const Record& rRhs)
         default:;
         }
     }
-    
+
     return result;
 }
-    
+
 const char* toStr(Record::Type type)
 {
     switch (type)
@@ -787,7 +788,7 @@ const char* toStr(Record::Type type)
     default:            return "INVALID";
     }
 }
-    
+
 } // namespace dns
 
 DebugOut& operator<<(DebugOut& rOut, dns::Record::Ptr spRecord)
@@ -801,21 +802,23 @@ DebugOut& operator<<(DebugOut& rOut, dns::Record::Ptr spRecord)
         break;
     case dns::Record::SRV:
         if (SRV::Ptr sp = fuze_dynamic_pointer_cast<SRV>(spRecord)) {
-            rOut << "[SRV] " << sp->name_ << ":" << sp->port_ << " ttl " << sp->ttl_
-                 << " priority: " << sp->priority_ << " weight: " << sp->weight_;
+            rOut << "[SRV] " << sp->domain_ << " -> " << sp->name_ << ":"
+                 << sp->port_ << " ttl " << sp->ttl_ << " priority: "
+                 << sp->priority_ << " weight: " << sp->weight_;
         }
         break;
     case dns::Record::NAPTR:
         if (NAPTR::Ptr sp = fuze_dynamic_pointer_cast<NAPTR>(spRecord)) {
-            rOut << "[NAPTR] " << sp->replacement_ << " ttl " << sp->ttl_ << " "
-                 << sp->flag_ << " " << sp->services_ << " order: " << sp->order_
-                 << ", pref: " << sp->pref_ << " " << sp->regexp_;
+            rOut << "[NAPTR] " << sp->domain_ << " -> " << sp->replacement_
+                 << " ttl " << sp->ttl_ << " " << sp->flag_ << " " << sp->services_
+                 << " order: " << sp->order_ << ", pref: " << sp->pref_
+                 << " " << sp->regexp_;
         }
         break;
     default:;
     }
-    
+
     return rOut;
 }
-    
+
 } // namespace fuze

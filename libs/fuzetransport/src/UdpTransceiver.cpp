@@ -54,6 +54,7 @@ UdpTransceiver::UdpTransceiver(int transID)
     , connectedUdp_(false)
     , remotePort_(0)
     , bConnected_(false)
+    , qSize_(0)
     , writeAdded_(false)
     , recvBufSize_(2000)
     , recvCnt_(0)
@@ -147,6 +148,7 @@ void UdpTransceiver::Reset()
         writeAdded_      = false;
         reservedPort_    = false;
         dropCnt_         = 0;
+        qSize_           = 0;
 
         queue<Buffer::Ptr> empty;
         swap(sendQ_, empty);
@@ -164,6 +166,13 @@ ConnectionType UdpTransceiver::ConnType()
     return CT_UDP;
 }
 
+void UdpTransceiver::GetSendQInfo(size_t& rNum, uint32_t& rBufSize)
+{
+    MutexLock scoped(&qlock_);
+    rNum     = sendQ_.size();
+    rBufSize = qSize_;
+}
+    
 void UdpTransceiver::SetConnectionID(int connID)
 {
     if (connID != INVALID_ID) {
@@ -388,6 +397,7 @@ bool UdpTransceiver::Send(Buffer::Ptr spBuffer)
     }
 
     sendQ_.push(spBuffer);
+    qSize_ += spBuffer->size();
 
     // trigger write operation if not done yet for first time
     if (!pWriteEvent_) {
@@ -425,9 +435,7 @@ bool UdpTransceiver::Send(const uint8_t* buf, size_t size, const fuze::Address& 
         return false;
     }
 
-    SendPayload((char*)buf, size, rRemote);
-
-    return true;
+    return SendPayload((char*)buf, size, rRemote);
 }
 
 void UdpTransceiver::OnWriteEvent()
@@ -448,6 +456,7 @@ void UdpTransceiver::OnWriteEvent()
             else {
                 sp_buf = sendQ_.front();
                 sendQ_.pop();
+                qSize_ -= sp_buf->size();
             }
         }
 
@@ -471,11 +480,11 @@ void UdpTransceiver::OnWriteEvent()
     }
 }
 
-void UdpTransceiver::SendPayload(char* pData, long dataLen, const Address& rRemote)
+bool UdpTransceiver::SendPayload(char* pData, long dataLen, const Address& rRemote)
 {
     if (!pData || !dataLen) {
         WLOG("0 bytes was requested to send - ignored");
-        return;
+        return false;
     }
 
     if (pConn_->IsPayloadType(Connection::STUN)) {
@@ -517,6 +526,8 @@ void UdpTransceiver::SendPayload(char* pData, long dataLen, const Address& rRemo
             s_last_error = error;
         }
     }
+
+    return (sent == dataLen);
 }
 
 void UdpTransceiver::OnReadEvent()
@@ -741,5 +752,119 @@ void UdpTransceiver::OnTimeOutEvent()
 {
     pConn_->OnTransceiverTimeout();
 }
+
+#if defined(__linux__) && !defined(ANDROID)
+bool BulkUdpTransceiver::Start()
+{
+    if (!UdpTransceiver::Start()) return false;
+    int64_t expected = 0;
+    if (m_timer.compare_exchange_strong(expected, 1, std::memory_order_release, std::memory_order_relaxed))
+    {
+        m_timer.store(StartTimer(this, BULK_UDP_SEND_DATA_TIMER, BULK_UDP_SEND_DATA_CTX));
+    }
+    return true;
+}
+
+void BulkUdpTransceiver::Reset()
+{
+    UdpTransceiver::Reset();
+    m_msg1.reset();
+    m_msg2.reset();
+    m_msgPtr.store(&m_msg1);
+    stopTimer();
+}
+
+bool BulkUdpTransceiver::Send(const uint8_t* buf, size_t size, const Address& rRemote)
+{
+    MsgData* msgPtr = m_msgPtr.load(std::memory_order_relaxed);
+    const size_t msgIdx = msgPtr->m_nextMsgIdx++;
+    if (msgIdx >= UIO_MAXIOV) return Send(buf, size, rRemote);
+    bool doSend = false;
+    if (msgIdx == UIO_MAXIOV - 1 && m_msgPtr.compare_exchange_strong(msgPtr, getAltMsgData(msgPtr), std::memory_order_release, std::memory_order_relaxed))
+    {
+        doSend = true;
+    }
+    bzero(&msgPtr->m_msgData[msgIdx], sizeof(msgPtr->m_msgData[msgIdx]));
+    msgPtr->m_msgData[msgIdx].iov_base = msgPtr->m_dataHolder.getDataSlot(msgIdx);
+    Address& remoteAddress = msgPtr->m_dataHolder.getRemoteAddress(msgIdx);
+    remoteAddress = rRemote;
+    msgPtr->m_msgData[msgIdx].iov_len = std::min(MAX_PACKET_SIZE, size);
+    msgPtr->m_cumulativeMsgSize[msgIdx] = (msgIdx ? msgPtr->m_cumulativeMsgSize[msgIdx - 1] : 0) + msgPtr->m_msgData[msgIdx].iov_len;
+    memcpy(msgPtr->m_msgData[msgIdx].iov_base, buf, msgPtr->m_msgData[msgIdx].iov_len);
+    msgPtr->m_msg[msgIdx].msg_hdr.msg_iov = &msgPtr->m_msgData[msgIdx];
+    msgPtr->m_msg[msgIdx].msg_hdr.msg_iovlen = 1;
+    msgPtr->m_msg[msgIdx].msg_hdr.msg_name = (void*)remoteAddress.SockAddr();
+    msgPtr->m_msg[msgIdx].msg_hdr.msg_namelen = remoteAddress.SockAddrLen();
+    ++msgPtr->m_numMsgs;
+    if (doSend)
+    {
+        sendInternal(msgPtr);
+    }
+    return true;
+}
+
+void BulkUdpTransceiver::OnTimer(int32_t data)
+{
+    if (data == BULK_UDP_SEND_DATA_CTX)
+    {
+        int64_t lastSendTimeDiff = GetTimeMs() - m_lastSendTime.load(std::memory_order_relaxed);
+        if (lastSendTimeDiff < BULK_UDP_SEND_DATA_TIMER)
+        {
+            m_timer.store(fuze::StartTimer(this, lastSendTimeDiff, BULK_UDP_SEND_DATA_CTX));
+            return;
+        }
+        MsgData* msgPtr = m_msgPtr.load(std::memory_order_relaxed);
+        if (m_msgPtr.compare_exchange_strong(msgPtr, getAltMsgData(msgPtr), std::memory_order_release, std::memory_order_relaxed))
+        {
+            sendInternal(msgPtr);
+        }
+        m_timer.store(fuze::StartTimer(this, BULK_UDP_SEND_DATA_TIMER, BULK_UDP_SEND_DATA_CTX));
+    }
+}
+
+void BulkUdpTransceiver::sendInternal(MsgData* msgPtr)
+{
+    unsigned int numMsgs = msgPtr->m_numMsgs.load(std::memory_order_relaxed);
+    if (!numMsgs) return;
+    int numMsgsSent = sendmmsg(socket_, msgPtr->m_msg, numMsgs, MSG_DONTWAIT);
+    m_lastSendTime.store(GetTimeMs());
+    if (numMsgsSent == numMsgs)
+    {
+        if (pConn_) pConn_->OnBytesSent((uint32_t)msgPtr->m_cumulativeMsgSize[numMsgsSent - 1]);
+    }
+    else if (numMsgsSent > 0)
+    {
+        WLOG("Only sent " << msgPtr->m_cumulativeMsgSize[numMsgsSent - 1] << "/" << msgPtr->m_cumulativeMsgSize[numMsgs - 1] << "B");
+    }
+    else
+    {
+        static int s_last_error;
+        static int s_counter;
+        int error = errno;
+        if (s_last_error != error)
+        {
+            s_counter = 0;
+        }
+        if (!(s_counter++ % 10))
+        {
+            ELOG("Error: " << error << " (" <<
+                 strerror(error) << ") cnt: " <<
+                 s_counter);
+            s_last_error = error;
+        }
+    }
+    msgPtr->reset();
+}
+
+void BulkUdpTransceiver::stopTimer()
+{
+    int64_t timer = m_timer.load(std::memory_order_relaxed);
+    if (timer)
+    {
+        StopTimer(this, timer);
+        m_timer.store(0);
+    }
+}
+#endif
 
 } //namespace fuze
