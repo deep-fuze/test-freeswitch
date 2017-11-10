@@ -679,6 +679,8 @@ typedef enum {
     RTP_CUR_JB_SIZE,
     RTP_RECV_RATE,
     RTP_SEND_RATE,
+    RTP_RECV_CNT,
+    RTP_SEND_CNT,
     RTP_RECV_LEVEL,
     RTP_SEND_LEVEL,
     RTP_ACTIVE_SPEAKER,
@@ -762,6 +764,8 @@ typedef struct {
 
     uint16_t last_recv_rate;
     uint16_t last_send_rate;
+    uint16_t last_recv_cnt;
+    uint16_t last_send_cnt;
     int last_recv_level;
     int last_send_level;
     int last_active_speaker;
@@ -777,6 +781,7 @@ typedef struct {
     int last_proc_time;
 
     uint16_t recv_rate_history[RTP_STATS_RATE_HISTORY];
+    uint16_t recv_cnt_history[RTP_STATS_RATE_HISTORY];
     int recv_rate_history_idx;
     rtp_rx_congestion_state_t rx_congestion_state;
     uint16_t ignore_rate_period;

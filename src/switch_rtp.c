@@ -651,6 +651,7 @@ typedef struct switch_rtcp_app_rx_congestion {
     uint16_t lost_percent;
     uint16_t pad;
     uint16_t rx[APP_RX_NUM_STATS];
+    uint16_t rxcnt[APP_RX_NUM_STATS];
 } switch_rtcp_app_rx_congestion_t;
 
 typedef enum {
@@ -2826,6 +2827,7 @@ static int add_rx_congestion(switch_rtp_t *rtp_session, void *body, switch_rtcp_
         int idx = rtp_session->stats.recv_rate_history_idx - (i+1);
         idx = (idx < 0) ? idx + RTP_STATS_RATE_HISTORY : idx;
         rx_congestion->rx[i] = htons(rtp_session->stats.recv_rate_history[idx]);
+        rx_congestion->rxcnt[i] = htons(rtp_session->stats.recv_cnt_history[idx]);
     }
 
     /*Make sure the total length is aligned with 32-bit boundary; Pad it with NULL bytes*/
@@ -4768,6 +4770,8 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->stats.last_active_speaker = -1;
     rtp_session->stats.last_recv_rate = -1;
     rtp_session->stats.last_send_rate = -1;
+    rtp_session->stats.last_recv_cnt = -1;
+    rtp_session->stats.last_send_cnt = -1;
     rtp_session->stats.last_cumulative_lost = -1;
     rtp_session->stats.last_lost_percent = -1;
     rtp_session->stats.last_mos = -1;
@@ -4796,6 +4800,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->stats.recv_rate_history_idx = 0;
     rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
     memset(rtp_session->stats.recv_rate_history, 0, sizeof(uint16_t)*RTP_STATS_RATE_HISTORY);
+    memset(rtp_session->stats.recv_cnt_history, 0, sizeof(uint16_t)*RTP_STATS_RATE_HISTORY);
 
     for (int i = 0; i < STATS_MAX; i++) {
         memset(rtp_session->stats.str[i], 0, sizeof(rtp_session->stats.str[i]));
@@ -5074,7 +5079,8 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_activate_rtcp(switch_rtp_t *rtp_sessi
         rtp_session->flags[SWITCH_RTP_FLAG_RTCP_PASSTHRU] = 1;
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_DEBUG, "RTCP passthru enabled. Remote Port: %d\n", rtp_session->remote_rtcp_port);
     } else {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_DEBUG, "RTCP send rate is: %d and packet rate is: %d Remote Port: %d\n",                           send_rate, rtp_session->ms_per_packet, rtp_session->remote_rtcp_port);
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_DEBUG, "RTCP send rate is: %d and packet rate is: %d Remote Port: %d\n",
+                          send_rate, rtp_session->ms_per_packet, rtp_session->remote_rtcp_port);
 
         rtp_session->rtcp_interval = send_rate/(rtp_session->ms_per_packet/1000);
     }
@@ -7769,7 +7775,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtcp_zerocopy_read_frame(switch_rtp_t *rt
             frame->reports[i].jitter = ntohl(report->jitter);
             frame->reports[i].lsr = ntohl(report->lsr);
             frame->reports[i].dlsr = ntohl(report->dlsr);
-			/* convert from q14 */
+            /* convert from q14 */
             rtp_session->remote_lost = (int16_t)(((float)report->fraction)/2.56);
 
             if (rtp_session->remote_lost > 5) {
@@ -9263,6 +9269,7 @@ SWITCH_DECLARE(void) switch_rtp_reset_rtp_stats(switch_channel_t *channel)
 #define rtp_stat_add_value(rtp_session, rtpstat, type_str, value, last_value) \
     { \
         int statno = rtpstat-RTP_RECV_RATE; \
+        if (value == -1) value = 0; \
         if (value != last_value || rtp_session->stats.len[statno] == RTP_STATS_STR_SIZE) { \
             if (rtp_session->stats.len[statno] < RTP_STATS_STR_SIZE) { \
                 strncat(rtp_session->stats.eos[statno], ":", rtp_session->stats.len[statno]); \
@@ -9286,6 +9293,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
     FuzeNetEqNetworkStatistics nwstats;
     int jbuf = -1;
     uint16_t local_send = 0, local_recv = 0;
+    uint16_t local_send_cnt = 0, local_recv_cnt = 0;
     int max_proc_time = 0;
     short loss = 0;
 
@@ -9308,7 +9316,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
 
             /* ignore loss after muted periods */
             if (rtp_session->ignore_loss_after_muted <= 0) {
-			/* convert from q14 */
+            /* convert from q14 */
                 loss = (short)((float)nwstats.currentPacketLossRate/163.84);
             }
 
@@ -9413,9 +9421,11 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
     }
 
     if (rtp_session->rtp_conn) {
-        fuze_transport_get_rates(rtp_session->rtp_conn, &local_send, &local_recv);
+        fuze_transport_get_rates(rtp_session->rtp_conn, &local_send, &local_recv, &local_send_cnt, &local_recv_cnt);
         rtp_stat_add_value(rtp_session, RTP_SEND_RATE, "%d", local_send, rtp_session->stats.last_send_rate);
         rtp_stat_add_value(rtp_session, RTP_RECV_RATE, "%d", local_recv, rtp_session->stats.last_recv_rate);
+        rtp_stat_add_value(rtp_session, RTP_SEND_CNT, "%d", local_send, rtp_session->stats.last_send_cnt);
+        rtp_stat_add_value(rtp_session, RTP_RECV_CNT, "%d", local_recv, rtp_session->stats.last_recv_cnt);
 #if 0
         if (local_send == 0 || (!switch_core_session_get_cn_state(rtp_session->session) && local_recv == 0)) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "bad local send(%d) or recv(%d)\n",
@@ -9424,6 +9434,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
 #endif
 
         rtp_session->stats.recv_rate_history[rtp_session->stats.recv_rate_history_idx] = local_recv;
+        rtp_session->stats.recv_cnt_history[rtp_session->stats.recv_rate_history_idx] = local_recv_cnt;
         rtp_session->stats.recv_rate_history_idx = (rtp_session->stats.recv_rate_history_idx + 1) % RTP_STATS_RATE_HISTORY;
         if (neteq_inst && rtp_session->stats.time > RTP_STATS_RATE_HISTORY) {
             if (!switch_core_session_get_cn_state(rtp_session->session)) {

@@ -2474,7 +2474,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_write_frame_core(switch_core
             }
             /* this is the path taken by IVR frames */
             if (write_frame->flags != before_flags) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "%s (wr)flags don't match 0x%x != 0x%x\n", 
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "%s (wr)flags don't match 0x%x != 0x%x\n", 
                                   switch_channel_get_name(session->channel), before_flags, write_frame->flags);
             }
             if (!encoder_path) { status = perform_write(session, write_frame, flags, stream_id); }
@@ -2643,7 +2643,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_write_frame_core(switch_core
                 }
 
                 if (write_frame->flags != before_flags) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "%s (wr)flags don't match 0x%x != 0x%x\n", 
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "%s (wr)flags don't match 0x%x != 0x%x\n", 
                                       switch_channel_get_name(session->channel), before_flags, write_frame->flags);
                 }
                 if ((status = perform_write(session, write_frame, flags, stream_id)) != SWITCH_STATUS_SUCCESS) {

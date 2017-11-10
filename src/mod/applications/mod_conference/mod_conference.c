@@ -4320,7 +4320,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             conference_member_t *cmember = conference->last_active_talkers[i];
             if (is_muted(cmember) ||
                 (!switch_test_flag(cmember, MFLAG_TALKING) && !switch_test_flag(cmember, MFLAG_ACTIVE_TALKER))) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(cmember->session), SWITCH_LOG_INFO,
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(cmember->session), SWITCH_LOG_DEBUG,
                                   "removing active speaker (act_talkers %d -> %d)\n",
                                   prev_active_speaker_cnt+1, prev_active_speaker_cnt);
                 conference->last_active_talkers[i] = NULL;
@@ -4368,7 +4368,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                 /* if we had active speakers before then check threshold 1 */
                 if (prev_active_speaker_cnt > 0) {
                     if (imember->score_iir < SCORE_IIR_SPEAKING_MAX) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(imember->session), SWITCH_LOG_INFO, "skipping too low: prev_cnt:%d level:%d\n",
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(imember->session), SWITCH_LOG_DEBUG, "skipping too low: prev_cnt:%d level:%d\n",
                                           prev_active_speaker_cnt, imember->score_iir);
                         skip_speaker = SWITCH_TRUE;
                         break;
@@ -4376,7 +4376,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                 } else {
                     /* if we didn't have active speakers before then check threshold 2 */
                     if (imember->score_iir < SCORE_IIR_SPEAKING_MIN) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(imember->session), SWITCH_LOG_INFO, "skipping too low: level:%d\n",
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(imember->session), SWITCH_LOG_DEBUG, "skipping too low: level:%d\n",
                                           imember->score_iir);
                         skip_speaker = SWITCH_TRUE;
                         break;

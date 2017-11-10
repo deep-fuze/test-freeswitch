@@ -73,6 +73,7 @@ typedef void (*trace_cb_t)(int16_t level, const char *msg);
 typedef void (*rate_cb_t)(void*    conn,
                           uint16_t type, /* as shown above */
                           uint16_t rateKbps,
+                          uint16_t count,
                           uint16_t arrivedTime);
 void fuze_transport_register_rate_cb(rate_cb_t rate_cb);
 
@@ -135,7 +136,7 @@ extern void fuze_release_udp_port(uint16_t port);
 extern void fuze_transport_ignore_packets(void *conn, int size);
 
 /* read local rates from transport */
-extern transport_status_t fuze_transport_get_rates(void *conn, uint16_t *local_send, uint16_t *local_recv);
+extern transport_status_t fuze_transport_get_rates(void *conn, uint16_t *local_send, uint16_t *local_recv, uint16_t *local_send_cnt, uint16_t *local_recv_cnt);
 
 #ifdef __cplusplus
 } // extern "C"

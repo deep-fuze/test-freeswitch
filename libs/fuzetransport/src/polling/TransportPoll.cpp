@@ -61,6 +61,7 @@ struct connection_wrap_t
     __sockaddr_t          last_from_addr_;
 
     uint16_t rateKbps[4];
+    uint16_t count[4];
     uint16_t arrivedTime[4];
 
     size_t ignore_size;
@@ -99,12 +100,13 @@ void TransportPoll::OnRateData(void*    pContext,
                                uint16_t arrivedTime) {
     
     if (g_rate_callback) {
-        g_rate_callback(pContext, type, rateKbps, arrivedTime);
+        g_rate_callback(pContext, type, rateKbps, count, arrivedTime);
     }
     else {
         connection_wrap_t *conn_wrap = static_cast<connection_wrap_t *> (pContext);
         if (conn_wrap) {
             conn_wrap->rateKbps[type-RT_LOCAL_SEND] = rateKbps;
+            conn_wrap->count[type-RT_LOCAL_SEND] = count;
             conn_wrap->arrivedTime[type-RT_LOCAL_SEND] = arrivedTime;
         }
     }
@@ -478,7 +480,7 @@ transport_status_t fuze_transport_socket_poll(void *conn, int timeout_us)
     return (conn_wrap->evq_.WaitUntil(timeout_us) == true) ? TR_STATUS_SUCCESS : TR_STATUS_FALSE;
 }
 
-transport_status_t fuze_transport_get_rates(void *conn, uint16_t *local_send, uint16_t *local_recv)
+transport_status_t fuze_transport_get_rates(void *conn, uint16_t *local_send, uint16_t *local_recv, uint16_t *local_send_cnt, uint16_t *local_recv_cnt)
 {
     if (!conn) {
         return TR_STATUS_FALSE;
@@ -488,6 +490,8 @@ transport_status_t fuze_transport_get_rates(void *conn, uint16_t *local_send, ui
 
     *local_send = conn_wrap->rateKbps[RT_LOCAL_SEND];
     *local_recv = conn_wrap->rateKbps[RT_LOCAL_RECV];
+    *local_send_cnt = conn_wrap->count[RT_LOCAL_SEND];
+    *local_recv_cnt = conn_wrap->count[RT_LOCAL_RECV];
     
     return TR_STATUS_SUCCESS;
 }
