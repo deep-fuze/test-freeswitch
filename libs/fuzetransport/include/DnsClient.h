@@ -99,7 +99,9 @@ namespace dns {
         static void  Terminate();
         
         // set DNS lookup request (multiple queries can be set)
-        virtual void SetQuery(const string& rDomain, Record::Type type) = 0;
+        virtual void SetQuery(const string& rDomain,
+                              Record::Type  type,
+                              bool          bVoip = false) = 0;
         
         // perform DNS query
         virtual Record::List Query(int timeout = 30) = 0;
