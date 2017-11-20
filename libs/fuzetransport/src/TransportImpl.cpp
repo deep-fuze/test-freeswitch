@@ -1224,11 +1224,11 @@ void TransportImpl::SetDnsCache(Record::List& rList)
             
             if (!found) {
                 it->second.push_back(sp_rec);
-                _MLOG_(sp_rec << " - new record (size " << it->second.size() << ")");
+                _DLOG_(sp_rec << " - new record (size " << it->second.size() << ")");
             }
         }
         else {
-            _MLOG_(sp_rec << " - new record (size 1)");
+            _DLOG_(sp_rec << " - new record (size 1)");
             Record::List new_list;
             new_list.push_back(sp_rec);
             r_map[sp_rec->domain_] = new_list;
@@ -1248,7 +1248,7 @@ Record::List TransportImpl::GetDnsCache(const string& rDomain, Record::Type type
             Record::Ptr sp = *(it->second.begin());
             // check if this is expired
             if (GetTimeMs() > sp->expire_) {
-                MLOG(" [" << toStr(type) << "] " << rDomain <<  " expired");
+                DLOG(" [" << toStr(type) << "] " << rDomain <<  " expired");
                 staleCache_[type][rDomain] = it->second;
                 dnsCache_[type].erase(it);
             }

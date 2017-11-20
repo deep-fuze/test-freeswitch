@@ -68,6 +68,7 @@ public:
     virtual bool UsePortReservation();
     virtual NetworkBuffer::Ptr GetBuffer(uint32_t bufSize);
     virtual NetworkBuffer::Ptr GetBuffer(Buffer::Ptr spBuf);
+    virtual void SetWindowSize(unsigned long windowSize);
 
     // Addtional internal API
     const Address& GetLocalAddress();
@@ -174,6 +175,8 @@ private:
     bool                     bReservePort_;
     bool                     processDataSync_;
 
+    uint16_t                 failoverCnt_;   // limit failing over using same type
+    
 private:
     inline TcpTransceiver* GetTcpTransceiver()
     {

@@ -84,6 +84,7 @@ ConnectionImpl::ConnectionImpl(int connID)
     , workerId_(0)
 	, bReservePort_(false)
     , processDataSync_(false)
+    , failoverCnt_(0)
     , bufNum_(0)
 {
     SetName("");
@@ -341,12 +342,14 @@ void ConnectionImpl::Reset()
         domainRemote_.clear();
         wpObserver_.reset();
 
-        pObserver_     = 0;
-        bWYSWYG_       = false;
-        bRateReport_   = false;
-        payloadType_   = 0;
-        bRemotePerBuf_ = false;
-        bReservePort_  = false;
+        pObserver_       = 0;
+        bWYSWYG_         = false;
+        bRateReport_     = false;
+        payloadType_     = 0;
+        bRemotePerBuf_   = false;
+        bReservePort_    = false;
+        processDataSync_ = false;
+        failoverCnt_     = 0;
 
         ReplaceTransceiver(NoTransceiver::GetInstance());
     }
@@ -1086,14 +1089,6 @@ void ConnectionImpl::DeliverEventData(EventData &rEvent)
     if (diff > 5) {
         WLOG("App delayed libevent thread " << diff << " ms");
     }
-
-    // when end event is detected then reset the connection
-    if (is_end_event(rEvent.type_)) {
-        TransportImpl* p = TransportImpl::GetInstance();
-        if (p->IsAppServer() == false) {
-            p->RequestReset(Resource::CONNECTION, ID());
-        }
-    }
 }
 
 void ConnectionImpl::OnRateData(RateType type, uint16_t rate, uint16_t count, uint16_t delta)
@@ -1364,6 +1359,13 @@ bool ConnectionImpl::Failover(bool bRetrySameType)
 
     MLOG("RetrySameType: " << (bRetrySameType ? "true" : "false"));
 
+    if (bRetrySameType) {
+        if (++failoverCnt_ > 30) {
+            WLOG("Reached failover limit of 30");
+            return false;
+        }
+    }
+    
     bool bResult = false;
 
     ConnectionType     type = connType_;
@@ -1709,6 +1711,13 @@ NetworkBuffer::Ptr ConnectionImpl::GetBuffer(Buffer::Ptr spBuf)
     NetworkBuffer::Ptr sp_buf = GetBufferShell();
     sp_buf->setAsShallowCopy(spBuf);
     return sp_buf;
+}
+
+void ConnectionImpl::SetWindowSize(unsigned long windowSize)
+{
+    if (Transceiver* p = pTransceiver_.load(std::memory_order_relaxed)) {
+        p->SetWindowSize(windowSize);
+    }
 }
 
 void ConnectionImpl::AddBuffer(NetworkBuffer* pBuf)

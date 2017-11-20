@@ -151,16 +151,22 @@ bool Stat::AddBytes(uint32_t  bytes, int64_t   currTime,
                 tcp_based = true;
             }
         }
-        
+
+        size_t   q_size = 0;
+        uint32_t q_buf_size = 0;
+
         if (tcp_based) {
-            size_t   q_size = 0;
-            uint32_t q_buf_size = 0, q_retry = 0;
+            uint32_t q_retry = 0;
             pConn_->GetSendQInfo2(q_size, q_buf_size, q_retry);
-            sendQ_.SetData((uint16_t)q_size);
-            sendBuf_.SetData(q_buf_size);
             sendRetry_.SetData(q_retry);
         }
-        
+        else if (pConn_) {
+            pConn_->GetSendQInfo(q_size, q_buf_size);
+        }
+
+        sendQ_.SetData((uint16_t)q_size);
+        sendBuf_.SetData(q_buf_size);
+
         if (local_.index_ >= DISPLAY_CNT) {
             std::ostringstream log;
             log << "local seq # " << local_.seq_-local_.index_
@@ -174,10 +180,12 @@ bool Stat::AddBytes(uint32_t  bytes, int64_t   currTime,
             if (tcp_based) {
                 remote_.Display(log, log_, "Remote ");
                 arrival_.Display(log, log_, "Arrival ");
-                sendQ_.Display(log, log_, "Tx Queue #   ");
-                sendBuf_.Display(log, log_, "Tx Buf Size  ");
                 sendRetry_.Display(log, log_, "Tx Retry Cnt ");
             }
+            
+            sendQ_.Display(log, log_, "Tx Queue #   ");
+            sendBuf_.Display(log, log_, "Tx Buf Size  ");
+            
             DEBUG_OUT(LEVEL_MSG, AREA_COM, log_ << log.str());
         }
 

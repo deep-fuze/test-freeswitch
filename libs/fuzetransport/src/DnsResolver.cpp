@@ -1024,7 +1024,7 @@ void AsyncResolver::Run()
         }
         
         while (QueryData* p_query = GetQueryData()) {
-            _MLOG_("Querying [" << toStr(p_query->type_) <<
+            _DLOG_("Querying [" << toStr(p_query->type_) <<
                    "] " << p_query->domain_);
             ares_query(channel_, p_query->domain_.c_str(), 1,
                        GetDnsType(p_query->type_), OnReply, p_query);
