@@ -689,6 +689,7 @@ typedef struct conference_obj {
 
     switch_bool_t stopping;
     uint16_t stop_entry_tone_participants;
+    uint16_t mute_on_entry_participants;
 
     uint32_t participants_per_thread[N_CWC];
     uint32_t g711acnt, g711ucnt, g722cnt, opuscnt, opuslosscnt[OPUS_LOSS_CNT];
@@ -2906,10 +2907,16 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
            }
     }
 
-    
-    if (switch_test_flag(conference, CFLAG_INDICATE_MUTE))
+    if (switch_test_flag(conference, CFLAG_INDICATE_MUTE) ||
+        (conference->mute_on_entry_participants > 0 &&
+         conference->count >= conference->mute_on_entry_participants))
     {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "Conference mute all flag enabled\n");
+        if (switch_test_flag(conference, CFLAG_INDICATE_MUTE)) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "Conference mute all flag enabled\n");
+        } else {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "Conference count %d > %d auto-muting\n",
+                              conference->count, conference->stop_entry_tone_participants);
+        }
         clear_member_state_locked(member, MFLAG_CAN_SPEAK);
         clear_member_state_locked(member, MFLAG_TALKING);
         
@@ -3220,7 +3227,6 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
         }
 
         call_list = (call_list_t *) switch_channel_get_private(channel, "_conference_autocall_list_");
-
         if (call_list) {
             char saymsg[1024];
             switch_snprintf(saymsg, sizeof(saymsg), "Auto Calling %d parties", call_list->iteration);
@@ -3400,7 +3406,10 @@ static void conference_opus_loss_adjust(conference_obj_t *conference) {
 
             if (loss != prev_loss) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
-                                  "Setting loss for opus member %d to %2.2f%% (%d)\n", member->id, member->loss, member->loss_idx);
+                                  "M(%s)/I(%s):U(%s) Setting loss for opus member %d to %2.2f%% (%d)\n",
+                                  conference->meeting_id, conference->instance_id, member->mname,
+                                  member->id, member->loss, member->loss_idx);
+
                 if (switch_core_codec_ready(&member->write_codec)) {
                     switch_core_ctl(&member->write_codec, 1, &loss);
                 }
@@ -3452,7 +3461,9 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
 
             if (last) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, 
-                                  "Moving member %d from speakers to listeners\n", member->id);
+                                  "M(%s)/I(%s):U(%s) Moving member %d from speakers to listeners\n",
+                                  conference->meeting_id, conference->instance_id, member->mname,
+                                  member->id);
                 last->next = member->next;
                 member->next = conference->member_lists[eMemberListTypes_Listeners];
                 conference->member_lists[eMemberListTypes_Listeners] = member;
@@ -3463,8 +3474,10 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
                 member = last->next;
             } else {
                 conference_member_t *member_next = member->next;
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, 
-                                  "Moving member %d from speakers to listeners\n", member->id);
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                                  "M(%s)/I(%s):U(%s) Moving member %d from speakers to listeners\n",
+                                  conference->meeting_id, conference->instance_id, member->mname,
+                                  member->id);
                 member->next = conference->member_lists[eMemberListTypes_Listeners];
                 conference->member_lists[eMemberListTypes_Listeners] = member;
                 conference->member_lists[eMemberListTypes_Speakers] = member_next;
@@ -14297,6 +14310,7 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
     uint16_t history_time_period = 2000;
     uint16_t history_reset_time_period = 500;
     uint16_t stop_entry_tone_participants = 50;
+    uint16_t mute_on_entry_participants = 50;
     uint16_t max_participants_per_thread = MAX_PARTICIPANTS_PER_THREAD;
     uint16_t max_participants_per_othread = MAX_PARTICIPANTS_PER_OTHREAD;
     uint16_t min_sleep_per_thread = 5000;
@@ -14553,6 +14567,8 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
                 begin_sound = val;
             } else if (!strcasecmp(var, "stop-entry-tone-after-participants") && !zstr(val)) {
                 stop_entry_tone_participants = strtol(val, NULL, 0);
+            } else if (!strcasecmp(var, "mute-on-entry-after-participants") && !zstr(val)) {
+                mute_on_entry_participants = strtol(val, NULL, 0);
             } else if (!strcasecmp(var, "max-participants-per-thread") && !zstr(val)) {
                 max_participants_per_thread = strtol(val, NULL, 0);
             } else if (!strcasecmp(var, "max-participants-per-othread") && !zstr(val)) {
@@ -14607,6 +14623,7 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
         conference->ending_due_to_inactivity = SWITCH_FALSE;
 
         conference->stop_entry_tone_participants = stop_entry_tone_participants;
+        conference->mute_on_entry_participants = mute_on_entry_participants;
 
         conference->stopping = SWITCH_FALSE;
         
