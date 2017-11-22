@@ -4333,9 +4333,6 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             conference_member_t *cmember = conference->last_active_talkers[i];
             if (is_muted(cmember) ||
                 (!switch_test_flag(cmember, MFLAG_TALKING) && !switch_test_flag(cmember, MFLAG_ACTIVE_TALKER))) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(cmember->session), SWITCH_LOG_DEBUG,
-                                  "removing active speaker (act_talkers %d -> %d)\n",
-                                  prev_active_speaker_cnt+1, prev_active_speaker_cnt);
                 conference->last_active_talkers[i] = NULL;
                 for (int j = i+1; j < MAX_ACTIVE_TALKERS; ++j) {
                     conference->last_active_talkers[j-1] = conference->last_active_talkers[j];
