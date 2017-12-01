@@ -4184,7 +4184,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
     int count;
     int16_t max_mix;
     int prev_active_speaker_cnt;
-    intx max_runs;
+    int max_runs;
 
 #define CTR_DEBUG_STR_LEN 4096
 
@@ -7114,7 +7114,7 @@ switch_bool_t conference_thread_list_lock_low_line(int i, uint32_t tid, int line
     now = switch_time_now() - now;
 
     if (now > 1000*1000) {
-        Switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
                           "TIMELOCK: conference_thread_lock LOW T%d:%d(<-T%u:%d) took a long time to acquire lock %" PRId64 "\n",
                           i, line, prev_thread, prev_line, now/1000);
     }
