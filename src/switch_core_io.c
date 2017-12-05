@@ -542,7 +542,7 @@ read_again:
     
     if (switch_test_flag(*frame, SFF_MARKER) || (!switch_test_flag(*frame, SFF_CNG) && !switch_test_flag(*frame, SFF_RFC2833))) {
         if (session->in_cn_period) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "state changed from comfort noise to NO comfort noise\n");
+            // switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "state changed from comfort noise to NO comfort noise\n");
             session->in_cn_period = SWITCH_FALSE;
         }
     }
@@ -550,7 +550,7 @@ read_again:
     /* fuze: so we don't init the plc anymore but webrtc neteq has a built in plc so ... */
     if (switch_test_flag(*frame, SFF_CNG) && !switch_test_flag(*frame, SFF_TIMEOUT)) {
         if (!session->in_cn_period) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "state changed from NO comfort noise to comfort noise\n");
+            // switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "state changed from NO comfort noise to comfort noise\n");
             session->in_cn_period = SWITCH_TRUE;
         }
         

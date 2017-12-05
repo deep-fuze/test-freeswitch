@@ -93,6 +93,12 @@ static int EC = 0;
 /* the threshold below which you cede the floor to someone loud (see above value). */
 #define SCORE_IIR_SPEAKING_MIN 100
 
+#define SCORE_IIR_SPEAKING_MIN_WHEN_NO_ONE_SPEAKING 100
+#define SCORE_IIR_SPEAKING_MIN_WHEN_OTHERS_SPEAKING 300
+#define SCORE_IIR_SPEAKING_MIN_WHEN_NO_ONE_SPEAKING_MED 200
+#define SCORE_IIR_SPEAKING_MIN_WHEN_OTHERS_SPEAKING_MED 450
+#define SCORE_IIR_SPEAKING_MIN_WHEN_NO_ONE_SPEAKING_HIGH 300
+#define SCORE_IIR_SPEAKING_MIN_WHEN_OTHERS_SPEAKING_HIGH 600
 
 #define test_eflag(conference, flag) ((conference)->eflags & flag)
 
@@ -439,7 +445,6 @@ typedef struct {
 
     uint64_t signaled;
     uint64_t run;
-
 } conference_thread_data_t;
 
 /* Global Values */
@@ -524,7 +529,6 @@ typedef struct {
     uint32_t fuze_ticks;
     int prev_has_file_data;
     switch_bool_t active;
-
 } conference_loop_t;
 
 /* Conference Object */
@@ -699,6 +703,21 @@ typedef struct conference_obj {
 
     switch_time_t conference_loop_time;
     int conference_loop_time_cnt;
+
+    int noise_measurement_period;
+    float noise_measurement_periodf;
+
+    int noise_percentage_med;
+    int noise_percentage_high;
+
+    int min_when_no_one_speaking;
+    int min_when_others_speaking;
+    int min_when_no_one_speaking_med;
+    int min_when_others_speaking_med;
+    int min_when_no_one_speaking_high;
+    int min_when_others_speaking_high;
+
+    int noise_change_thresholds;
 } conference_obj_t;
 
 /* Relationship with another member */
@@ -721,6 +740,12 @@ typedef enum {
     ME_MUTE,
     ME_UNMUTE
 } mute_event_t;
+
+typedef enum {
+    NOISE_NONE,
+    NOISE_MEDIUM,
+    NOISE_HIGH
+} member_noise_t;
 
 /* Conference Member Object */
 struct conference_member {
@@ -862,7 +887,20 @@ struct conference_member {
     char contactive_userid[1024];
     char contactive_email[1024];
     char corp_name[1025];
+
+    float noise_probability; /* noise or echo */
+    float crossed_threshold;
+    uint64_t noise_cnt;
+
+    member_noise_t noise_state;
+
+    uint32_t min_iir_to_speak_when_others_speaking;
+    uint32_t min_iir_to_speak_when_no_one_speaking;
 };
+
+/* 8s echo mesaurement period */
+#define NOISE_MEASUREMENT_PERIOD (10 * 50)
+#define NOISE_MEASUREMENT_PERIODF ((float)NOISE_MEASUREMENT_PERIOD)
 
 typedef enum {
     CONF_API_SUB_ARGS_SPLIT,
@@ -2791,6 +2829,11 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     member->ms_cnt = 0;
     member->max_out_level = 0;
     member->max_input_level = 0;
+    member->noise_probability = 0;
+    member->crossed_threshold = 0;
+    member->noise_cnt = 0;
+    member->min_iir_to_speak_when_others_speaking = conference->min_when_others_speaking;
+    member->min_iir_to_speak_when_no_one_speaking = conference->min_when_no_one_speaking;
 
     meo_initialize(&member->meo);
     
@@ -2915,7 +2958,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "Conference mute all flag enabled\n");
         } else {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "Conference count %d > %d auto-muting\n",
-                              conference->count, conference->stop_entry_tone_participants);
+                              conference->count, conference->mute_on_entry_participants);
         }
         clear_member_state_locked(member, MFLAG_CAN_SPEAK);
         clear_member_state_locked(member, MFLAG_TALKING);
@@ -4379,17 +4422,13 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             if (!prev_speaker) {
                 /* if we had active speakers before then check threshold 1 */
                 if (prev_active_speaker_cnt > 0) {
-                    if (imember->score_iir < SCORE_IIR_SPEAKING_MAX) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(imember->session), SWITCH_LOG_DEBUG, "skipping too low: prev_cnt:%d level:%d\n",
-                                          prev_active_speaker_cnt, imember->score_iir);
+                    if (imember->score_iir < imember->min_iir_to_speak_when_others_speaking) {
                         skip_speaker = SWITCH_TRUE;
                         break;
                     }
                 } else {
                     /* if we didn't have active speakers before then check threshold 2 */
-                    if (imember->score_iir < SCORE_IIR_SPEAKING_MIN) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(imember->session), SWITCH_LOG_DEBUG, "skipping too low: level:%d\n",
-                                          imember->score_iir);
+                    if (imember->score_iir < imember->min_iir_to_speak_when_no_one_speaking) {
                         skip_speaker = SWITCH_TRUE;
                         break;
                     }
@@ -4736,6 +4775,101 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             }
         }
     } /* fuze step 6 */
+
+    /* echo probability */
+    for (int j = 0; j < MAX_ACTIVE_TALKERS; j++) {
+        int higher = 0;
+        conference_member_t *cmember = conference->last_active_talkers[j];
+        float probability;
+        if (cmember == NULL) {
+            continue;
+        }
+        for (int k = 0; k < MAX_ACTIVE_TALKERS; k++) {
+            if (j == k) {
+                continue;
+            }
+            if (conference->last_active_talkers[k] == NULL) {
+                continue;
+            }
+            if (conference->last_active_talkers[k]->score_iir > cmember->score_iir) {
+                higher += 1;
+            }
+        }
+
+        if (cmember->noise_cnt < conference->noise_measurement_period) {
+            cmember->noise_probability += (higher > 0 ? 1.0f : 0.0f);
+        } else {
+            cmember->noise_probability =
+                cmember->noise_probability*((conference->noise_measurement_periodf-1.0)/
+                                            conference->noise_measurement_periodf) +
+                (higher > 0 ? 1.0f : 0.0f);
+        }
+        cmember->noise_cnt += 1;
+
+        probability = 100*cmember->noise_probability/conference->noise_measurement_periodf;
+        if (cmember->noise_cnt == 1) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(cmember->session), SWITCH_LOG_INFO,
+                              "M(%s)/I(%s):U(%s) NOISE (LOW) probability %2.2f%% (cnt=%" PRId64 ") iir=%d\n",
+                              conference->meeting_id, conference->instance_id, cmember->mname,
+                              probability, cmember->noise_cnt, cmember->score_iir);
+        }
+
+        if (cmember->noise_cnt > 4*conference->noise_measurement_period) {
+            if (probability > conference->noise_percentage_med && cmember->noise_state == NOISE_NONE) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(cmember->session), SWITCH_LOG_INFO,
+                                  "M(%s)/I(%s):U(%s) NOISE (MEDIUM) probability %2.2f%% (cnt=%" PRId64 ") iir=%d\n",
+                                  conference->meeting_id, conference->instance_id, cmember->mname,
+                                  probability, cmember->noise_cnt, cmember->score_iir);
+                if (conference->noise_change_thresholds) {
+                    cmember->min_iir_to_speak_when_others_speaking = conference->min_when_others_speaking_med;
+                    cmember->min_iir_to_speak_when_no_one_speaking = conference->min_when_no_one_speaking_med;
+                }
+                cmember->noise_state = NOISE_MEDIUM;
+            } else if (probability > conference->noise_percentage_high && cmember->noise_state != NOISE_HIGH) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(cmember->session), SWITCH_LOG_INFO,
+                                  "M(%s)/I(%s):U(%s) NOISE (HIGH) probability %2.2f%% (cnt=%" PRId64 ") iir=%d\n",
+                                  conference->meeting_id, conference->instance_id, cmember->mname,
+                                  probability, cmember->noise_cnt, cmember->score_iir);
+                if (conference->noise_change_thresholds) {
+                    cmember->min_iir_to_speak_when_others_speaking = conference->min_when_others_speaking_high;
+                    cmember->min_iir_to_speak_when_no_one_speaking = conference->min_when_no_one_speaking_high;
+                }
+                cmember->noise_state = NOISE_HIGH;
+            }
+        }
+    }
+
+    if (prev_active_speaker_cnt > 0) {
+        for (imember = conference->member_lists[eMemberListTypes_Speakers]; imember; imember = imember->next) {
+            float probability;
+
+            if (!switch_test_flag(imember, MFLAG_HAS_AUDIO) || is_muted(imember)) {
+                continue;
+            }
+
+            probability = 100 * imember->noise_probability/conference->noise_measurement_periodf;
+            if (fabs(imember->crossed_threshold - probability) > 5) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(imember->session), SWITCH_LOG_INFO,
+                                  "M(%s)/I(%s):U(%s) noise probability %2.2f -> %2.2f%% (cnt=%" PRId64 ") iir=%d members=%d\n",
+                                  conference->meeting_id, conference->instance_id, imember->mname,
+                                  imember->crossed_threshold, probability, imember->noise_cnt, imember->score_iir,
+                                  conference->count);
+                imember->crossed_threshold = probability;
+            }
+
+            if (!switch_test_flag(imember, MFLAG_TALKING) || imember->one_of_active) {
+                continue;
+            }
+
+            if (imember->noise_cnt >= conference->noise_measurement_period) {
+                imember->noise_probability =
+                    imember->noise_probability*((conference->noise_measurement_periodf-1.0)/
+                                                conference->noise_measurement_periodf);
+            }
+            imember->noise_cnt += 1;
+        }
+
+    }
 
     delta = switch_time_now() - delta;
     if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
@@ -14314,6 +14448,19 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
     uint16_t max_participants_per_othread = MAX_PARTICIPANTS_PER_OTHREAD;
     uint16_t min_sleep_per_thread = 5000;
     char *begin_sound = NULL;
+    int noise_measurement_period = NOISE_MEASUREMENT_PERIOD;
+
+    int noise_percentage_med = 40;
+    int noise_percentage_high = 70;
+
+    int min_when_no_one_speaking = SCORE_IIR_SPEAKING_MIN_WHEN_NO_ONE_SPEAKING;
+    int min_when_others_speaking = SCORE_IIR_SPEAKING_MIN_WHEN_OTHERS_SPEAKING;
+    int min_when_no_one_speaking_med = SCORE_IIR_SPEAKING_MIN_WHEN_NO_ONE_SPEAKING_MED;
+    int min_when_others_speaking_med = SCORE_IIR_SPEAKING_MIN_WHEN_OTHERS_SPEAKING_MED;
+    int min_when_no_one_speaking_high = SCORE_IIR_SPEAKING_MIN_WHEN_NO_ONE_SPEAKING_HIGH;
+    int min_when_others_speaking_high = SCORE_IIR_SPEAKING_MIN_WHEN_OTHERS_SPEAKING_HIGH;
+
+    int noise_change_thresholds = SWITCH_FALSE;
 
     /* Validate the conference name */
     if (zstr(name)) {
@@ -14574,6 +14721,26 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
                 max_participants_per_othread = strtol(val, NULL, 0);
             } else if (strcasecmp(var, "min-sleep-per-thread") && !zstr(val)) {
                 min_sleep_per_thread = strtol(val, NULL, 0);
+            } else if (strcasecmp(var, "noise-percentage-med") && !zstr(val)) {
+                noise_percentage_med = strtol(val, NULL, 0);
+            } else if (strcasecmp(var, "noise-percentage-high") && !zstr(val)) {
+                noise_percentage_high = strtol(val, NULL, 0);
+            } else if (strcasecmp(var, "min-when-no-one-speaking") && !zstr(val)) {
+                min_when_no_one_speaking = strtol(val, NULL, 0);
+            } else if (strcasecmp(var, "min-when-others-speaking") && !zstr(val)) {
+                min_when_others_speaking = strtol(val, NULL, 0);
+            } else if (strcasecmp(var, "min-when-no-one-speaking-med") && !zstr(val)) {
+                min_when_no_one_speaking_med = strtol(val, NULL, 0);
+            } else if (strcasecmp(var, "min-when-others-speaking-med") && !zstr(val)) {
+                min_when_others_speaking_med = strtol(val, NULL, 0);
+            } else if (strcasecmp(var, "min-when-no-one-speaking-high") && !zstr(val)) {
+                min_when_no_one_speaking_high = strtol(val, NULL, 0);
+            } else if (strcasecmp(var, "min-when-others-speaking-high") && !zstr(val)) {
+                min_when_others_speaking_high = strtol(val, NULL, 0);
+            } else if (strcasecmp(var, "noise-change-thresholds") && !zstr(val)) {
+                noise_change_thresholds = switch_true(val) ? SWITCH_TRUE : SWITCH_FALSE;
+            } else if (strcasecmp(var, "noise-measurement-period") && !zstr(val)) {
+                noise_measurement_period = strtol(val, NULL, 0);
             }
         }
 
@@ -14625,7 +14792,19 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
         conference->mute_on_entry_participants = mute_on_entry_participants;
 
         conference->stopping = SWITCH_FALSE;
-        
+
+        conference->noise_percentage_med = noise_percentage_med;
+        conference->noise_percentage_high = noise_percentage_high;
+        conference->min_when_no_one_speaking = min_when_no_one_speaking;
+        conference->min_when_others_speaking = min_when_others_speaking;
+        conference->min_when_no_one_speaking_med = min_when_no_one_speaking_med;
+        conference->min_when_others_speaking_med = min_when_others_speaking_med;
+        conference->min_when_no_one_speaking_high = min_when_no_one_speaking_high;
+        conference->min_when_others_speaking_high = min_when_others_speaking_high;
+        conference->noise_change_thresholds = noise_change_thresholds;
+        conference->noise_measurement_period = noise_measurement_period;
+        conference->noise_measurement_periodf = (float)noise_measurement_period;
+
         /* initialize the conference object with settings from the specified profile */
         conference->pool = pool;
         conference->profile_name = switch_core_strdup(conference->pool, cfg.profile ? switch_xml_attr_soft(cfg.profile, "name") : "none");
