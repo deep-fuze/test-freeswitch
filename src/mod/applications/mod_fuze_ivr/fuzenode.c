@@ -395,11 +395,15 @@ void fuze_conference_number_authenticate(switch_core_session_t *session, ivrc_pr
   full_from = switch_channel_get_variable(channel, "sip_full_from");
 
   if (!caller_number || !full_from) {
+    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "!caller_number || !full_from\n");
     return;
   }
+
+#if 0
   if (!strstr(full_from, "user=phone")) {
     return;
   }
+#endif
 
   url = switch_core_session_sprintf(session, base_url, profile->corp_name, caller_number);
   bearer = switch_core_session_sprintf(session, AUTHORIZATION, auth);
