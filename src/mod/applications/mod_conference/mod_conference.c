@@ -3485,10 +3485,6 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
             continue;
         }
 
-        if (count > conference->max_members) {
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Exceeded max number of participants\n");
-        }
-        
         if (!(switch_test_flag(member, MFLAG_CAN_SPEAK) || switch_test_flag(member, MFLAG_USE_FAKE_MUTE)) ||
             switch_core_session_get_cn_state(member->session)) {
 
@@ -3545,10 +3541,6 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
             continue;
         }
 
-        if (count > conference->max_members) {
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Exceeded max number of participants\n");
-        }
-        
         if ((switch_test_flag(member, MFLAG_CAN_SPEAK) || switch_test_flag(member, MFLAG_USE_FAKE_MUTE)) &&
             !switch_core_session_get_cn_state(member->session)) {
 
