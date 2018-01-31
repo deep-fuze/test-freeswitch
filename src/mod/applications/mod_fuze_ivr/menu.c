@@ -156,8 +156,6 @@ char *ivrc_menu_get_input_set(switch_core_session_t *session, ivrc_profile_t *pr
 	if (menu->ivre_d.result == RES_TIMEOUT) {
 	    if (strlen(menu->ivre_d.dtmf_stored) >= 1) {
 	        result = switch_core_session_strdup(session, menu->ivre_d.dtmf_stored);
-		menu->ivr_maximum_attempts = --retry;
-		retry = -1;
 	    } else {
 	        ivre_playback_dtmf_buffered(session, switch_event_get_header(menu->event_phrases, "timeout"), NULL, NULL, NULL, 0);
 		loc_stored = &loc_stored_data;
@@ -166,6 +164,8 @@ char *ivrc_menu_get_input_set(switch_core_session_t *session, ivrc_profile_t *pr
 		memcpy(loc_stored, &(menu->ivre_d), sizeof(loc_stored_data));
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: ID stored: %s\n", menu->ivre_d.dtmf_stored);
 	    }
+	    menu->ivr_maximum_attempts = --retry;
+	    retry = -1;
 	} 
 	else if (menu->ivre_d.result == RES_INVALID) {
 	    ivre_playback_dtmf_buffered(session, switch_event_get_header(menu->event_phrases, "invalid"), NULL, NULL, NULL, 0);
@@ -180,7 +180,6 @@ char *ivrc_menu_get_input_set(switch_core_session_t *session, ivrc_profile_t *pr
 		result = switch_core_session_strdup(session, menu->ivre_d.dtmf_stored);
 		menu->ivr_maximum_attempts = --retry;
 		retry = -1;
-		
 	    }
 	}
 	menu_instance_free(menu);

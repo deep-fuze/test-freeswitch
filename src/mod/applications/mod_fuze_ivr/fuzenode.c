@@ -48,21 +48,21 @@ void fuze_session_bridge(switch_core_session_t *session, ivrc_profile_t *profile
                 switch_snprintf(email, MAX_EMAIL_LEN, "sip:%s@%s;id=%s;inst=%s", switch_channel_get_variable(channel, "caller_id_number"),
                                 switch_core_get_hostname(), profile->id, profile->meeting_instance_id);
 
-		if (profile->caller_contactive_found) {
-		  switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive=true", email);
-		  if (profile->caller_name) {
-		      switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive_name=%s", email, profile->caller_name);
-		  }
-		  if (profile->caller_userid) {
-		      switch_snprintf(email, MAX_EMAIL_LEN, "%s;userid=%s", email, profile->caller_userid);
-		  }
-		  if (profile->caller_email) {
-		      switch_snprintf(email, MAX_EMAIL_LEN, "%s;email=%s", email, profile->caller_email);
-		  }
-                  if (profile->corp_name) {
-		    switch_snprintf(email, MAX_EMAIL_LEN, "%s;corp=%s", email, profile->corp_name);
+                if (profile->caller_contactive_found) {
+                  switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive=true", email);
+                  if (profile->caller_name) {
+                      switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive_name=%s", email, profile->caller_name);
                   }
-		}
+                  if (profile->caller_userid) {
+                      switch_snprintf(email, MAX_EMAIL_LEN, "%s;userid=%s", email, profile->caller_userid);
+                  }
+                  if (profile->caller_email) {
+                      switch_snprintf(email, MAX_EMAIL_LEN, "%s;email=%s", email, profile->caller_email);
+                  }
+                  if (profile->corp_name) {
+                    switch_snprintf(email, MAX_EMAIL_LEN, "%s;corp=%s", email, profile->corp_name);
+                  }
+                }
                 switch_channel_set_variable(channel, "email-sdp", email);
         }
         switch_channel_set_variable_var_check(channel, "extension", extension, SWITCH_FALSE);
@@ -218,8 +218,8 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
         fuze_status_t status = FUZE_STATUS_FALSE;
         const char *pin = "";
         const char *url = NULL;
-	const char *email = NULL;
-	const char *password = NULL;
+        const char *email = NULL;
+        const char *password = NULL;
         const char *caller_number = NULL;
         const char *dialed_number = NULL;
         switch_channel_t *channel = switch_core_session_get_channel(session);
@@ -237,13 +237,13 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
         if (!url || zstr(url)) {
                 url = switch_channel_get_variable(channel, "callback_caller_url");
         }
-	email = switch_channel_get_variable(channel, "fuze_callback_caller_email");
-	password = switch_channel_get_variable(channel, "fuze_callback_caller_password");
-	if (!email || !password) {
-	  switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Fuze Conference Authenticate Fail email=%s password=%s\n",
-			    email ? email : "null", password ? password : "null");
-	  return;
-	}
+        email = switch_channel_get_variable(channel, "fuze_callback_caller_email");
+        password = switch_channel_get_variable(channel, "fuze_callback_caller_password");
+        if (!email || !password) {
+          switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Fuze Conference Authenticate Fail email=%s password=%s\n",
+                            email ? email : "null", password ? password : "null");
+          return;
+        }
         if (url && !zstr(url)) {
                 const char *body, *cmd;
 
@@ -279,97 +279,103 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
 
                 status = FUZE_STATUS_NOTFOUND;
                 while ((status  == FUZE_STATUS_NOTFOUND) && (profile->retry > 0)) { // [403|404]
-		    //------------------------------------------ IVRC
-		    profile->authenticated = SWITCH_FALSE;
-		    if (fPtr) {
-			int expected_meeting_id_len = fuze_expected_meeting_id_len();
+                    //------------------------------------------ IVRC
+                    profile->authenticated = SWITCH_FALSE;
 
-			fPtr(session, profile);
+                    if (fPtr) {
+                        int expected_meeting_id_len = fuze_expected_meeting_id_len();
 
-			pin = "";
+                        fPtr(session, profile);
 
-			if (profile->id && !zstr(profile->id)) {
+                        pin = "";
+
+                        if (profile->id && !zstr(profile->id)) {
                             int len = strlen(profile->id);
 
                             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: len=%d profile->id=%s\n", len, profile->id);
 
                             if (len > expected_meeting_id_len) {
                                 char buf[MAX_MEETING_NUMBER_LEN + 1];
-			        if (len >= (expected_meeting_id_len + 4)) {
-				    switch_snprintf(buf, 5, "%s", &profile->id[expected_meeting_id_len]);
-				    buf[4] = '\0';
-				    pin = switch_core_session_strdup(session, buf);
-				}
-				switch_snprintf(buf, expected_meeting_id_len+1, "%s", profile->id);
-				buf[expected_meeting_id_len] = '\0';
-				profile->id = switch_core_session_strdup(session, buf);
-				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: meeting#: %s pin : %s\n", profile->id, pin);
-			    }
-			}
-			else
-			    break;
-		    }
+                                if (len >= (expected_meeting_id_len + 4)) {
+                                    switch_snprintf(buf, 5, "%s", &profile->id[expected_meeting_id_len]);
+                                    buf[4] = '\0';
+                                    pin = switch_core_session_strdup(session, buf);
+                                }
+                                switch_snprintf(buf, expected_meeting_id_len+1, "%s", profile->id);
+                                buf[expected_meeting_id_len] = '\0';
+                                profile->id = switch_core_session_strdup(session, buf);
+                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: meeting#: %s pin : %s\n", profile->id, pin);
+                            }
+                        } else {
+                        }
+                    }
 
-		    body = switch_core_session_sprintf(session, BODY_JSON_FMT,
-						       email, password, profile->id, pin, caller_number, dialed_number);
-		    cmd = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUTHENTICATE_CALLER_SERVICE, CONTENT_URLENCODED, body);
-		    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: About to call authenticate_caller (cmd: %s) - dialed_number=%s callerid_number=%s\n",
-				      cmd, dialed_number, caller_number);
+                    body = switch_core_session_sprintf(session, BODY_JSON_FMT,
+                                                       email, password, profile->id, pin, caller_number, dialed_number);
+                    cmd = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUTHENTICATE_CALLER_SERVICE, CONTENT_URLENCODED, body);
+                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: About to call authenticate_caller (cmd: %s) - dialed_number=%s callerid_number=%s\n",
+                                      cmd, dialed_number, caller_number);
 
-		    status = fuze_curl_execute(session, profile, cmd);
-		    //--------------------------------------------------------------------------------------------------
-		    if (status == FUZE_STATUS_SUCCESS) { // 200 && 200 && conf_address --> bridge/transfer to conference
-		        profile->authenticated = SWITCH_TRUE;
-			break;
-		    }
-		    else if (status == FUZE_STATUS_NOTFOUND) { // 403, 404
-		       switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeCause_INVALID_PIN, SWITCH_FALSE); // json_code
-		       switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
-		       switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Invalid PIN entered meeting#: %s pin : %s\n", profile->id, pin); // %d times/num_attempts
-		       switch_ivr_phrase_macro(session, "invalid_entry@fuze_ivr",NULL,NULL,NULL);
-		       return;
-		    }
-		    else if (status == FUZE_STATUS_RESTRICTED) { // 405
-		        switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_RESTRICTED_ACCESS, SWITCH_FALSE); // json_code
-			switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: International dial-in not authorized for the meeting the user is attempting to join\n");
-			switch_ivr_phrase_macro(session, "restricted@fuze_ivr",NULL,NULL,NULL);
-			return;
-		    }
-		    else if (status == FUZE_STATUS_TIMEOUT) { // 406
-		        switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_NO_MINUTES, SWITCH_FALSE);
-			switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC:  No minutes available for the account\n");
-			switch_ivr_phrase_macro(session, "no_minutes@fuze_ivr",NULL,NULL,NULL);
-			return;
-		    }
-		    else {
-		        switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_UNKNOWN_CODE, SWITCH_FALSE); // json_code
-			switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Internal authentication failed: %d meeting#: %s pin : %s\n", status, profile->id, pin);
-			switch_ivr_phrase_macro(session, "call_cannot_be_completed@fuze_ivr",NULL,NULL,NULL);
-			return;
-		    }
+                    status = fuze_curl_execute(session, profile, cmd);
+                    //--------------------------------------------------------------------------------------------------
+                    if (status == FUZE_STATUS_SUCCESS) { // 200 && 200 && conf_address --> bridge/transfer to conference
+                        profile->authenticated = SWITCH_TRUE;
+                        break;
+                    }
+                    else if (profile->retry == 0) {
+                      switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_UNKNOWN_CODE, SWITCH_FALSE); // json_code
+                      switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
+                      switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Internal authentication failed: %d meeting#: %s pin : %s\n", status, profile->id, pin);
+                      switch_ivr_phrase_macro(session, "call_cannot_be_completed@fuze_ivr",NULL,NULL,NULL);
+                      return;
+                    }
+                    else if (status == FUZE_STATUS_NOTFOUND) { // 403, 404
+                       switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeCause_INVALID_PIN, SWITCH_FALSE); // json_code
+                       switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
+                       switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Invalid PIN entered meeting#: %s pin : %s\n", profile->id, pin); // %d times/num_attempts
+                       switch_ivr_phrase_macro(session, "invalid_entry@fuze_ivr",NULL,NULL,NULL);
+                    }
+                    else if (status == FUZE_STATUS_RESTRICTED) { // 405
+                        switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_RESTRICTED_ACCESS, SWITCH_FALSE); // json_code
+                        switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: International dial-in not authorized for the meeting the user is attempting to join\n");
+                        switch_ivr_phrase_macro(session, "restricted@fuze_ivr",NULL,NULL,NULL);
+                        return;
+                    }
+                    else if (status == FUZE_STATUS_TIMEOUT) { // 406
+                        switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_NO_MINUTES, SWITCH_FALSE);
+                        switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC:  No minutes available for the account\n");
+                        switch_ivr_phrase_macro(session, "no_minutes@fuze_ivr",NULL,NULL,NULL);
+                        return;
+                    }
+                    else {
+                        switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_UNKNOWN_CODE, SWITCH_FALSE); // json_code
+                        switch_channel_set_variable_var_check(channel, "fuze_cause", FuzeCause_AUTH_FAILED, SWITCH_FALSE);
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Internal authentication failed: %d meeting#: %s pin : %s\n", status, profile->id, pin);
+                        switch_ivr_phrase_macro(session, "call_cannot_be_completed@fuze_ivr",NULL,NULL,NULL);
+                        return;
+                    }
                 } // while ((status  == FUZE_STATUS_NOTFOUND) && (profile->retry > 0))
         } // if (url)
 
-	/* successfully authenticated ... now let's get info about the number */
-	if (profile->number_auth_is_allowed) {
-	    fuze_conference_number_authenticate(session, profile);
-	    switch_channel_set_variable_var_check(channel, "caller_name" , profile->caller_name, SWITCH_FALSE);
-	    switch_channel_set_variable_var_check(channel, "caller_email" , profile->caller_email, SWITCH_FALSE);
-	    switch_channel_set_variable_var_check(channel, "caller_corp_name" , profile->corp_name, SWITCH_FALSE);
-	    switch_channel_set_variable_var_check(channel, "caller_userid" , profile->caller_userid, SWITCH_FALSE);
-	}
-	switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_AUTH_OK, SWITCH_FALSE);
-	switch_channel_set_variable_var_check(channel, "meeting_number", profile->id, SWITCH_FALSE);
-	switch_channel_set_variable_var_check(channel, "meeting_pin", pin, SWITCH_FALSE);
-	switch_channel_set_variable_var_check(channel, "dialed_number" , dialed_number, SWITCH_FALSE);
+        /* successfully authenticated ... now let's get info about the number */
+        if (profile->number_auth_is_allowed) {
+            fuze_conference_number_authenticate(session, profile);
+            switch_channel_set_variable_var_check(channel, "caller_name" , profile->caller_name, SWITCH_FALSE);
+            switch_channel_set_variable_var_check(channel, "caller_email" , profile->caller_email, SWITCH_FALSE);
+            switch_channel_set_variable_var_check(channel, "caller_corp_name" , profile->corp_name, SWITCH_FALSE);
+            switch_channel_set_variable_var_check(channel, "caller_userid" , profile->caller_userid, SWITCH_FALSE);
+        }
+        switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_AUTH_OK, SWITCH_FALSE);
+        switch_channel_set_variable_var_check(channel, "meeting_number", profile->id, SWITCH_FALSE);
+        switch_channel_set_variable_var_check(channel, "meeting_pin", pin, SWITCH_FALSE);
+        switch_channel_set_variable_var_check(channel, "dialed_number" , dialed_number, SWITCH_FALSE);
 
-	switch_ivr_phrase_macro(session, "connected@fuze_ivr", NULL, NULL, NULL); // Why here?
-	fuze_session_bridge(session, profile);
+        switch_ivr_phrase_macro(session, "connected@fuze_ivr", NULL, NULL, NULL); // Why here?
+        fuze_session_bridge(session, profile);
 
-	return;
+        return;
 }
 
 void fuze_conference_number_authenticate(switch_core_session_t *session, ivrc_profile_t *profile)
@@ -387,7 +393,7 @@ void fuze_conference_number_authenticate(switch_core_session_t *session, ivrc_pr
 
   if (!base_url || !auth || !profile->corp_name) {
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Fuze Conference Authenticate Fail url=%s auth=%s corp_name=%s\n",
-		      base_url ? "set" : "null", auth ? "set" : "null", profile->corp_name ? profile->corp_name : "null");
+                      base_url ? "set" : "null", auth ? "set" : "null", profile->corp_name ? profile->corp_name : "null");
     return;
   }
 
@@ -428,7 +434,7 @@ void fuze_transfer(switch_core_session_t *session, ivrc_profile_t *profile)
         const char *url;
         const char *caller_number;
         const char *dialed_number;
-	const char *email, *password;
+        const char *email, *password;
 
         fuze_status_t status = FUZE_STATUS_FALSE;
 
@@ -462,13 +468,13 @@ void fuze_transfer(switch_core_session_t *session, ivrc_profile_t *profile)
                 if(zstr(meeting_pin))
                         meeting_pin = "";
 
-		email = switch_channel_get_variable(channel, "fuze_callback_caller_email");
-		password = switch_channel_get_variable(channel, "fuze_callback_caller_password");
-		if (!email || !password) {
-		  switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Fuze TRANSFER Authenticate Fail email=%s password=%s\n",
-				    email ? email : "null", password ? password : "null");
-		  return;
-		}
+                email = switch_channel_get_variable(channel, "fuze_callback_caller_email");
+                password = switch_channel_get_variable(channel, "fuze_callback_caller_password");
+                if (!email || !password) {
+                  switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Fuze TRANSFER Authenticate Fail email=%s password=%s\n",
+                                    email ? email : "null", password ? password : "null");
+                  return;
+                }
 
                 body = switch_core_session_sprintf(session, BODY_JSON_FMT, email, password, meeting_number, meeting_pin, caller_number, dialed_number);
                 cmd = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUTHENTICATE_CALLER_SERVICE, CONTENT_URLENCODED, body);
