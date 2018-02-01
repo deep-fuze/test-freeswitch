@@ -29,6 +29,7 @@ void fuze_session_bridge(switch_core_session_t *session, ivrc_profile_t *profile
         switch_channel_t *channel = switch_core_session_get_channel(session);
         const char *destination_number;
         const char *extension = profile->conf_address; // TODO: to check encoing type
+
         switch_channel_export_variable_var_check(channel, "conferense_id", profile->conference_id, SWITCH_EXPORT_VARS_VARIABLE, SWITCH_FALSE);
 
         if (!profile->meeting_instance_id || !strcasecmp(profile->meeting_instance_id,"")) {
@@ -47,7 +48,12 @@ void fuze_session_bridge(switch_core_session_t *session, ivrc_profile_t *profile
                 char email[MAX_EMAIL_LEN];
                 switch_snprintf(email, MAX_EMAIL_LEN, "sip:%s@%s;id=%s;inst=%s", switch_channel_get_variable(channel, "caller_id_number"),
                                 switch_core_get_hostname(), profile->id, profile->meeting_instance_id);
-
+                if (profile->uname) {
+                    switch_snprintf(email, MAX_EMAIL_LEN, "%s;userid=%s", email, profile->uname);
+                }
+                if (profile->moderator) {
+                    switch_snprintf(email, MAX_EMAIL_LEN, "%s;moderator=true", email, profile->uname);
+                }
                 if (profile->caller_contactive_found) {
                   switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive=true", email);
                   if (profile->caller_name) {
@@ -135,7 +141,7 @@ void fuze_conference_accept(switch_core_session_t *session, ivrc_profile_t *prof
                 return;
         }
 
-        if (!is_moderator(session)) {
+        if (!is_moderator(session) && !profile->moderator) {
                 if (is_conference_locked(session, conference_id)) {
                         return;
                 }
@@ -172,6 +178,8 @@ void fuze_conference_accept(switch_core_session_t *session, ivrc_profile_t *prof
 #define AUTHORIZATION "Authorization-Bearer %s"
 #define BODY_FMT "auth_email=%s&auth_password=%s&mobile_number=%s&dialed_number=%s&iso_code=%s"
 #define BODY_JSON_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&pin=%s&call_info={\"caller_id_number\":\"%s\",\"destination_number\":\"%s\"}"
+#define BODY2_JSON_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&username=%s&call_info={\"caller_id_number\":\"%s\",\"destination_number\":\"%s\"}"
+
 
 struct server_iso_code {
         const char *server_name;
@@ -246,6 +254,9 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
         }
         if (url && !zstr(url)) {
                 const char *body, *cmd;
+                int max_retries;
+                const char *meeting_id = NULL;
+                const char *userid = NULL;
 
                 switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_PREAUTH_CALL, SWITCH_FALSE);
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: verify_pstn_caller_url: %s%s\n", url, VERIFY_PSTN_CALLER_SERVICE);
@@ -261,6 +272,29 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
 
                 status = fuze_curl_execute(session, profile, cmd);
                 //------------------------------------------------
+
+                meeting_id = switch_channel_get_variable(channel, "sip_h_x-fuze-meetingid");
+                userid = switch_channel_get_variable(channel, "sip_h_x-fuze-userid");
+
+                if (meeting_id) {
+                  switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Found fuze meeting ID in sip message: %s\n", meeting_id);
+                  profile->conference_id = switch_core_session_sprintf(session, "%s", meeting_id);
+                }
+                
+                if (userid) {
+                  switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Found fuze uname in sip message: %s\n", userid);
+                  profile->uname = switch_core_session_sprintf(session, "%s", userid);
+                }
+
+                if (meeting_id) {
+                  body = switch_core_session_sprintf(session, BODY2_JSON_FMT,
+                                                     email, password, meeting_id, userid, caller_number, dialed_number);
+                  cmd = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUTHENTICATE_USER_SERVICE, CONTENT_URLENCODED, body);
+                  switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: About to call authenticate_user (cmd: %s) - dialed_number=%s callerid_number=%s\n",
+                                    cmd, dialed_number, caller_number);
+                  status = fuze_curl_execute(session, profile, cmd);
+                }
+
                 if (status == FUZE_STATUS_SUCCESS) { // 200 && 200 && conf_address
                         profile->authenticated = SWITCH_TRUE;
                         switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_AUTH_OK, SWITCH_FALSE);
@@ -278,9 +312,16 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: authenticate_caller_url: %s%s\n", url, AUTHENTICATE_CALLER_SERVICE);
 
                 status = FUZE_STATUS_NOTFOUND;
-                while ((status  == FUZE_STATUS_NOTFOUND) && (profile->retry > 0)) { // [403|404]
+                max_retries = profile->retry;
+
+                while ((status  == FUZE_STATUS_NOTFOUND) && (profile->retry > 0) && (max_retries > 0)) { // [403|404]
                     //------------------------------------------ IVRC
                     profile->authenticated = SWITCH_FALSE;
+
+                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: profile->retry=%d max_retries=%d\n",
+                                      profile->retry, max_retries);
+
+                    max_retries -= 1;
 
                     if (fPtr) {
                         int expected_meeting_id_len = fuze_expected_meeting_id_len();

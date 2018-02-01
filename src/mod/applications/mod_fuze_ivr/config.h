@@ -25,7 +25,9 @@ struct ivrc_profile
     const char *conference_id;
     const char *extension;
     const char *corp_name;
+    const char *uname;
     int is_retired;
+    int moderator;
 
     /* contactive */
     const char *caller_name;
