@@ -54,21 +54,22 @@ void fuze_session_bridge(switch_core_session_t *session, ivrc_profile_t *profile
                 if (profile->moderator) {
                     switch_snprintf(email, MAX_EMAIL_LEN, "%s;moderator=true", email, profile->uname);
                 }
+		if (profile->caller_name) {
+                    switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive=true", email);
+		    switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive_name=%s", email, profile->caller_name);
+		}
                 if (profile->caller_contactive_found) {
-                  switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive=true", email);
-                  if (profile->caller_name) {
-                      switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive_name=%s", email, profile->caller_name);
-                  }
-                  if (profile->caller_userid) {
-                      switch_snprintf(email, MAX_EMAIL_LEN, "%s;userid=%s", email, profile->caller_userid);
-                  }
-                  if (profile->caller_email) {
-                      switch_snprintf(email, MAX_EMAIL_LEN, "%s;email=%s", email, profile->caller_email);
-                  }
-                  if (profile->corp_name) {
-                    switch_snprintf(email, MAX_EMAIL_LEN, "%s;corp=%s", email, profile->corp_name);
-                  }
-                }
+                    switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive=true", email);
+		    if (profile->caller_userid) {
+                        switch_snprintf(email, MAX_EMAIL_LEN, "%s;userid=%s", email, profile->caller_userid);
+		    }
+		    if (profile->caller_email) {
+		        switch_snprintf(email, MAX_EMAIL_LEN, "%s;email=%s", email, profile->caller_email);
+		    }
+		}
+		if (profile->corp_name) {
+		    switch_snprintf(email, MAX_EMAIL_LEN, "%s;corp=%s", email, profile->corp_name);
+		}
                 switch_channel_set_variable(channel, "email-sdp", email);
         }
         switch_channel_set_variable_var_check(channel, "extension", extension, SWITCH_FALSE);
@@ -257,6 +258,8 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
                 int max_retries;
                 const char *meeting_id = NULL;
                 const char *userid = NULL;
+		const char *corp = NULL;
+		const char *name = NULL;
 
                 switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_PREAUTH_CALL, SWITCH_FALSE);
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: verify_pstn_caller_url: %s%s\n", url, VERIFY_PSTN_CALLER_SERVICE);
@@ -275,6 +278,8 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
 
                 meeting_id = switch_channel_get_variable(channel, "sip_h_x-fuze-meetingid");
                 userid = switch_channel_get_variable(channel, "sip_h_x-fuze-userid");
+		corp = switch_channel_get_variable(channel, "sip_h-x-fuze-customer-code");
+		name = switch_channel_get_variable(channel, "sip_h-x-fuze-user-fn");
 
                 if (meeting_id) {
                   switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Found fuze meeting ID in sip message: %s\n", meeting_id);
@@ -285,6 +290,14 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
                   switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Found fuze uname in sip message: %s\n", userid);
                   profile->uname = switch_core_session_sprintf(session, "%s", userid);
                 }
+		
+		if (corp) {
+		  profile->corp_name = switch_core_session_sprintf(session, "%s", corp);
+		}
+
+		if (name) {
+		  profile->caller_name = switch_core_session_sprintf(session, "%s", name);
+		}
 
                 if (meeting_id) {
                   body = switch_core_session_sprintf(session, BODY2_JSON_FMT,
