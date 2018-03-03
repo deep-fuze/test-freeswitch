@@ -2934,7 +2934,10 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
 
         if (rtp_session->send_rtcp & SWITCH_RTCP_NORMAL) {
             struct switch_rtcp_report *rep = NULL;
-            int recv_interval, exp_interval, cycles, exp_total, nbytes;
+#ifdef LOSS_RATIO
+			int recv_interval;
+#endif
+            int exp_interval, cycles, exp_total, nbytes;
             switch_time_t delay_since_last;
             int16_t dlsr_msw, dlsr_lsw;
             switch_rtcp_hdr_t *pHeader = &rtp_session->rtcp_send_msg.header;
@@ -2993,7 +2996,9 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
             }
             rtp_session->stats.rtcp.last_expected = rtp_session->last_seq;
 
+#ifdef LOSS_RATIO
             recv_interval = rtp_session->total_received - rtp_session->stats.rtcp.last_received;
+#endif
             rtp_session->stats.rtcp.last_received = rtp_session->total_received;
 
             if (rtp_session->seq_rollover) {
@@ -3008,9 +3013,10 @@ static int check_rtcp_and_ice(switch_rtp_t *rtp_session)
             dlsr_lsw = (delay_since_last - (dlsr_msw * 1000000ul)) / 1000; //in msec
 
             rep->sr_source.ssrc1 = htonl(rtp_session->stats.rtcp.peer_ssrc);
-            if (exp_interval > 0)
-                rep->sr_source.fraction_lost = ((exp_interval - recv_interval) << 8) / exp_interval;
-            else
+            if (exp_interval > 0) {
+				rep->sr_source.fraction_lost = (uint16_t)(((float)rtp_session->stats.last_lost_percent/100.0)*256);
+                //rep->sr_source.fraction_lost = ((exp_interval - recv_interval) << 8) / exp_interval;
+			} else
                 rep->sr_source.fraction_lost = 0;
             rep->sr_source.cumulative_lost = htonl(exp_total - rtp_session->total_received);
             rep->sr_source.hi_seq_recieved = htonl(rtp_session->last_seq + (rtp_session->seq_rollover << 16));
