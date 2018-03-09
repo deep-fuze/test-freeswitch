@@ -2764,6 +2764,19 @@ static void silence_transport_for_member(conference_member_t *member)
 
 static void conference_add_moderator(conference_obj_t *conference, conference_member_t *member)
 {
+    /* 
+     * MQT-7079
+     * If there is at least one participant in the meeting
+     * AND the conference isn't started yet
+     * AND this member is a moderator
+     * THEN let UCAPI know!
+     */
+    if (conference->count >= 1 && !switch_test_flag(conference, CFLAG_STARTED)) {
+        if (switch_test_flag(member, MFLAG_MOD) && get_moderator_count(conference) == 1) {
+            audio_bridge(member->session,  &member->auth_profile, member->conference->meeting_id, 1);
+        }
+    }
+
     if (conference->count > 1 && !switch_test_flag(conference, CFLAG_STARTED)) {
         /*
          * We play conference-starting prompt when:
@@ -2772,6 +2785,7 @@ static void conference_add_moderator(conference_obj_t *conference, conference_me
          */
         if ((conference->count > 1 && find_moderator(conference)) ||
             (switch_test_flag(member, MFLAG_MOD) && get_moderator_count(conference) == 1)) {
+
             conference_stop_file(conference, FILE_STOP_ASYNC);
             conference_stop_file(conference, FILE_STOP_ALL);
             for (int i = 0; i < eMemberListTypes_Recorders; i++) {

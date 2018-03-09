@@ -34,6 +34,7 @@ struct conf_auth_profile
 typedef struct conf_auth_profile conf_auth_profile_t;
 
 fuze_status_t authenticate(switch_core_session_t *session, conf_auth_profile_t *profile, const char *conference_id, const char *pin, switch_bool_t verify);
+fuze_status_t audio_bridge(switch_core_session_t *session, conf_auth_profile_t *profile, const char *conference_id, int is_allowed);
 
 #endif /* _UTIL_H_ */
 
