@@ -12,7 +12,7 @@
 #define CONTENT "Content-Type application/x-www-form-urlencoded"
 #define BODY_FMT "auth_email=%s&auth_password=%s&mobile_number=%s&dialed_number=%s&iso_code=%s"
 #define BODY_JSON_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&pin=%s&call_info={\"caller_id_number\":\"%s\",\"destination_number\":\"%s\"}"
-#define BRIDGE_BODY_FMT "auth_email=%s&auth_password=%s&meetingId=%s&isAllowed=%s"
+#define BRIDGE_BODY_FMT "auth_email=%s&auth_password=%s&meetingId=%s&instanceId=%s&isAllowed=%s"
 #define VERIFY_PSTN_CALLER_SERVICE "/services/audio/verify_pstn_caller"
 #define AUTHENTICATE_CALLER_SERVICE "/json/authenticate_caller"
 #define AUDIO_BRIDGE_SERVICE "/json/audioBridged"
@@ -256,7 +256,8 @@ fuze_status_t authenticate(switch_core_session_t *session, conf_auth_profile_t *
 }
 
 
-fuze_status_t audio_bridge(switch_core_session_t *session, conf_auth_profile_t *profile, const char *conference_id, int is_allowed)
+fuze_status_t audio_bridge(switch_core_session_t *session, conf_auth_profile_t *profile,
+                           const char *conference_id, const char *instance_id, int is_allowed)
 {
   fuze_status_t status = FUZE_STATUS_FALSE;
   const char *body, *cmd, *url;
@@ -272,7 +273,7 @@ fuze_status_t audio_bridge(switch_core_session_t *session, conf_auth_profile_t *
   }
 
   /* Post 1 */
-  body = switch_core_session_sprintf(session, BRIDGE_BODY_FMT, AUTH_EMAIL, AUTH_PASSWD, conference_id, is_allowed ? "true" : "false");
+  body = switch_core_session_sprintf(session, BRIDGE_BODY_FMT, AUTH_EMAIL, AUTH_PASSWD, conference_id, instance_id, is_allowed ? "true" : "false");
   cmd = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUDIO_BRIDGE_SERVICE, CONTENT, body);
   switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: About to call audio_bridge (cmd: %s)- meetingId: %s\n",
                     cmd, conference_id);

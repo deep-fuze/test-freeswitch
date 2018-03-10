@@ -2771,9 +2771,9 @@ static void conference_add_moderator(conference_obj_t *conference, conference_me
      * AND this member is a moderator
      * THEN let UCAPI know!
      */
-    if (conference->count >= 1 && !switch_test_flag(conference, CFLAG_STARTED)) {
-        if (switch_test_flag(member, MFLAG_MOD) && get_moderator_count(conference) == 1) {
-            audio_bridge(member->session,  &member->auth_profile, member->conference->meeting_id, 1);
+    if (conference->count >= 1) {
+        if (switch_test_flag(member, MFLAG_MOD) && get_moderator_count(conference) >= 1) {
+            audio_bridge(member->session,  &member->auth_profile, member->conference->meeting_id, member->conference->instance_id, 1);
         }
     }
 
@@ -3150,6 +3150,8 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             if ((pch = strstr(member->sdpname, "inst=")) != 0) {
                 if ((ech = strstr(pch, ";")) != 0) {
                     len = (ech - pch);
+                } else if ((ech = strstr(pch, "(")) != 0) {
+                    len = (ech - pch);
                 } else {
                     len = strlen(member->sdpname) - (pch-member->sdpname);
                 }
@@ -3157,6 +3159,11 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                     len = MAX_INSTANCE_ID_LEN-1;
                 }
                 strncpy(instance_id, pch+5, len-5);
+            } else {
+                const char *inst_id = switch_channel_get_variable(channel, "meeting_instance_id");
+                if (inst_id) {
+                    strcpy(instance_id, inst_id);
+                }
             }
 
             if (strstr(member->sdpname, "(chrome)") != 0) {
@@ -13590,6 +13597,7 @@ SWITCH_STANDARD_APP(conference_function)
     int mpin_matched = 0;
     uint32_t *mid;
     int wait = 0;
+    const char *inst_id;
 
     if (!switch_channel_test_app_flag_key("conf_silent", channel, CONF_SILENT_DONE) &&
         (switch_channel_test_flag(channel, CF_RECOVERED) || switch_true(switch_channel_get_variable(channel, "conference_silent_entry")))) {
@@ -13600,7 +13608,6 @@ SWITCH_STANDARD_APP(conference_function)
 
     switch_channel_set_flag(channel, CF_CONFERENCE);
     switch_channel_set_flag(channel, CF_VIDEO_PASSIVE);
-
 
     if (switch_channel_answer(channel) != SWITCH_STATUS_SUCCESS) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Channel answer failed.\n");
@@ -13887,7 +13894,7 @@ SWITCH_STANDARD_APP(conference_function)
             switch_channel_set_variable(channel, "conference_id", conference->name);
             rl++;
         }
-
+    
         /* Moderator PIN as a channel variable */
         mdpin = switch_channel_get_variable(channel, "conference_moderator_pin");
 
@@ -14048,6 +14055,21 @@ SWITCH_STANDARD_APP(conference_function)
             }
         }
 
+    }
+
+    inst_id = switch_channel_get_variable(channel, "meeting_instance_id");
+    if (inst_id && strlen(inst_id) > 0) {
+        int max_len = strlen(inst_id) > 8 ? 8 : strlen(inst_id);
+
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Found Instance Id %s\n", inst_id);
+
+        if (strlen(conference->instance_id) == 0) {
+            strncpy(conference->instance_id, inst_id, max_len);
+            switch_channel_set_variable(channel, "meeting_instance", conference->instance_id);
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Set Instance Id %s\n", inst_id);
+        }
+    } else {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "No Instance Id found\n");
     }
 
     /* Release the config registry handle */
