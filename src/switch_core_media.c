@@ -1443,12 +1443,12 @@ static void set_stats(switch_core_session_t *session, switch_media_type_t type, 
             void *neteq_inst = switch_core_get_neteq_inst(session);
             if (neteq_inst) {
                 FuzeNetEqNetworkStatistics nwstats;
-				int current_num_packets = 0, max_num_packets = 0;
+                int current_num_packets = 0, max_num_packets = 0;
 
-				WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats);
-				WebRtcNetEQ_CurrentPacketBufferStatistics(neteq_inst, &current_num_packets, &max_num_packets);
+                WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats);
+                WebRtcNetEQ_CurrentPacketBufferStatistics(neteq_inst, &current_num_packets, &max_num_packets);
 
-				/* TODO: add more stats? */
+                /* TODO: add more stats? */
 
                 //add_signed_stat(nwstats.total_lost_count, "in_skip_packet_count");
                 //add_stat(WebRtcNetEQ_MaxBufLen(neteq_inst), "jb_max_qlen");
@@ -1459,9 +1459,9 @@ static void set_stats(switch_core_session_t *session, switch_media_type_t type, 
                 //add_signed_stat(stat.total_insert_errors, "neteq_total_insert_errors");
                 //add_signed_stat(stat.total_extract_errors, "neteq_total_extract_errors");
 
-				add_stat(nwstats.currentBufferSize, "cur_jb_size");
-				add_stat(current_num_packets, "current_num_packets");
-				add_stat(max_num_packets, "max_num_packets");
+                add_stat(nwstats.currentBufferSize, "cur_jb_size");
+                add_stat(current_num_packets, "current_num_packets");
+                add_stat(max_num_packets, "max_num_packets");
 
             } else  {
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "NULL neteq_inst.\n");
@@ -1683,7 +1683,7 @@ static void set_periodic_stats(switch_core_session_t *session, switch_bool_t eve
             switch_core_media_set_rtp_event(session, RTP_EVENT_HIGH_CONSECUTIVE_PACKET_LOSS, type);
         if (switch_rtp_get_webrtc_neteq(engine->rtp_session)) {
 #if 0
-			/* TODO: add something in here? */
+            /* TODO: add something in here? */
             WebRtcNetEQ_ProcessingActivity neteq_stats;
             void *neteq_inst = switch_core_get_neteq_inst(session);
             if (neteq_inst) {
@@ -3464,6 +3464,67 @@ const char * get_fuze_app_type(switch_core_session_t *session, sdp_session_t *sd
     return NULL;
 }
 
+static void extract_browser_stuff(switch_core_session_t *session)
+{
+    const char *full_from;
+    const char *sip_user_agent;
+    bool is_chrome = false;
+    bool is_firefox = false;
+
+    sip_user_agent = switch_channel_get_variable(session->channel, "sip_user_agent");
+    if (sip_user_agent && strstr(sip_user_agent, "Chrome") != NULL) { is_chrome = true; }
+    if (sip_user_agent && strstr(sip_user_agent, "Firefox") != NULL) { is_firefox = true; }
+
+    full_from = switch_channel_get_variable(session->channel, "sip_full_from");
+    if ((is_firefox || is_chrome) && full_from) {
+        size_t len;
+        const char *ech;
+        const char *meeting_id = strstr(full_from, "id=");
+        const char *meeting_inst = strstr(full_from, "inst=");
+        if (meeting_id && !strstr(session->email, "id=")) {
+            meeting_id += 3;
+            if ((ech = strstr(meeting_id, ";")) != 0) {
+                len = (ech - meeting_id);
+                if (len > 20) {
+                    len = 20;
+                }
+                if (strlen(session->email) > 0) {
+                    strncat(session->email, ";", 1);
+                }
+                strncat(session->email, "id=", 4);
+                strncat(session->email, meeting_id, len);
+            }
+        }
+        if (meeting_inst && !strstr(session->email, "inst=")) {
+            meeting_inst += 5;
+            if ((ech = strstr(meeting_inst, ">")) != 0) {
+                len = (ech - meeting_inst);
+                if (len > 20) {
+                    len = 20;
+                }
+                if (strlen(session->email) > 0) {
+                    strncat(session->email, ";", 1);
+                }
+                strncat(session->email, "inst=", 6);
+                strncat(session->email, meeting_inst, len);
+            }
+        }
+    }
+    if (is_firefox) {
+        if (!strstr(session->email, "(mozilla)")) {
+            strncat(session->email, "(mozilla)", SWITCH_CORE_EMAIL_LEN);
+        }
+    } else if (is_chrome) {
+        if (!strstr(session->email, "(chrome)")) {
+            strncat(session->email, "(chrome)", SWITCH_CORE_EMAIL_LEN);
+        }
+    }
+
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Extract Browser Stuff: %s\n", session->email);
+
+    switch_channel_set_variable(session->channel, "email-sdp", session->email);
+}
+
 SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *session, const char *r_sdp, uint8_t *proceed, switch_sdp_type_t sdp_type)
 {
     uint8_t match = 0;
@@ -3716,12 +3777,18 @@ SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *s
                           "user info contact: %s agent:%s\n", sip_contact_user, sip_user_agent);
     }
 
+    extract_browser_stuff(session);
+
     if (sdp->sdp_origin->o_username) {
         if (is_firefox(session, sdp)) {
-            strncat(session->email, "(mozilla)", SWITCH_CORE_EMAIL_LEN);
+            if (!strstr(session->email, "(mozilla)")) {
+                strncat(session->email, "(mozilla)", SWITCH_CORE_EMAIL_LEN);
+            }
             switch_set_rtp_session_email(a_engine->rtp_session, session->email);
         } else if (is_chrome(session, sdp)) {
-            strncat(session->email, "(chrome)", SWITCH_CORE_EMAIL_LEN);
+            if (!strstr(session->email, "(chrome)")) {
+                strncat(session->email, "(chrome)", SWITCH_CORE_EMAIL_LEN);
+            }
             switch_set_rtp_session_email(a_engine->rtp_session, session->email);
         }
     }
@@ -6730,6 +6797,7 @@ SWITCH_DECLARE(void)switch_core_media_set_local_sdp(switch_core_session_t *sessi
 }
 
 
+
 //?
 #define SDPBUFLEN 65536
 SWITCH_DECLARE(void) switch_core_media_gen_local_sdp(switch_core_session_t *session, switch_sdp_type_t sdp_type, const char *ip, switch_port_t port, const char *sr, int force)
@@ -6801,6 +6869,7 @@ SWITCH_DECLARE(void) switch_core_media_gen_local_sdp(switch_core_session_t *sess
 
     /* fuze: if rfc6464 needs to get passed through it should be similar, search for other_session for pattern */
     if ((b_sdp = switch_channel_get_variable(session->channel, SWITCH_B_SDP_VARIABLE))) {
+        extract_browser_stuff(session);
         switch_core_media_set_email_and_phone(session, b_sdp);
         switch_core_media_set_session_name(session, b_sdp);
     }
@@ -7015,11 +7084,13 @@ SWITCH_DECLARE(void) switch_core_media_gen_local_sdp(switch_core_session_t *sess
 
             if ((uuid = switch_channel_get_partner_uuid(session->channel))
                 && (other_session = switch_core_session_locate(uuid))) {
+                extract_browser_stuff(other_session);
                 other_channel = switch_core_session_get_channel(other_session);
                 if (other_channel) {
                     email = switch_channel_get_variable(other_channel, "email-sdp");
                     if (email) {
                         switch_snprintf(buf + strlen(buf), SDPBUFLEN - strlen(buf), "e=%s\n", email);
+                    } else {
                     }
                 }
                 switch_core_session_rwunlock(other_session);
