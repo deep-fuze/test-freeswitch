@@ -12,10 +12,10 @@
 #define CONTENT "Content-Type application/x-www-form-urlencoded"
 #define BODY_FMT "auth_email=%s&auth_password=%s&mobile_number=%s&dialed_number=%s&iso_code=%s"
 #define BODY_JSON_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&pin=%s&call_info={\"caller_id_number\":\"%s\",\"destination_number\":\"%s\"}"
-#define BRIDGE_BODY_FMT "auth_email=%s&auth_password=%s&meetingId=%s&instanceId=%s&isAllowed=%s"
+#define BRIDGE_BODY_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&instance_id=%s&is_allowed=%s"
 #define VERIFY_PSTN_CALLER_SERVICE "/services/audio/verify_pstn_caller"
 #define AUTHENTICATE_CALLER_SERVICE "/json/authenticate_caller"
-#define AUDIO_BRIDGE_SERVICE "/json/audioBridged"
+#define AUDIO_BRIDGE_SERVICE "/json/audio_bridged"
 
 #define PREPROD_MEETING_ID_LEN 7
 #define PROD_MEETING_ID_LEN 8
