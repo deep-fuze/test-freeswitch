@@ -3738,8 +3738,8 @@ SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *s
     check_ice(smh, SWITCH_MEDIA_TYPE_AUDIO, sdp, NULL);
     check_ice(smh, SWITCH_MEDIA_TYPE_VIDEO, sdp, NULL);
 
-    session->email[0] = 0;
-    session->phone[0] = 0;
+    //session->email[0] = 0;
+    //session->phone[0] = 0;
 
     /* set session name */
     if (is_fuze_app(session, sdp)) {
@@ -3807,8 +3807,16 @@ SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *s
         }
     }
 
-    switch_channel_set_variable(session->channel, "email-sdp", session->email);
-    switch_channel_set_variable(session->channel, "phone-sdp", session->phone);
+    if (!switch_channel_get_variable(session->channel, "email-sdp")) {
+        switch_channel_set_variable(session->channel, "email-sdp", session->email);
+    } else {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session),
+                          SWITCH_LOG_INFO, "Keeping original email: %s\n",
+                          switch_channel_get_variable(session->channel, "email-sdp"));
+    }
+    if (!switch_channel_get_variable(session->channel, "phone-sdp")) {
+        switch_channel_set_variable(session->channel, "phone-sdp", session->phone);
+    }
 
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session),
                       SWITCH_LOG_INFO, "set email to:%s phone %s\n",
@@ -7089,6 +7097,7 @@ SWITCH_DECLARE(void) switch_core_media_gen_local_sdp(switch_core_session_t *sess
                 if (other_channel) {
                     email = switch_channel_get_variable(other_channel, "email-sdp");
                     if (email) {
+                        switch_channel_set_variable(session->channel, "email-sdp", email);
                         switch_snprintf(buf + strlen(buf), SDPBUFLEN - strlen(buf), "e=%s\n", email);
                     } else {
                     }
@@ -9146,6 +9155,10 @@ SWITCH_DECLARE(void) switch_core_media_set_email_and_phone(switch_core_session_t
     sdp_session_t *sdp;
     switch_media_handle_t *smh;
     switch_rtp_engine_t *a_engine = NULL;
+    const char *email;
+    switch_core_session_t *other_session;
+    switch_channel_t *other_channel;
+    const char *uuid;
 
     switch_assert(session);
 
@@ -9155,13 +9168,38 @@ SWITCH_DECLARE(void) switch_core_media_set_email_and_phone(switch_core_session_t
 
     a_engine = &smh->engines[SWITCH_MEDIA_TYPE_AUDIO];
 
+    session->email[0] = 0;
+    session->phone[0] = 0;
+
+    email = switch_channel_get_variable(session->channel, "email-sdp");
+    if (email) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session),
+                          SWITCH_LOG_INFO, "Current EMAIL from channel: %s\n",
+                          email);
+        strcpy(session->email, email);
+        switch_channel_set_variable(session->channel, "email-sdp", session->email);
+    }
+
+    if (!email && (uuid = switch_channel_get_partner_uuid(session->channel))
+        && (other_session = switch_core_session_locate(uuid))) {
+        other_channel = switch_core_session_get_channel(other_session);
+        if (other_channel) {
+            email = switch_channel_get_variable(other_channel, "email-sdp");
+            if (email) {
+                strcpy(session->email, email);
+                switch_channel_set_variable(session->channel, "email-sdp", email);
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session),
+                                  SWITCH_LOG_INFO, "Current EMAIL from channel: %s\n",
+                                  email);
+            }
+        }
+        switch_core_session_rwunlock(other_session);
+    }
+
     if ((parser = sdp_parse(NULL, r_sdp, (int) strlen(r_sdp), 0))) {
 
         if ((sdp = sdp_session(parser))) {
             sdp_list_t *l;
-
-            session->email[0] = 0;
-            session->phone[0] = 0;
 
             /* set email */
             for (l = sdp->sdp_emails; l; l = l->l_next) {

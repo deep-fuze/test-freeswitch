@@ -29,6 +29,7 @@ void fuze_session_bridge(switch_core_session_t *session, ivrc_profile_t *profile
         switch_channel_t *channel = switch_core_session_get_channel(session);
         const char *destination_number;
         const char *extension = profile->conf_address; // TODO: to check encoing type
+        char email[MAX_EMAIL_LEN];
 
         switch_channel_export_variable_var_check(channel, "conferense_id", profile->conference_id, SWITCH_EXPORT_VARS_VARIABLE, SWITCH_FALSE);
 
@@ -43,40 +44,45 @@ void fuze_session_bridge(switch_core_session_t *session, ivrc_profile_t *profile
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,"IVRC: destination number is retired\n");
                 switch_ivr_phrase_macro(session, "retired@fuze_ivr", NULL, NULL, NULL);
         }
-
-        if (profile->id && profile->meeting_instance_id && switch_channel_get_variable(channel, "caller_id_number")) {
-                char email[MAX_EMAIL_LEN];
-                switch_snprintf(email, MAX_EMAIL_LEN, "sip:%s@%s;id=%s;inst=%s", switch_channel_get_variable(channel, "caller_id_number"),
-                                switch_core_get_hostname(), profile->id, profile->meeting_instance_id);
-		if (profile->caller_name) {
-                    switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive=true", email);
-		    switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive_name=%s", email, profile->caller_name);
-		}
-                if (profile->uname) {
-                    switch_snprintf(email, MAX_EMAIL_LEN, "%s;userid=%s", email, profile->uname);
-                }
-                if (profile->moderator) {
-                    switch_snprintf(email, MAX_EMAIL_LEN, "%s;moderator=true", email, profile->uname);
-                }
-                if (profile->caller_contactive_found) {
-                    switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive=true", email);
-		    if (profile->caller_userid) {
-                        switch_snprintf(email, MAX_EMAIL_LEN, "%s;userid=%s", email, profile->caller_userid);
-		    }
-		    if (profile->caller_email) {
-		        switch_snprintf(email, MAX_EMAIL_LEN, "%s;email=%s", email, profile->caller_email);
-		    }
-		}
-		if (profile->corp_name) {
-		    switch_snprintf(email, MAX_EMAIL_LEN, "%s;corp=%s", email, profile->corp_name);
-		}
-                switch_channel_set_variable(channel, "email-sdp", email);
+        if (switch_channel_get_variable(channel, "caller_id_number")) {
+          switch_snprintf(email, MAX_EMAIL_LEN, "sip:%s@%s;", switch_channel_get_variable(channel, "caller_id_number"),
+                          switch_core_get_hostname());
         }
+        if (profile->id) {
+          switch_snprintf(email, MAX_EMAIL_LEN, "%sid=%s;", email, profile->id);
+        }
+        if (profile->meeting_instance_id) {
+          switch_snprintf(email, MAX_EMAIL_LEN, "%sinst=%s", email, profile->meeting_instance_id);
+        }
+        if (profile->caller_name) {
+          switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive=true", email);
+          switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive_name=%s", email, profile->caller_name);
+        }
+        if (profile->uname) {
+          switch_snprintf(email, MAX_EMAIL_LEN, "%s;userid=%s", email, profile->uname);
+        }
+        if (profile->moderator) {
+          switch_snprintf(email, MAX_EMAIL_LEN, "%s;moderator=true", email, profile->uname);
+        }
+        if (profile->caller_contactive_found) {
+          switch_snprintf(email, MAX_EMAIL_LEN, "%s;contactive=true", email);
+          if (profile->caller_userid) {
+            switch_snprintf(email, MAX_EMAIL_LEN, "%s;userid=%s", email, profile->caller_userid);
+          }
+          if (profile->caller_email) {
+            switch_snprintf(email, MAX_EMAIL_LEN, "%s;email=%s", email, profile->caller_email);
+          }
+        }
+        if (profile->corp_name) {
+          switch_snprintf(email, MAX_EMAIL_LEN, "%s;corp=%s", email, profile->corp_name);
+        }
+        switch_channel_set_variable(channel, "email-sdp", email);
+
         switch_channel_set_variable_var_check(channel, "extension", extension, SWITCH_FALSE);
         destination_number = switch_channel_get_variable(channel, "destination_number");
         switch_channel_set_variable_var_check(channel, "dn", destination_number, SWITCH_FALSE);
         switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeCause_CONFERENCE_BRIDGED, SWITCH_FALSE);
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: Bridge to conference (dn=%s; extension=%s)\n", destination_number, extension);
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: Bridge to conference (dn=%s; extension=%s email=%s)\n", destination_number, extension, email);
         switch_ivr_session_transfer(session, destination_number, "XML", "fuze_conference");
         return;
 }
