@@ -11794,7 +11794,7 @@ static switch_status_t conf_api_sub_enter_sound(conference_obj_t *conference, sw
     if ( !strcasecmp(argv[2], "on") ) {
         set_conference_state_locked(conference, CFLAG_ENTER_SOUND);
         stream->write_function(stream, "OK %s enter sounds on (%s)\n", argv[0], conference->enter_sound);
-        conference_play_to_moderator(conference, conference->chimes_on_sound, CONF_DEFAULT_LEADIN);
+        // conference_play_to_moderator(conference, conference->chimes_on_sound, CONF_DEFAULT_LEADIN);
         if (test_eflag(conference, EFLAG_LOCK) && switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, CONF_EVENT_MAINT) == SWITCH_STATUS_SUCCESS) {
             conference_add_event_data(conference, event);
             switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Action", "enter-sounds-on");
@@ -11803,7 +11803,7 @@ static switch_status_t conf_api_sub_enter_sound(conference_obj_t *conference, sw
     } else if ( !strcasecmp(argv[2], "off") || !strcasecmp(argv[2], "none") ) {
         clear_conference_state_locked(conference, CFLAG_ENTER_SOUND);
         stream->write_function(stream, "OK %s enter sounds off (%s)\n", argv[0], conference->enter_sound);
-        conference_play_to_moderator(conference, conference->chimes_off_sound, CONF_DEFAULT_LEADIN);
+        // conference_play_to_moderator(conference, conference->chimes_off_sound, CONF_DEFAULT_LEADIN);
         if (test_eflag(conference, EFLAG_LOCK) && switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, CONF_EVENT_MAINT) == SWITCH_STATUS_SUCCESS) {
             conference_add_event_data(conference, event);
             switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Action", "enter-sounds-off");
