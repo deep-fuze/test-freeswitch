@@ -11,7 +11,7 @@
 #define AUTH_PASSWD "2ymkRlqIoDkuYhAOEXqfjTZoSktLXqCM"
 #define CONTENT "Content-Type application/x-www-form-urlencoded"
 #define BODY_FMT "auth_email=%s&auth_password=%s&mobile_number=%s&dialed_number=%s&iso_code=%s"
-#define BODY_JSON_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&pin=%s&call_info={\"caller_id_number\":\"%s\",\"destination_number\":\"%s\"}"
+#define BODY_JSON_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&instance_id=%s&pin=%s&call_info={\"caller_id_number\":\"%s\",\"destination_number\":\"%s\"}"
 #define BRIDGE_BODY_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&instance_id=%s&is_allowed=%s"
 #define VERIFY_PSTN_CALLER_SERVICE "/services/audio/verify_pstn_caller"
 #define AUTHENTICATE_CALLER_SERVICE "/json/authenticate_caller"
@@ -214,7 +214,8 @@ fuze_status_t fuze_curl_execute(switch_core_session_t *session, conf_auth_profil
     return status;
 }
 
-fuze_status_t authenticate(switch_core_session_t *session, conf_auth_profile_t *profile, const char *conference_id, const char *pin, switch_bool_t verify) 
+fuze_status_t authenticate(switch_core_session_t *session, conf_auth_profile_t *profile, const char *conference_id,
+                           const char *instance_id, const char *pin, switch_bool_t verify) 
 {
     fuze_status_t status = FUZE_STATUS_FALSE;
     const char *caller_number;
@@ -244,7 +245,7 @@ fuze_status_t authenticate(switch_core_session_t *session, conf_auth_profile_t *
     }
 
     /* Post 2 */
-    body = switch_core_session_sprintf(session, BODY_JSON_FMT, AUTH_EMAIL, AUTH_PASSWD, conference_id, pin, caller_number, dialed_number);
+    body = switch_core_session_sprintf(session, BODY_JSON_FMT, AUTH_EMAIL, AUTH_PASSWD, conference_id, instance_id, pin, caller_number, dialed_number);
     cmd = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUTHENTICATE_CALLER_SERVICE, CONTENT, body);
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: About to call authenticate_caller (cmd: %s) - dialed_number=%s callerid_number=%s\n",
                       cmd, dialed_number, caller_number);

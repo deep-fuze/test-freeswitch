@@ -7501,7 +7501,9 @@ static void start_conference_loops(conference_member_t *member)
                           member->conference->meeting_id, member->mname, member->id);
         if (member->authenticate != 0) {
             /* set pin */
-            if (authenticate(member->session, &member->auth_profile, member->conference->meeting_id, member->pin, SWITCH_FALSE) == FUZE_STATUS_SUCCESS) {
+            if (authenticate(member->session, &member->auth_profile, member->conference->meeting_id, 
+							 member->conference->instance_id,
+							 member->pin, SWITCH_FALSE) == FUZE_STATUS_SUCCESS) {
                 switch_event_t *event;
                 switch_set_flag(member, MFLAG_MOD);
                 if (member->conference->ack_sound) {
