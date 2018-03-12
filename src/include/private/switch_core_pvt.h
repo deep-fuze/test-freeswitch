@@ -103,8 +103,8 @@ typedef enum {
         SSF_MEDIA_BUG_TAP_ONLY = (1 << 10)
 } switch_session_flag_t;
 
-#define SWITCH_CORE_EMAIL_LEN 200
-#define SWITCH_CORE_PHONE_LEN 100
+#define SWITCH_CORE_EMAIL_LEN 2048
+#define SWITCH_CORE_PHONE_LEN 2048
 
 struct switch_core_session {
         switch_memory_pool_t *pool;
