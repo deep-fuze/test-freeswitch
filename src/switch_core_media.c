@@ -9176,7 +9176,7 @@ SWITCH_DECLARE(void) switch_core_media_set_email_and_phone(switch_core_session_t
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session),
                           SWITCH_LOG_INFO, "Current EMAIL from channel: %s\n",
                           email);
-        strcpy(session->email, email);
+        strncpy(session->email, email, SWITCH_CORE_EMAIL_LEN);
         switch_channel_set_variable(session->channel, "email-sdp", session->email);
     }
 
@@ -9186,7 +9186,7 @@ SWITCH_DECLARE(void) switch_core_media_set_email_and_phone(switch_core_session_t
         if (other_channel) {
             email = switch_channel_get_variable(other_channel, "email-sdp");
             if (email) {
-                strcpy(session->email, email);
+                strncpy(session->email, email, SWITCH_CORE_EMAIL_LEN);
                 switch_channel_set_variable(session->channel, "email-sdp", email);
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session),
                                   SWITCH_LOG_INFO, "Current EMAIL from channel: %s\n",
