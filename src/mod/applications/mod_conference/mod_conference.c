@@ -822,6 +822,7 @@ struct conference_member {
     char pin[FUZE_PIN_LEN_FIELD];
     switch_time_t last_pin_time;
     int authenticate;
+    int audio_bridge;
 
     const char *sdpname;
     char mname[MAX_MEMBERNAME_LEN];
@@ -2764,12 +2765,12 @@ static void silence_transport_for_member(conference_member_t *member)
 
 static void conference_audio_bridge(conference_obj_t *conference, conference_member_t *member)
 {
-	/*
-	 * MQT-7079
-	 * If there is at least one participant in the meeting
-	 * AND the conference isn't started yet
-	 * AND this member is a moderator
-	 * THEN let UCAPI know!
+    /*
+     * MQT-7079
+     * If there is at least one participant in the meeting
+     * AND the conference isn't started yet
+     * AND this member is a moderator
+     * THEN let UCAPI know!
      */
     if (conference->count >= 1) {
         if (switch_test_flag(member, MFLAG_MOD) && get_moderator_count(conference) >= 1) {
@@ -2861,6 +2862,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     member->pin[0] = 0;
     member->last_pin_time = switch_time_now();
     member->authenticate = 0;
+    member->audio_bridge = 0;
     if (!switch_test_flag(member,MFLAG_NOCHANNEL)){
         int loss = 1;
         /* Does any of this need to change for OPUS? */
@@ -3023,8 +3025,8 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
     conference_cdr_add(member);
 
     if (!switch_test_flag(member, MFLAG_NOCHANNEL)) {
-		const char *inst_id;
-		char instance_id[MAX_INSTANCE_ID_LEN];
+        const char *inst_id;
+        char instance_id[MAX_INSTANCE_ID_LEN];
 
         if (switch_test_flag(member, MFLAG_GHOST)) {
             conference->count_ghosts++;
@@ -3085,11 +3087,11 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
         memset(member->corp_name, 0, 1024);
 
 
-		memset(instance_id, 0, MAX_INSTANCE_ID_LEN);
-		inst_id = switch_channel_get_variable(channel, "meeting_instance_id");
-		if (inst_id) {
-			strcpy(instance_id, inst_id);
-		}
+        memset(instance_id, 0, MAX_INSTANCE_ID_LEN);
+        inst_id = switch_channel_get_variable(channel, "meeting_instance_id");
+        if (inst_id) {
+            strcpy(instance_id, inst_id);
+        }
 
         if (member->sdpname) {
             char meeting_id[MAX_MEETING_ID_LEN];
@@ -3158,7 +3160,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                     strncpy(meeting_id, pch+3, len-3);
                 }
             }
-			
+            
             if (!strlen(instance_id) && (pch = strstr(member->sdpname, "inst=")) != 0) {
                 if ((ech = strstr(pch, ";")) != 0) {
                     len = (ech - pch);
@@ -7499,8 +7501,11 @@ static void start_conference_loops(conference_member_t *member)
                           member->mname, member->id, idx, member->meo.cwc->num_conf_frames);
     }
 
-	conference_audio_bridge(member->conference, member);
-
+    if (member->conference->count >= 1) {
+        if (switch_test_flag(member, MFLAG_MOD) && get_moderator_count(member->conference) >= 1) {
+            member->audio_bridge = 1;
+        }
+    }
     while (1) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "start_conference_loops cond_wait mid:%s/%d\n",
                           member->mname, member->id);
@@ -7508,18 +7513,22 @@ static void start_conference_loops(conference_member_t *member)
         switch_thread_cond_wait(ols.cond, ols.cond_mutex);
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "and we're back from the wait conf:%s mid:%s/%d\n",
                           member->conference->meeting_id, member->mname, member->id);
+        if (member->audio_bridge != 0) {
+            conference_audio_bridge(member->conference, member);
+            member->audio_bridge = 0;
+        }
         if (member->authenticate != 0) {
             /* set pin */
             if (authenticate(member->session, &member->auth_profile, member->conference->meeting_id, 
-							 member->conference->instance_id,
-							 member->pin, SWITCH_FALSE) == FUZE_STATUS_SUCCESS) {
+                             member->conference->instance_id,
+                             member->pin, SWITCH_FALSE) == FUZE_STATUS_SUCCESS) {
                 switch_event_t *event;
                 switch_set_flag(member, MFLAG_MOD);
                 if (member->conference->ack_sound) {
                     conference_member_play_file(member, member->conference->ack_sound, CONF_DEFAULT_LEADIN, 1);
                 }
                 conference_add_moderator(member->conference, member);
-				conference_audio_bridge(member->conference, member);
+                conference_audio_bridge(member->conference, member);
                 if (!switch_channel_test_app_flag_key("conf_silent", ols.channel, CONF_SILENT_REQ) &&
                     switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, CONF_EVENT_MAINT) == SWITCH_STATUS_SUCCESS) {
                     conference_add_event_member_data(member, event);
@@ -8223,6 +8232,11 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             if (ols->member->authenticate == 1) {
                 switch_mutex_lock(ols->cond_mutex);
                 ols->member->authenticate = 2;
+                switch_mutex_unlock(ols->cond_mutex);
+                switch_thread_cond_signal(ols->cond);
+            } else if (ols->member->audio_bridge == 1) {
+                switch_mutex_lock(ols->cond_mutex);
+                ols->member->audio_bridge = 2;
                 switch_mutex_unlock(ols->cond_mutex);
                 switch_thread_cond_signal(ols->cond);
             }
