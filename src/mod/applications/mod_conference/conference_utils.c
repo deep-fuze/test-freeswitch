@@ -220,7 +220,7 @@ fuze_status_t authenticate(switch_core_session_t *session, conf_auth_profile_t *
     fuze_status_t status = FUZE_STATUS_FALSE;
     const char *caller_number;
     const char *dialed_number;
-    const char *body, *cmd, *url;
+    const char *body, *cmd, *url, *body2, *cmd2;
 
     switch_channel_t *channel = switch_core_session_get_channel(session);
 
@@ -239,16 +239,20 @@ fuze_status_t authenticate(switch_core_session_t *session, conf_auth_profile_t *
     if (verify) {
         body = switch_core_session_sprintf(session, BODY_FMT, AUTH_EMAIL, AUTH_PASSWD, caller_number, dialed_number, get_country_iso_code());
         cmd = switch_core_session_sprintf(session, "%s%s json %s post %s", url, VERIFY_PSTN_CALLER_SERVICE, CONTENT, body);
+        body2 = switch_core_session_sprintf(session, BODY_FMT, AUTH_EMAIL, "xxxxx", caller_number, dialed_number, get_country_iso_code());
+        cmd2 = switch_core_session_sprintf(session, "%s%s json %s post %s", url, VERIFY_PSTN_CALLER_SERVICE, CONTENT, body2);
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: About to call verify_pstn_caller (cmd: %s)- dialed_number=%s callerid_number=%s\n",
-                          cmd, dialed_number, caller_number);
+                          cmd2, dialed_number, caller_number);
         status = fuze_curl_execute(session, profile, cmd);
     }
 
     /* Post 2 */
     body = switch_core_session_sprintf(session, BODY_JSON_FMT, AUTH_EMAIL, AUTH_PASSWD, conference_id, instance_id, pin, caller_number, dialed_number);
     cmd = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUTHENTICATE_CALLER_SERVICE, CONTENT, body);
+    body2 = switch_core_session_sprintf(session, BODY_JSON_FMT, AUTH_EMAIL, "xxxxx", conference_id, instance_id, pin, caller_number, dialed_number);
+    cmd2 = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUTHENTICATE_CALLER_SERVICE, CONTENT, body2);
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: About to call authenticate_caller (cmd: %s) - dialed_number=%s callerid_number=%s\n",
-                      cmd, dialed_number, caller_number);
+                      cmd2, dialed_number, caller_number);
 
     status = fuze_curl_execute(session, profile, cmd);
 
@@ -261,7 +265,7 @@ fuze_status_t audio_bridge(switch_core_session_t *session, conf_auth_profile_t *
                            const char *conference_id, const char *instance_id, int is_allowed)
 {
   fuze_status_t status = FUZE_STATUS_FALSE;
-  const char *body, *cmd, *url;
+  const char *body, *cmd, *url, *body2, *cmd2;
 
   switch_channel_t *channel = switch_core_session_get_channel(session);
 
@@ -276,8 +280,10 @@ fuze_status_t audio_bridge(switch_core_session_t *session, conf_auth_profile_t *
   /* Post 1 */
   body = switch_core_session_sprintf(session, BRIDGE_BODY_FMT, AUTH_EMAIL, AUTH_PASSWD, conference_id, instance_id, is_allowed ? "true" : "false");
   cmd = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUDIO_BRIDGE_SERVICE, CONTENT, body);
+  body2 = switch_core_session_sprintf(session, BRIDGE_BODY_FMT, AUTH_EMAIL, "xxxxx", conference_id, instance_id, is_allowed ? "true" : "false");
+  cmd2 = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUDIO_BRIDGE_SERVICE, CONTENT, body2);
   switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: About to call audio_bridge (cmd: %s)- meetingId: %s\n",
-                    cmd, conference_id);
+                    cmd2, conference_id);
   status = fuze_curl_execute(session, profile, cmd);
 
   return status;
