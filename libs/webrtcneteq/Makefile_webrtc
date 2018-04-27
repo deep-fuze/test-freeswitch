@@ -7,27 +7,19 @@ WEBRTC=libwebrtccore.a
 WEBRTC_DIR=$(switch_srcdir)/libs/webrtcneteq
 WEBRTC_BUILDDIR=$(switch_builddir)/libs/webrtcneteq/src
 
-WEBRTC_OBJ_DIR=$(WEBRTC_DIR)/libwebrtc/out/webrtc/src/out/Release/obj/webrtc
+WEBRTC_OBJ_DIR=$(WEBRTC_DIR)/meetings-third-party/src/cmake/build/webrtc/src/out/Linux/obj/webrtc
 
-$(WEBRTC_DIR)/libwebrtc:
-	git clone https://github.com/lsurazski/libwebrtc.git
+$(WEBRTC_DIR)/meetings-third-party:
+	git clone https://github.com/fuze/meetings-third-party
 
-$(WEBRTC_DIR)/libwebrtc/out:
-	cd libwebrtc && mkdir out
-
-.step1: $(WEBRTC_DIR)/libwebrtc $(WEBRTC_DIR)/libwebrtc/out
-	cd libwebrtc/out && cmake -DGN_EXTRA_ARGS="cflags=-fPIC" ..
+.step1: $(WEBRTC_DIR)/meetings-third-party
+	cd meetings-third-party/src/cmake && ./build_Linux_WebRTC_freeswitch.sh
 	touch .step1
 
-.step2: .step1
-	cd libwebrtc/out && make
-	touch .step2
-
-#	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/../third_party/libsrtp/libsrtp/srtp.o
-
-.installed_webrtc: .step2
+.installed_webrtc: .step1
 	mv $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation.o $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation_2.o
 	find $(WEBRTC_OBJ_DIR)/modules/audio_coding -name "*.o"	| xargs ar cru libwebrtccore.a
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/modules/audio_coding/isac_c/fft.o
 	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/*.o
 	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/base/rtc_base_approved/checks.o
 	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/webrtc_common/common_types.o

@@ -11,7 +11,6 @@
 #include "include/webrtc/modules/audio_coding/neteq/neteq_decoder_enum.h"
 #include "include/webrtc/api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "include/webrtc/modules/audio_coding/neteq/neteq_decoder_enum.h"
-#include "webrtc/src/webrtc/modules/audio_processing/low_cut_filter.h"
 
 #define CONVERT_STATUS(ret) ((ret) == 0 ? WebRtcNetEQ_SUCCESS : \
                                 ((ret == -2) ? WebRtcNetEQ_NOT_STARTED : WebRtcNetEQ_ERROR))
