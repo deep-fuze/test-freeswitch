@@ -7,7 +7,7 @@ WEBRTC=libwebrtccore.a
 WEBRTC_DIR=$(switch_srcdir)/libs/webrtcneteq
 WEBRTC_BUILDDIR=$(switch_builddir)/libs/webrtcneteq/src
 
-WEBRTC_OBJ_DIR=$(WEBRTC_DIR)/meetings-third-party/src/cmake/build/webrtc/src/out/Linux/obj/webrtc
+WEBRTC_OBJ_DIR=$(WEBRTC_DIR)/meetings-third-party/src/cmake/build/webrtc/src/out/Linux/obj
 
 $(WEBRTC_DIR)/meetings-third-party:
 	git clone https://github.com/fuze/meetings-third-party
@@ -36,7 +36,8 @@ cross_correlation.o:
 	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/modules/audio_coding/builtin_audio_decoder_factory_internal/builtin_audio_decoder_factory_internal.o
 	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/api/audio_codecs/builtin_audio_decoder_factory/builtin_audio_decoder_factory.o
 	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/api/audio_codecs/audio_codecs_api/*
-	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/rtc_base/rtc_base_approved/*.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/rtc_base/rtc_base_approved_generic/*.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/rtc_base/rtc_base_generic/*.o
 	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/modules/audio_coding/neteq/*.o
 	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/system_wrappers/metrics_default/metrics_default.o
 	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation_2.o

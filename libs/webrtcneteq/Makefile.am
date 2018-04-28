@@ -4,7 +4,7 @@ AUTOMAKE_OPTIONS = gnu subdir-objects
 PREFIX=$(prefix)
 NAME = webrtcneteq
 
-WEBRTC_INC_DIR=./meetings-third-party/src/cmake/SDK/webrtc
+WEBRTC_INC_DIR=./meetings-third-party/src/cmake/build/webrtc/src
 WEBRTC_LIB_DIR = .
 WEBRTC_LIBS = $(WEBRTC_LIB_DIR)/libwebrtccore.a
 
