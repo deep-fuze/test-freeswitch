@@ -8,7 +8,8 @@ WEBRTC_INC_DIR=./meetings-third-party/src/cmake/SDK/webrtc
 WEBRTC_LIB_DIR = .
 WEBRTC_LIBS = $(WEBRTC_LIB_DIR)/libwebrtccore.a
 
-AM_CFLAGS    = -std=c++0x $(new_AM_CFLAGS) -I./src -I../spandsp/src -I../opus-1.2.1/include -I$(WEBRTC_INC_DIR) -I$(WEBRTC_INC_DIR)/include
+# -std=c++11 or -std=gnu++11
+AM_CFLAGS    =  -std=c++0x $(new_AM_CFLAGS) -I./src -I../spandsp/src -I../opus-1.2.1/include -I$(WEBRTC_INC_DIR) -I$(WEBRTC_INC_DIR)/include
 AM_CPPFLAGS  = $(AM_CFLAGS)
 AM_LDFLAGS   = $(new_AM_LDFLAGS) -L. -L$(WEBRTC_LIB_DIR)
 

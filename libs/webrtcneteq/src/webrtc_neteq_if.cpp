@@ -210,8 +210,8 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Insert(void *inst, int8_t *payload, uint32_t pa
   }
 
   if (ret != 0) {
-    int errorCode = neteq->LastError();
-    app_log_cb(3, "WebRtcNetEQ_Insert Error bad insert code: %d ret:%d\n", errorCode, ret);
+    //int errorCode = neteq->LastError();
+    app_log_cb(3, "WebRtcNetEQ_Insert Error bad insert code: ret:%d\n", ret);
   }
 #ifdef DEBUG
   else {
