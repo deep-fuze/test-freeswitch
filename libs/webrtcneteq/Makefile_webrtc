@@ -16,10 +16,20 @@ $(WEBRTC_DIR)/meetings-third-party:
 	cd meetings-third-party/src/cmake && ./build_Linux_WebRTC_freeswitch.sh
 	touch .step1
 
+cross_correlation.o:
+	cp $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation_2.o $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation.o
+
 .installed_webrtc: .step1
 	mv $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation.o $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation_2.o
 	find $(WEBRTC_OBJ_DIR)/modules/audio_coding -name "*.o"	| xargs ar cru libwebrtccore.a
-	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/modules/audio_coding/isac_c/fft.o
+	cp $(WEBRTC_OBJ_DIR)/api/audio_codecs/g722/audio_decoder_g722/audio_decoder_g722.o $(WEBRTC_OBJ_DIR)/api/audio_codecs/g722/audio_decoder_g722_2.o
+	cp $(WEBRTC_OBJ_DIR)/api/audio_codecs/ilbc/audio_decoder_ilbc/audio_decoder_ilbc.o $(WEBRTC_OBJ_DIR)/api/audio_codecs/ilbc/audio_decoder_ilbc_2.o
+	cp $(WEBRTC_OBJ_DIR)/api/audio_codecs/opus/audio_decoder_opus/audio_decoder_opus.o $(WEBRTC_OBJ_DIR)/api/audio_codecs/opus/audio_decoder_opus_2.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/api/audio_codecs/g722/audio_decoder_g722_2.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/api/audio_codecs/ilbc/audio_decoder_ilbc_2.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/api/audio_codecs/opus/audio_decoder_opus_2.o
+	cp $(WEBRTC_OBJ_DIR)/modules/audio_coding/isac_c/fft.o $(WEBRTC_OBJ_DIR)/modules/audio_coding/isac_c/fft_2.o
+	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/modules/audio_coding/isac_c/fft_2.o
 	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/*.o
 	find $(WEBRTC_OBJ_DIR) -name "checks.o" | xargs ar cru libwebrtccore.a
 	ar cru libwebrtccore.a $(WEBRTC_OBJ_DIR)/webrtc_common/common_types.o
