@@ -3,11 +3,21 @@ switch_srcdir := $(CURDIR)/../..
 switch_builddir := $(CURDIR)/../..
 GETLIB=cd $(switch_srcdir)/libs && $(SHELL) $(switch_builddir)/build/getlib.sh.in
 
+WEBRTC_VERSION=18.05.02598
+WEBRTC_FILE=webrtc.linux.$(WEBRTC_VERSION).tar.gz
+WEBRTC_DOWNLOAD=http://sjoprodstore05.fuzemeeting.com/builds/builds/BuildLinuxWebRTCFreeswitch/$(WEBRTC_VERSION)/$(WEBRTC_FILE)
+
 WEBRTC=libwebrtccore.a
 WEBRTC_DIR=$(switch_srcdir)/libs/webrtcneteq
 WEBRTC_BUILDDIR=$(switch_builddir)/libs/webrtcneteq/src
 
 WEBRTC_OBJ_DIR=$(WEBRTC_DIR)/meetings-third-party/src/cmake/build/webrtc/src/out/Linux/obj
+
+.download_webrtc:
+	wget $(WEBRTC_DOWNLOAD)
+	tar -xvf $(WEBRTC_FILE)
+	cp SDK/webrtc/lib_64/libwebrtccore.a ./libwebrtccore.a
+	touch .download_webrtc
 
 $(WEBRTC_DIR)/meetings-third-party:
 	git clone https://github.com/fuze/meetings-third-party
@@ -16,14 +26,9 @@ $(WEBRTC_DIR)/meetings-third-party:
 	cd meetings-third-party/src/cmake && git pull && ./build_Linux_WebRTC_freeswitch.sh
 	touch .step1
 
-cross_correlation.o:
-	cp $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation_2.o $(WEBRTC_OBJ_DIR)/common_audio/common_audio_c/cross_correlation.o
-
 .step1r: $(WEBRTC_DIR)/meetings-third-party
 	 cd meetings-third-party/src/cmake && ./rebuild_Linux_WebRTC_freeswitch.sh
 	 touch .step1r
-
-# builtin_audio_decoder_factory_internal.o
 
 .installed_webrtc: .step1
 	-rm libwebrtccore.a
@@ -59,10 +64,4 @@ cross_correlation.o:
 	ranlib libwebrtccore.a
 	touch .installed_webrtc
 
-all: .installed_webrtc
-
-# ./meetings-third-party/src/cmake/build/webrtc/src/modules/audio_coding/neteq/cross_correlation.cc
-# ./meetings-third-party/src/cmake/build/webrtc/src/common_audio/signal_processing/cross_correlation.c
-# ./meetings-third-party/src/cmake/build/webrtc/src/out/Linux/obj/modules/audio_coding/neteq/cross_correlation.o
-# ./meetings-third-party/src/cmake/build/webrtc/src/out/Linux/obj/common_audio/common_audio_c/cross_correlation.o
-
+all: .download_webrtc
