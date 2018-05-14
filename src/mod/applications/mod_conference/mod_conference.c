@@ -2339,6 +2339,7 @@ static switch_status_t conference_add_event_member_data(conference_member_t *mem
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Member-Ghost", "%s", switch_test_flag(member, MFLAG_GHOST) ? "true" : "false");
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Energy-Level", "%d", member->energy_level);
     switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Current-Energy", "%d", member->score);
+    switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Member-Name", "%s", member->mname);
     if (strlen(member->contactive_name) > 0) {
         switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Contactive-Name", "%s", member->contactive_name);
     }

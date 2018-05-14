@@ -247,6 +247,7 @@ fuze_status_t fuze_contactive_execute(switch_core_session_t *session, ivrc_profi
 
                 if (origins && origins->type == cJSON_Array) {
                     int osize = cJSON_GetArraySize(origins);
+                    switch_bool_t foundUserId = SWITCH_FALSE;
                     for (int j = 0; j < osize; j++) {
                         cJSON *oitem = cJSON_GetArrayItem(origins, j);
                         if (oitem && oitem->type == cJSON_Object) {
@@ -269,6 +270,7 @@ fuze_status_t fuze_contactive_execute(switch_core_session_t *session, ivrc_profi
                                 if (uid) {
                                     profile->caller_userid = fuze_session_encode(session, switch_core_session_strdup(session, uid+1));
                                     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "userid %s\n", profile->caller_userid);
+                                    foundUserId = SWITCH_TRUE;
                                 }
                             }
 
@@ -294,6 +296,14 @@ fuze_status_t fuze_contactive_execute(switch_core_session_t *session, ivrc_profi
                               }
                             }
                         }
+                    }
+                    if (foundUserId == SWITCH_FALSE) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Didn't find a username for number ... forget everything that contactive told us!\n");
+                        profile->caller_contactive_found = 0;
+                        profile->caller_email = NULL;
+                        profile->caller_userid = NULL;
+                        profile->caller_name = NULL;
+                        status = FUZE_STATUS_GENERR;
                     }
                 }
             }
