@@ -301,7 +301,8 @@ static void event_handler(switch_event_t *event)
             //      } else if (event->subclass_name && strstr(event->subclass_name, "conference") != NULL) {
             //send = 1;
         } else if ((l->event_list[event->event_id])) {
-            if (event->event_id != SWITCH_EVENT_CUSTOM || !event->subclass_name || (switch_core_hash_find(l->event_hash, event->subclass_name))) {
+            if (event->event_id != SWITCH_EVENT_CUSTOM || !event->subclass_name || 
+                (l->event_hash && (switch_core_hash_find(l->event_hash, event->subclass_name)))) {
                 send = 1;
             }
         }

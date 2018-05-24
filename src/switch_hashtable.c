@@ -40,13 +40,13 @@
   http://planetmath.org/encyclopedia/GoodHashTablePrimes.html
 */
 static const unsigned int primes[] = {
-	53, 97, 193, 389,
-	769, 1543, 3079, 6151,
-	12289, 24593, 49157, 98317,
-	196613, 393241, 786433, 1572869,
-	3145739, 6291469, 12582917, 25165843,
-	50331653, 100663319, 201326611, 402653189,
-	805306457, 1610612741
+    53, 97, 193, 389,
+    769, 1543, 3079, 6151,
+    12289, 24593, 49157, 98317,
+    196613, 393241, 786433, 1572869,
+    3145739, 6291469, 12582917, 25165843,
+    50331653, 100663319, 201326611, 402653189,
+    805306457, 1610612741
 };
 const unsigned int prime_table_length = sizeof(primes)/sizeof(primes[0]);
 const float max_load_factor = 0.65f;
@@ -54,8 +54,8 @@ const float max_load_factor = 0.65f;
 /*****************************************************************************/
 SWITCH_DECLARE(switch_status_t)
 switch_create_hashtable(switch_hashtable_t **hp, unsigned int minsize,
-						unsigned int (*hashf) (void*),
-						int (*eqf) (void*,void*))
+                        unsigned int (*hashf) (void*),
+                        int (*eqf) (void*,void*))
 {
     switch_hashtable_t *h;
     unsigned int pindex, size = primes[0];
@@ -65,9 +65,9 @@ switch_create_hashtable(switch_hashtable_t **hp, unsigned int minsize,
     /* Enforce size as prime */
     for (pindex=0; pindex < prime_table_length; pindex++) {
         if (primes[pindex] > minsize) { 
-			size = primes[pindex]; 
-			break; 
-		}
+            size = primes[pindex]; 
+            break; 
+        }
     }
     h = (switch_hashtable_t *) malloc(sizeof(switch_hashtable_t));
 
@@ -85,8 +85,8 @@ switch_create_hashtable(switch_hashtable_t **hp, unsigned int minsize,
     h->eqfn         = eqf;
     h->loadlimit    = (unsigned int) ceil(size * max_load_factor);
 
-	*hp = h;
-	return SWITCH_STATUS_SUCCESS;
+    *hp = h;
+    return SWITCH_STATUS_SUCCESS;
 }
 
 /*****************************************************************************/
@@ -104,43 +104,43 @@ hashtable_expand(switch_hashtable_t *h)
 
     newtable = (struct entry **)malloc(sizeof(struct entry*) * newsize);
     if (NULL != newtable)
-		{
-			memset(newtable, 0, newsize * sizeof(struct entry *));
-			/* This algorithm is not 'stable'. ie. it reverses the list
-			 * when it transfers entries between the tables */
-			for (i = 0; i < h->tablelength; i++) {
-				while (NULL != (e = h->table[i])) {
-					h->table[i] = e->next;
-					index = indexFor(newsize,e->h);
-					e->next = newtable[index];
-					newtable[index] = e;
-				}
-			}
-			switch_safe_free(h->table);
-			h->table = newtable;
-		}
+        {
+            memset(newtable, 0, newsize * sizeof(struct entry *));
+            /* This algorithm is not 'stable'. ie. it reverses the list
+             * when it transfers entries between the tables */
+            for (i = 0; i < h->tablelength; i++) {
+                while (NULL != (e = h->table[i])) {
+                    h->table[i] = e->next;
+                    index = indexFor(newsize,e->h);
+                    e->next = newtable[index];
+                    newtable[index] = e;
+                }
+            }
+            switch_safe_free(h->table);
+            h->table = newtable;
+        }
     /* Plan B: realloc instead */
     else 
-		{
-			newtable = (struct entry **)
-				realloc(h->table, newsize * sizeof(struct entry *));
-			if (NULL == newtable) { (h->primeindex)--; return 0; }
-			h->table = newtable;
-			memset(newtable[h->tablelength], 0, newsize - h->tablelength);
-			for (i = 0; i < h->tablelength; i++) {
-				for (pE = &(newtable[i]), e = *pE; e != NULL; e = *pE) {
-					index = indexFor(newsize,e->h);
+        {
+            newtable = (struct entry **)
+                realloc(h->table, newsize * sizeof(struct entry *));
+            if (NULL == newtable) { (h->primeindex)--; return 0; }
+            h->table = newtable;
+            memset(newtable[h->tablelength], 0, newsize - h->tablelength);
+            for (i = 0; i < h->tablelength; i++) {
+                for (pE = &(newtable[i]), e = *pE; e != NULL; e = *pE) {
+                    index = indexFor(newsize,e->h);
 
-					if (index == i) {
-						pE = &(e->next);
-					} else {
-						*pE = e->next;
-						e->next = newtable[index];
-						newtable[index] = e;
-					}
-				}
-			}
-		}
+                    if (index == i) {
+                        pE = &(e->next);
+                    } else {
+                        *pE = e->next;
+                        e->next = newtable[index];
+                        newtable[index] = e;
+                    }
+                }
+            }
+        }
     h->tablelength = newsize;
     h->loadlimit   = (unsigned int) ceil(newsize * max_load_factor);
     return -1;
@@ -165,27 +165,27 @@ static void * _switch_hashtable_remove(switch_hashtable_t *h, void *k, unsigned 
     pE = &(h->table[index]);
     e = *pE;
     while (NULL != e) {
-		/* Check hash value to short circuit heavier comparison */
-		if ((hashvalue == e->h) && (h->eqfn(k, e->k))) {
-			*pE = e->next;
-			h->entrycount--;
-			v = e->v;
-			if (e->flags & HASHTABLE_FLAG_FREE_KEY) {
-				freekey(e->k);
-			}
-			if (e->flags & HASHTABLE_FLAG_FREE_VALUE) {
-				switch_safe_free(e->v); 
-				v = NULL;
-			} else if (e->destructor) {
-				e->destructor(e->v);
-				v = e->v = NULL;
-			}
-			switch_safe_free(e);
-			return v;
-		}
-		pE = &(e->next);
-		e = e->next;
-	}
+        /* Check hash value to short circuit heavier comparison */
+        if ((hashvalue == e->h) && (h->eqfn(k, e->k))) {
+            *pE = e->next;
+            h->entrycount--;
+            v = e->v;
+            if (e->flags & HASHTABLE_FLAG_FREE_KEY) {
+                freekey(e->k);
+            }
+            if (e->flags & HASHTABLE_FLAG_FREE_VALUE) {
+                switch_safe_free(e->v); 
+                v = NULL;
+            } else if (e->destructor) {
+                e->destructor(e->v);
+                v = e->v = NULL;
+            }
+            switch_safe_free(e);
+            return v;
+        }
+        pE = &(e->next);
+        e = e->next;
+    }
     return NULL;
 }
 
@@ -194,29 +194,29 @@ SWITCH_DECLARE(int)
 switch_hashtable_insert_destructor(switch_hashtable_t *h, void *k, void *v, hashtable_flag_t flags, hashtable_destructor_t destructor)
 {
     struct entry *e;
-	unsigned int hashvalue = hash(h, k);
+    unsigned int hashvalue = hash(h, k);
     unsigned index = indexFor(h->tablelength, hashvalue);
 
-	if (flags & HASHTABLE_DUP_CHECK) {
-		_switch_hashtable_remove(h, k, hashvalue, index);
-	}
+    if (flags & HASHTABLE_DUP_CHECK) {
+        _switch_hashtable_remove(h, k, hashvalue, index);
+    }
 
     if (++(h->entrycount) > h->loadlimit)
-		{
-			/* Ignore the return value. If expand fails, we should
-			 * still try cramming just this value into the existing table
-			 * -- we may not have memory for a larger table, but one more
-			 * element may be ok. Next time we insert, we'll try expanding again.*/
-			hashtable_expand(h);
-			index = indexFor(h->tablelength, hashvalue);
-		}
+        {
+            /* Ignore the return value. If expand fails, we should
+             * still try cramming just this value into the existing table
+             * -- we may not have memory for a larger table, but one more
+             * element may be ok. Next time we insert, we'll try expanding again.*/
+            hashtable_expand(h);
+            index = indexFor(h->tablelength, hashvalue);
+        }
     e = (struct entry *)malloc(sizeof(struct entry));
     if (NULL == e) { --(h->entrycount); return 0; } /*oom*/
     e->h = hashvalue;
     e->k = k;
     e->v = v;
-	e->flags = flags;
-	e->destructor = destructor;
+    e->flags = flags;
+    e->destructor = destructor;
     e->next = h->table[index];
     h->table[index] = e;
     return -1;
@@ -228,14 +228,17 @@ switch_hashtable_search(switch_hashtable_t *h, void *k)
 {
     struct entry *e;
     unsigned int hashvalue, index;
+    if (h == NULL || k == NULL) {
+        return NULL;
+    }
     hashvalue = hash(h,k);
     index = indexFor(h->tablelength,hashvalue);
     e = h->table[index];
     while (NULL != e) {
-		/* Check hash value to short circuit heavier comparison */
-		if ((hashvalue == e->h) && (h->eqfn(k, e->k))) return e->v;
-		e = e->next;
-	}
+        /* Check hash value to short circuit heavier comparison */
+        if ((hashvalue == e->h) && (h->eqfn(k, e->k))) return e->v;
+        e = e->next;
+    }
     return NULL;
 }
 
@@ -243,8 +246,8 @@ switch_hashtable_search(switch_hashtable_t *h, void *k)
 SWITCH_DECLARE(void *) /* returns value associated with key */
 switch_hashtable_remove(switch_hashtable_t *h, void *k)
 {
-	unsigned int hashvalue = hash(h,k);
-	return _switch_hashtable_remove(h, k, hashvalue, indexFor(h->tablelength,hashvalue));
+    unsigned int hashvalue = hash(h,k);
+    return _switch_hashtable_remove(h, k, hashvalue, indexFor(h->tablelength,hashvalue));
 }
 
 /*****************************************************************************/
@@ -256,107 +259,107 @@ switch_hashtable_destroy(switch_hashtable_t **h)
     struct entry *e, *f;
     struct entry **table = (*h)->table;
 
-	for (i = 0; i < (*h)->tablelength; i++) {
-		e = table[i];
-		while (NULL != e) {
-			f = e; e = e->next; 
+    for (i = 0; i < (*h)->tablelength; i++) {
+        e = table[i];
+        while (NULL != e) {
+            f = e; e = e->next; 
 
-			if (f->flags & HASHTABLE_FLAG_FREE_KEY) {
-				freekey(f->k); 
-			}
-			
-			if (f->flags & HASHTABLE_FLAG_FREE_VALUE) {
-				switch_safe_free(f->v); 
-			} else if (f->destructor) {
-				f->destructor(f->v);
-				f->v = NULL;
-			}
-			switch_safe_free(f); 
-		}
-	}
+            if (f->flags & HASHTABLE_FLAG_FREE_KEY) {
+                freekey(f->k); 
+            }
+            
+            if (f->flags & HASHTABLE_FLAG_FREE_VALUE) {
+                switch_safe_free(f->v); 
+            } else if (f->destructor) {
+                f->destructor(f->v);
+                f->v = NULL;
+            }
+            switch_safe_free(f); 
+        }
+    }
     
     switch_safe_free((*h)->table);
-	free(*h);
-	*h = NULL;
+    free(*h);
+    *h = NULL;
 }
 
 SWITCH_DECLARE(switch_hashtable_iterator_t *) switch_hashtable_next(switch_hashtable_iterator_t **iP)
 {
 
-	switch_hashtable_iterator_t *i = *iP;
-	
-	if (i->e) {
-		if ((i->e = i->e->next) != 0) { 
-			return i;
-		} else {
-			i->pos++;
-		}
-	}
+    switch_hashtable_iterator_t *i = *iP;
+    
+    if (i->e) {
+        if ((i->e = i->e->next) != 0) { 
+            return i;
+        } else {
+            i->pos++;
+        }
+    }
 
-	while(i->pos < i->h->tablelength && !i->h->table[i->pos]) {
-		i->pos++;
-	}
-	
-	if (i->pos >= i->h->tablelength) {
-		goto end;
-	}
-	
-	if ((i->e = i->h->table[i->pos]) != 0) { 
-		return i;
-	}
+    while(i->pos < i->h->tablelength && !i->h->table[i->pos]) {
+        i->pos++;
+    }
+    
+    if (i->pos >= i->h->tablelength) {
+        goto end;
+    }
+    
+    if ((i->e = i->h->table[i->pos]) != 0) { 
+        return i;
+    }
 
  end:
 
-	free(i);
-	*iP = NULL;
+    free(i);
+    *iP = NULL;
 
-	return NULL;
+    return NULL;
 }
 
 SWITCH_DECLARE(switch_hashtable_iterator_t *) switch_hashtable_first_iter(switch_hashtable_t *h, switch_hashtable_iterator_t *it)
 {
-	switch_hashtable_iterator_t *iterator;
+    switch_hashtable_iterator_t *iterator;
 
-	if (it) {
-		iterator = it;
-	} else {
-		switch_zmalloc(iterator, sizeof(*iterator));
-	}
+    if (it) {
+        iterator = it;
+    } else {
+        switch_zmalloc(iterator, sizeof(*iterator));
+    }
 
-	switch_assert(iterator);
+    switch_assert(iterator);
 
-	iterator->pos = 0;
-	iterator->e = NULL;
-	iterator->h = h;
+    iterator->pos = 0;
+    iterator->e = NULL;
+    iterator->h = h;
 
-	return switch_hashtable_next(&iterator);
+    return switch_hashtable_next(&iterator);
 }
 
 
 
 SWITCH_DECLARE(void) switch_hashtable_this(switch_hashtable_iterator_t *i, const void **key, switch_ssize_t *klen, void **val)
 {
-	if (i->e) {
-		if (key) {
-			*key = i->e->k;
-		}
-		if (klen) {
-			*klen = (int)strlen(i->e->k);
-		}
-		if (val) {
-			*val = i->e->v;
-		}
-	} else {
-		if (key) {
-			*key = NULL;
-		}
-		if (klen) {
-			*klen = 0;
-		}
-		if (val) {
-			*val = NULL;
-		}
-	}
+    if (i->e) {
+        if (key) {
+            *key = i->e->k;
+        }
+        if (klen) {
+            *klen = (int)strlen(i->e->k);
+        }
+        if (val) {
+            *val = i->e->v;
+        }
+    } else {
+        if (key) {
+            *key = NULL;
+        }
+        if (klen) {
+            *klen = 0;
+        }
+        if (val) {
+            *val = NULL;
+        }
+    }
 }
 
 
