@@ -364,12 +364,20 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
                             if (len > expected_meeting_id_len) {
                                 char buf[MAX_MEETING_NUMBER_LEN + 1];
                                 if (len >= (expected_meeting_id_len + 4)) {
-                                    switch_snprintf(buf, 5, "%s", &profile->id[expected_meeting_id_len]);
+                                    switch_snprintf(buf, 5, "%s", &profile->id[len-4]);
                                     buf[4] = '\0';
                                     pin = switch_core_session_strdup(session, buf);
                                 }
-                                switch_snprintf(buf, expected_meeting_id_len+1, "%s", profile->id);
-                                buf[expected_meeting_id_len] = '\0';
+				if ((len == expected_meeting_id_len) || (len == (expected_meeting_id_len+4))) {
+				    switch_snprintf(buf, expected_meeting_id_len+1, "%s", profile->id);
+				    buf[expected_meeting_id_len] = '\0';
+				} else if (len == (expected_meeting_id_len+1) || (len == (expected_meeting_id_len+5))) {
+				    switch_snprintf(buf, expected_meeting_id_len+2, "%s", profile->id);
+				    buf[expected_meeting_id_len+1] = '\0';
+				} else {
+				    switch_snprintf(buf, expected_meeting_id_len+1, "%s", profile->id);
+				    buf[expected_meeting_id_len] = '\0';
+				}
                                 profile->id = switch_core_session_strdup(session, buf);
                                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: meeting#: %s pin : %s\n", profile->id, pin);
                             }

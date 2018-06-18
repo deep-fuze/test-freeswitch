@@ -3190,7 +3190,7 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             }
 
             if (strlen(meeting_id) > 0) {
-                int max_len = strlen(meeting_id) > 8 ? 8 : strlen(meeting_id);
+                int max_len = strlen(meeting_id) > 9 ? 9 : strlen(meeting_id);
                 if (strlen(conference->meeting_id) > 0) {
                     if (strcmp(conference->meeting_id, meeting_id) != 0) {
                         memset(conference->meeting_id, 0, MAX_MEETING_ID_LEN);
