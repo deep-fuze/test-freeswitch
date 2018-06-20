@@ -7,7 +7,7 @@
 #include "menu.h"
 #include "utils.h"
 #include "fuzenode.h"
-
+#include "b64.h"
 
 /*******************************************************************************/
 /* List of available menus */
@@ -266,6 +266,7 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
                 const char *userid = NULL;
                 const char *corp = NULL;
                 const char *name = NULL;
+		const char *x_fuze_custom = NULL;
 
                 switch_channel_set_variable_var_check(channel, "fuze_progress", FuzeProgress_PREAUTH_CALL, SWITCH_FALSE);
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: verify_pstn_caller_url: %s%s\n", url, VERIFY_PSTN_CALLER_SERVICE);
@@ -284,6 +285,7 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
                 status = fuze_curl_execute(session, profile, cmd);
                 //------------------------------------------------
 
+		x_fuze_custom = switch_channel_get_variable(channel, "sip_h_x-fuze-custom");
                 meeting_id = switch_channel_get_variable(channel, "sip_h_x-fuze-meetingid");
                 userid = switch_channel_get_variable(channel, "sip_h_x-fuze-userid");
                 corp = switch_channel_get_variable(channel, "sip_h_x-fuze-customer-code");
@@ -302,6 +304,33 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
                 
                 if (corp) {
                   profile->corp_name = switch_core_session_sprintf(session, "%s", corp);
+                }
+
+                if (x_fuze_custom) {
+                  switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Found x_fuze_custom in sip : %s\n", x_fuze_custom);
+                  x_fuze_custom = (char *)b64_decode(x_fuze_custom, strlen(x_fuze_custom));
+                  if (x_fuze_custom) {
+                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Decoded x_fuze_custom: %s\n", x_fuze_custom);
+                    userid = (char *)strstr(x_fuze_custom, "fuze.userid=");
+                    corp = (char *)strstr(x_fuze_custom, "fuze.customer_code=");
+
+                    if (userid) {
+                      char *c;
+                      userid += strlen("fuze.userid=");
+                      for (c = (char *)userid; *c != '~' && *c != '\0'; c++) {
+                      }
+                      *c = '\0';
+                      switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Found userid in x_fuze_custom: %s\n", userid);
+                    }
+                    if (corp) {
+                      char *c;
+                      corp += strlen("fuze.customer_code=");
+                      for (c = (char *)corp; *c != '~' && *c != '\0'; c++) {
+                      }
+                      *c = '\0';
+                      switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "IVRC: Found corp in x_fuze_custom: %s\n", corp);
+                    }
+                  }
                 }
 
                 if (meeting_id) {
