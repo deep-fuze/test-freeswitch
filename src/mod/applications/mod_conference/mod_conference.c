@@ -5343,6 +5343,7 @@ static void conference_thread_stop(conference_obj_t *conference)
     // conference_loop_t *cl = &conference->cloop;
     conference_member_t *imember;
     switch_event_t *event;
+    switch_bool_t ended_conference = SWITCH_FALSE;
 
     if (conference->stopping) {
         return;
@@ -5437,7 +5438,10 @@ static void conference_thread_stop(conference_obj_t *conference)
                     /* add this little bit to preserve the bridge cause code in case of an early media call that */
                     /* never answers */
                     if (conference->ending_due_to_inactivity) {
-                        switch_channel_hangup(channel, SWITCH_CAUSE_CONFERENCE_INACTIVE);
+                        if (ended_conference == SWITCH_FALSE) {
+                            end_conference(imember->session, &imember->auth_profile, conference->meeting_id, conference->instance_id);
+                        }
+                        ended_conference = SWITCH_TRUE;
                     } else if (switch_test_flag(conference, CFLAG_ANSWERED)) {
                         switch_channel_hangup(channel, SWITCH_CAUSE_NORMAL_CLEARING);
                     } else {
@@ -14192,7 +14196,7 @@ SWITCH_STANDARD_APP(conference_function)
     switch_core_session_receive_message(session, &msg);
 
     if (member.conference->ending_due_to_inactivity) {
-        switch_channel_hangup(channel, SWITCH_CAUSE_CONFERENCE_INACTIVE);
+        end_conference(member.session, &member.auth_profile, member.conference->meeting_id, member.conference->instance_id);
     }
 
 #if 0
@@ -14516,6 +14520,7 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
     int min_when_others_speaking_high = SCORE_IIR_SPEAKING_MIN_WHEN_OTHERS_SPEAKING_HIGH;
 
     int noise_change_thresholds = SWITCH_FALSE;
+    int inactive_minutes_time = MINUTES_INACTIVE_TO_END;
 
     /* Validate the conference name */
     if (zstr(name)) {
@@ -14574,6 +14579,8 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
                 }
                 var = buf;
             }
+
+            //switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "param[%s] = %s\n", var, val);
 
             if (!force_rate_i && !strcasecmp(var, "rate") && !zstr(val)) {
                 uint32_t tmp = atoi(val);
@@ -14774,28 +14781,30 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
                 max_participants_per_thread = strtol(val, NULL, 0);
             } else if (!strcasecmp(var, "max-participants-per-othread") && !zstr(val)) {
                 max_participants_per_othread = strtol(val, NULL, 0);
-            } else if (strcasecmp(var, "min-sleep-per-thread") && !zstr(val)) {
+            } else if (!strcasecmp(var, "min-sleep-per-thread") && !zstr(val)) {
                 min_sleep_per_thread = strtol(val, NULL, 0);
-            } else if (strcasecmp(var, "noise-percentage-med") && !zstr(val)) {
+            } else if (!strcasecmp(var, "noise-percentage-med") && !zstr(val)) {
                 noise_percentage_med = strtol(val, NULL, 0);
-            } else if (strcasecmp(var, "noise-percentage-high") && !zstr(val)) {
+            } else if (!strcasecmp(var, "noise-percentage-high") && !zstr(val)) {
                 noise_percentage_high = strtol(val, NULL, 0);
-            } else if (strcasecmp(var, "min-when-no-one-speaking") && !zstr(val)) {
+            } else if (!strcasecmp(var, "min-when-no-one-speaking") && !zstr(val)) {
                 min_when_no_one_speaking = strtol(val, NULL, 0);
-            } else if (strcasecmp(var, "min-when-others-speaking") && !zstr(val)) {
+            } else if (!strcasecmp(var, "min-when-others-speaking") && !zstr(val)) {
                 min_when_others_speaking = strtol(val, NULL, 0);
-            } else if (strcasecmp(var, "min-when-no-one-speaking-med") && !zstr(val)) {
+            } else if (!strcasecmp(var, "min-when-no-one-speaking-med") && !zstr(val)) {
                 min_when_no_one_speaking_med = strtol(val, NULL, 0);
-            } else if (strcasecmp(var, "min-when-others-speaking-med") && !zstr(val)) {
+            } else if (!strcasecmp(var, "min-when-others-speaking-med") && !zstr(val)) {
                 min_when_others_speaking_med = strtol(val, NULL, 0);
-            } else if (strcasecmp(var, "min-when-no-one-speaking-high") && !zstr(val)) {
+            } else if (!strcasecmp(var, "min-when-no-one-speaking-high") && !zstr(val)) {
                 min_when_no_one_speaking_high = strtol(val, NULL, 0);
-            } else if (strcasecmp(var, "min-when-others-speaking-high") && !zstr(val)) {
+            } else if (!strcasecmp(var, "min-when-others-speaking-high") && !zstr(val)) {
                 min_when_others_speaking_high = strtol(val, NULL, 0);
-            } else if (strcasecmp(var, "noise-change-thresholds") && !zstr(val)) {
+            } else if (!strcasecmp(var, "noise-change-thresholds") && !zstr(val)) {
                 noise_change_thresholds = switch_true(val) ? SWITCH_TRUE : SWITCH_FALSE;
-            } else if (strcasecmp(var, "noise-measurement-period") && !zstr(val)) {
+            } else if (!strcasecmp(var, "noise-measurement-period") && !zstr(val)) {
                 noise_measurement_period = strtol(val, NULL, 0);
+            } else if (!strcasecmp(var, "inactive-minutes-time") && !zstr(val)) {
+                inactive_minutes_time = strtol(val, NULL, 0);
             }
         }
 
@@ -14840,8 +14849,10 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
 
         conference->start_time = switch_epoch_time_now(NULL);
         conference->last_time_active = switch_time_now();
-        conference->min_inactive_to_end = MINUTES_INACTIVE_TO_END;
+        conference->min_inactive_to_end = inactive_minutes_time;
         conference->ending_due_to_inactivity = SWITCH_FALSE;
+
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Setting minutes inactive to end for conference to %d min\n", conference->min_inactive_to_end);
 
         conference->stop_entry_tone_participants = stop_entry_tone_participants;
         conference->mute_on_entry_participants = mute_on_entry_participants;

@@ -13,8 +13,10 @@
 #define BODY_FMT "auth_email=%s&auth_password=%s&mobile_number=%s&dialed_number=%s&iso_code=%s"
 #define BODY_JSON_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&instance_id=%s&pin=%s&call_info={\"caller_id_number\":\"%s\",\"destination_number\":\"%s\"}"
 #define BRIDGE_BODY_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&instance_id=%s&is_allowed=%s"
+#define END_CONFERENCE_JSON_FMT "auth_email=%s&auth_password=%s&instance_id=%s"
 #define VERIFY_PSTN_CALLER_SERVICE "/services/audio/verify_pstn_caller"
 #define AUTHENTICATE_CALLER_SERVICE "/json/authenticate_caller"
+#define AUDIO_CONFERENCE_ENDED_SERVICE "/json/end_instance"
 #define AUDIO_BRIDGE_SERVICE "/json/audio_bridged"
 
 #define PREPROD_MEETING_ID_LEN 7
@@ -288,3 +290,32 @@ fuze_status_t audio_bridge(switch_core_session_t *session, conf_auth_profile_t *
 
   return status;
 }
+
+fuze_status_t end_conference(switch_core_session_t *session, conf_auth_profile_t *profile,
+			     const char *conference_id, const char *instance_id)
+{
+  fuze_status_t status = FUZE_STATUS_FALSE;
+  const char *body, *cmd, *url, *body2, *cmd2;
+
+  switch_channel_t *channel = switch_core_session_get_channel(session);
+
+  url = switch_channel_get_variable(channel, "fuze_callback_caller_url");
+  if (!url || zstr(url)) {
+    url = switch_channel_get_variable(channel, "callback_caller_url");
+  }
+  if (!url || zstr(url)) {
+    url = get_caller_url();
+  }
+
+
+  body = switch_core_session_sprintf(session, END_CONFERENCE_JSON_FMT, AUTH_EMAIL, AUTH_PASSWD, instance_id);
+  cmd = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUDIO_CONFERENCE_ENDED_SERVICE, CONTENT, body);
+  body2 = switch_core_session_sprintf(session, END_CONFERENCE_JSON_FMT, AUTH_EMAIL, "xxxxx", instance_id);
+  cmd2 = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUDIO_CONFERENCE_ENDED_SERVICE, CONTENT, body2);
+  switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: About to call end_instance (cmd: %s)\n", cmd2);
+
+  status = fuze_curl_execute(session, profile, cmd);
+
+  return status;
+}
+
