@@ -689,7 +689,7 @@ typedef struct conference_obj {
 
     int min_inactive_to_end;
     switch_time_t last_time_active;
-    switch_bool_t ending_due_to_inactivity;
+    int ending_due_to_inactivity;
 
     switch_bool_t stopping;
     uint16_t stop_entry_tone_participants;
@@ -4645,12 +4645,11 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         } else {
             if (conference->min_inactive_to_end) {
                 int min_inactive = (int)((now - conference->last_time_active)/(60*1000*1000));
-                if (min_inactive > conference->min_inactive_to_end) {
+                if (min_inactive > conference->min_inactive_to_end && conference->ending_due_to_inactivity == 0) {
                     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
                                       "Meeting Id: %s Instance Id: %s no active speakers for %d minutes, ending meeting!\n",
                                       conference->meeting_id, conference->instance_id, min_inactive);
-                    conference->ending_due_to_inactivity = SWITCH_TRUE;
-                    set_conference_state_unlocked(conference, CFLAG_DESTRUCT);
+                    conference->ending_due_to_inactivity = 1;
                 }
             }
         }
@@ -5343,7 +5342,6 @@ static void conference_thread_stop(conference_obj_t *conference)
     // conference_loop_t *cl = &conference->cloop;
     conference_member_t *imember;
     switch_event_t *event;
-    switch_bool_t ended_conference = SWITCH_FALSE;
 
     if (conference->stopping) {
         return;
@@ -5432,17 +5430,13 @@ static void conference_thread_stop(conference_obj_t *conference)
             if (!switch_test_flag(imember, MFLAG_NOCHANNEL)) {
                 channel = switch_core_session_get_channel(imember->session);
 
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(imember->session), SWITCH_LOG_INFO, "Hanging up session due to meeting ended (inactive=%d)\n", conference->ending_due_to_inactivity);
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(imember->session), SWITCH_LOG_INFO, 
+                                  "Hanging up session due to meeting ended (inactive=%d)\n", conference->ending_due_to_inactivity);
                 
                 if (!switch_false(switch_channel_get_variable(channel, "hangup_after_conference"))) {
                     /* add this little bit to preserve the bridge cause code in case of an early media call that */
                     /* never answers */
-                    if (conference->ending_due_to_inactivity) {
-                        if (ended_conference == SWITCH_FALSE) {
-                            end_conference(imember->session, &imember->auth_profile, conference->meeting_id, conference->instance_id);
-                        }
-                        ended_conference = SWITCH_TRUE;
-                    } else if (switch_test_flag(conference, CFLAG_ANSWERED)) {
+                    if (switch_test_flag(conference, CFLAG_ANSWERED)) {
                         switch_channel_hangup(channel, SWITCH_CAUSE_NORMAL_CLEARING);
                     } else {
                         /* put actual cause code from outbound channel hangup here */
@@ -7522,6 +7516,10 @@ static void start_conference_loops(conference_member_t *member)
             conference_audio_bridge(member->conference, member);
             member->audio_bridge = 0;
         }
+        if (member->conference->ending_due_to_inactivity == 2) {
+            end_conference(member->session, &member->auth_profile, member->conference->instance_id);
+            member->conference->ending_due_to_inactivity = 3;
+        }
         if (member->authenticate != 0) {
             /* set pin */
             if (authenticate(member->session, &member->auth_profile, member->conference->meeting_id, 
@@ -8242,6 +8240,11 @@ static void *SWITCH_THREAD_FUNC conference_thread(switch_thread_t *thread, void 
             } else if (ols->member->audio_bridge == 1) {
                 switch_mutex_lock(ols->cond_mutex);
                 ols->member->audio_bridge = 2;
+                switch_mutex_unlock(ols->cond_mutex);
+                switch_thread_cond_signal(ols->cond);
+            } else if (ols->member->conference->ending_due_to_inactivity == 1) {
+                switch_mutex_lock(ols->cond_mutex);
+                ols->member->conference->ending_due_to_inactivity = 2;
                 switch_mutex_unlock(ols->cond_mutex);
                 switch_thread_cond_signal(ols->cond);
             }
@@ -14195,10 +14198,6 @@ SWITCH_STANDARD_APP(conference_function)
     msg.message_id = SWITCH_MESSAGE_INDICATE_UNBRIDGE;
     switch_core_session_receive_message(session, &msg);
 
-    if (member.conference->ending_due_to_inactivity) {
-        end_conference(member.session, &member.auth_profile, member.conference->meeting_id, member.conference->instance_id);
-    }
-
 #if 0
     wait = (member.id % 50) * 1000000;
     switch_yield(wait);
@@ -14850,7 +14849,7 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
         conference->start_time = switch_epoch_time_now(NULL);
         conference->last_time_active = switch_time_now();
         conference->min_inactive_to_end = inactive_minutes_time;
-        conference->ending_due_to_inactivity = SWITCH_FALSE;
+        conference->ending_due_to_inactivity = 0;
 
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Setting minutes inactive to end for conference to %d min\n", conference->min_inactive_to_end);
 

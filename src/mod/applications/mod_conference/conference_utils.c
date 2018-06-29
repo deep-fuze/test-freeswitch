@@ -291,8 +291,7 @@ fuze_status_t audio_bridge(switch_core_session_t *session, conf_auth_profile_t *
   return status;
 }
 
-fuze_status_t end_conference(switch_core_session_t *session, conf_auth_profile_t *profile,
-			     const char *conference_id, const char *instance_id)
+fuze_status_t end_conference(switch_core_session_t *session, conf_auth_profile_t *profile, const char *instance_id)
 {
   fuze_status_t status = FUZE_STATUS_FALSE;
   const char *body, *cmd, *url, *body2, *cmd2;
