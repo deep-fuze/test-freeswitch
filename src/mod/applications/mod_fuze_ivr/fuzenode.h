@@ -27,7 +27,7 @@ typedef enum
 /* Service part of url -- keep the leading slash */
 #define VERIFY_PSTN_CALLER_SERVICE "/services/audio/verify_pstn_caller"
 #define AUTHENTICATE_CALLER_SERVICE "/json/authenticate_caller"
-#define AUTHENTICATE_USER_SERVICE "/json/authenticate_caller_by_uname"
+#define AUTHENTICATE_USER_SERVICE "/json/authenticate_caller"
 
 /*******************************************************************************/
 /* FuzeProgress */
