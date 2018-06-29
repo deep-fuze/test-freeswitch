@@ -53,7 +53,7 @@ SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_conference_shutdown);
 SWITCH_MODULE_DEFINITION(mod_conference, mod_conference_load, mod_conference_shutdown, NULL);
 
 #define CPU_UTIL_PERIOD (5*6*500)
-#define MINUTES_INACTIVE_TO_END 90
+#define MINUTES_INACTIVE_TO_END 120
 
 typedef enum {
     CONF_SILENT_REQ = (1 << 0),
