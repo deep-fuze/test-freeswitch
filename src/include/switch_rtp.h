@@ -58,59 +58,59 @@ typedef enum {
 } switch_rtp_rtcp_type_t;
 
 typedef enum {
-	SWITCH_RTP_CRYPTO_SEND,
-	SWITCH_RTP_CRYPTO_RECV,
-	SWITCH_RTP_CRYPTO_SEND_RTCP,
-	SWITCH_RTP_CRYPTO_RECV_RTCP,
-	SWITCH_RTP_CRYPTO_MAX
+    SWITCH_RTP_CRYPTO_SEND,
+    SWITCH_RTP_CRYPTO_RECV,
+    SWITCH_RTP_CRYPTO_SEND_RTCP,
+    SWITCH_RTP_CRYPTO_RECV_RTCP,
+    SWITCH_RTP_CRYPTO_MAX
 } switch_rtp_crypto_direction_t;
 
 typedef struct switch_srtp_crypto_suite_s {
-	char *name;
-	switch_rtp_crypto_key_type_t type;
-	int keylen;
+    char *name;
+    switch_rtp_crypto_key_type_t type;
+    int keylen;
 } switch_srtp_crypto_suite_t;
 
 
 struct switch_rtp_crypto_key {
-	uint32_t index;
-	switch_rtp_crypto_key_type_t type;
-	unsigned char key[SWITCH_RTP_MAX_CRYPTO_LEN];
-	switch_size_t keylen;
-	struct switch_rtp_crypto_key *next;
+    uint32_t index;
+    switch_rtp_crypto_key_type_t type;
+    unsigned char key[SWITCH_RTP_MAX_CRYPTO_LEN];
+    switch_size_t keylen;
+    struct switch_rtp_crypto_key *next;
 };
 typedef struct switch_rtp_crypto_key switch_rtp_crypto_key_t;
 
 typedef enum {
-	IPR_RTP,
-	IPR_RTCP
+    IPR_RTP,
+    IPR_RTCP
 } ice_proto_t;
 
 
 
 typedef struct icand_s {
-	char *foundation;
-	int component_id;
-	char *transport;
-	uint32_t priority;
-	char *con_addr;
-	switch_port_t con_port;
-	char *cand_type;
-	char *raddr;
-	switch_port_t rport;
-	char *generation;
-	uint8_t ready;
+    char *foundation;
+    int component_id;
+    char *transport;
+    uint32_t priority;
+    char *con_addr;
+    switch_port_t con_port;
+    char *cand_type;
+    char *raddr;
+    switch_port_t rport;
+    char *generation;
+    uint8_t ready;
 } icand_t;
 
 #define MAX_CAND 50
 typedef struct ice_s {
 
-	icand_t cands[MAX_CAND][2];
-	int cand_idx;
-	int chosen[2];
-	char *ufrag;
-	char *pwd;
-	char *options;
+    icand_t cands[MAX_CAND][2];
+    int cand_idx;
+    int chosen[2];
+    char *ufrag;
+    char *pwd;
+    char *options;
 
 } ice_t;
 
@@ -122,14 +122,14 @@ SWITCH_DECLARE(switch_bool_t) switch_get_dont_wait_for_packets(switch_channel_t 
 SWITCH_DECLARE(switch_bool_t) switch_set_rtcp_passthru(switch_channel_t *channel);
 
 SWITCH_DECLARE(switch_status_t) switch_rtp_add_crypto_key(switch_rtp_t *rtp_session,
-														  switch_rtp_crypto_direction_t direction,
-														  uint32_t index, switch_rtp_crypto_key_type_t type, unsigned char *key, switch_size_t keylen);
+                                                          switch_rtp_crypto_direction_t direction,
+                                                          uint32_t index, switch_rtp_crypto_key_type_t type, unsigned char *key, switch_size_t keylen);
 
 ///\defgroup rtp RTP (RealTime Transport Protocol)
 ///\ingroup core1
 ///\{
-	 typedef void (*switch_rtp_invalid_handler_t) (switch_rtp_t *rtp_session,
-												   switch_socket_t *sock, void *data, switch_size_t datalen, switch_sockaddr_t *from_addr);
+     typedef void (*switch_rtp_invalid_handler_t) (switch_rtp_t *rtp_session,
+                                                   switch_socket_t *sock, void *data, switch_size_t datalen, switch_sockaddr_t *from_addr);
 
 
 SWITCH_DECLARE(void) switch_rtp_get_random(void *buf, uint32_t len);
@@ -182,10 +182,10 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_change_interval(switch_rtp_t *rtp_ses
   \return the new RTP session or NULL on failure
 */
 SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session,
-												  switch_payload_t payload,
-												  uint32_t samples_per_interval,
-												  uint32_t ms_per_packet,
-												  switch_rtp_flag_t flags[], char *timer_name, const char **err, switch_memory_pool_t *pool);
+                                                  switch_payload_t payload,
+                                                  uint32_t samples_per_interval,
+                                                  uint32_t ms_per_packet,
+                                                  switch_rtp_flag_t flags[], char *timer_name, const char **err, switch_memory_pool_t *pool);
 
 
 SWITCH_DECLARE(void) switch_rtp_apply_timestamp_multiplier(switch_rtp_t *rtp_session, uint8_t multiplier);
@@ -207,13 +207,13 @@ SWITCH_DECLARE(void) switch_rtp_apply_timestamp_multiplier(switch_rtp_t *rtp_ses
 */
 SWITCH_DECLARE(switch_rtp_t *) switch_rtp_new(void *tbase, 
                                               const char *rx_host,
-											  switch_port_t rx_port,
-											  const char *tx_host,
-											  switch_port_t tx_port,
-											  switch_payload_t payload,
-											  uint32_t samples_per_interval,
-											  uint32_t ms_per_packet,
-											  switch_rtp_flag_t flags[], char *timer_name, const char **err, switch_memory_pool_t *pool);
+                                              switch_port_t rx_port,
+                                              const char *tx_host,
+                                              switch_port_t tx_port,
+                                              switch_payload_t payload,
+                                              uint32_t samples_per_interval,
+                                              uint32_t ms_per_packet,
+                                              switch_rtp_flag_t flags[], char *timer_name, const char **err, switch_memory_pool_t *pool);
 
 
 /*! 
@@ -224,7 +224,7 @@ SWITCH_DECLARE(switch_rtp_t *) switch_rtp_new(void *tbase,
   \param err pointer for error messages
 */
 SWITCH_DECLARE(switch_status_t) switch_rtp_set_remote_address(switch_rtp_t *rtp_session, const char *host, switch_port_t port, switch_port_t remote_rtcp_port,
-															  switch_bool_t change_adv_addr, const char **err);
+                                                              switch_bool_t change_adv_addr, const char **err);
 
 SWITCH_DECLARE(char *) switch_rtp_get_remote_host(switch_rtp_t *rtp_session);
 SWITCH_DECLARE(switch_port_t) switch_rtp_get_remote_port(switch_rtp_t *rtp_session);
@@ -272,8 +272,8 @@ SWITCH_DECLARE(void) switch_rtp_destroy(switch_rtp_t **rtp_session);
   \return SWITCH_STATUS_SUCCESS
 */
 SWITCH_DECLARE(switch_status_t) switch_rtp_activate_ice(switch_rtp_t *rtp_session, char *login, char *rlogin, 
-														const char *password, const char *rpassword, ice_proto_t proto,
-														switch_core_media_ice_type_t type, ice_t *ice_params);
+                                                        const char *password, const char *rpassword, ice_proto_t proto,
+                                                        switch_core_media_ice_type_t type, ice_t *ice_params);
 
 /*! 
   \brief Activate sending RTCP Sender Reports (SR's)
@@ -289,9 +289,9 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_activate_rtcp(switch_rtp_t *rtp_sessi
   \return SWITCH_STATUS_SUCCESS
 */
 SWITCH_DECLARE(switch_status_t) switch_rtp_activate_jitter_buffer(switch_rtp_t *rtp_session, 
-																  uint32_t queue_frames,
-																  uint32_t max_queue_frames,
-																  uint32_t samples_per_packet, uint32_t samples_per_second, uint32_t max_drift);
+                                                                  uint32_t queue_frames,
+                                                                  uint32_t max_queue_frames,
+                                                                  uint32_t samples_per_packet, uint32_t samples_per_second, uint32_t max_drift);
 
 SWITCH_DECLARE(switch_status_t) switch_rtp_debug_jitter_buffer(switch_rtp_t *rtp_session, const char *name);
 
@@ -371,7 +371,7 @@ SWITCH_DECLARE(void) switch_rtp_set_invald_handler(switch_rtp_t *rtp_session, sw
   \return the number of bytes read
 */
 SWITCH_DECLARE(switch_status_t) switch_rtp_read(switch_rtp_t *rtp_session, void *data, uint32_t *datalen,
-												switch_payload_t *payload_type, switch_frame_flag_t *flags, switch_io_flag_t io_flags);
+                                                switch_payload_t *payload_type, switch_frame_flag_t *flags, switch_io_flag_t io_flags);
 
 /*! 
   \brief Queue RFC2833 DTMF data into an RTP Session
@@ -415,8 +415,8 @@ SWITCH_DECLARE(switch_size_t) switch_rtp_dequeue_dtmf(switch_rtp_t *rtp_session,
   \return the number of bytes read
 */
 SWITCH_DECLARE(switch_status_t) switch_rtp_zerocopy_read(switch_rtp_t *rtp_session,
-														 void **data, uint32_t *datalen, switch_payload_t *payload_type, switch_frame_flag_t *flags,
-														 switch_io_flag_t io_flags);
+                                                         void **data, uint32_t *datalen, switch_payload_t *payload_type, switch_frame_flag_t *flags,
+                                                         switch_io_flag_t io_flags);
 
 /*! 
   \brief Read data from a given RTP session without copying
@@ -447,7 +447,7 @@ SWITCH_DECLARE(void) rtp_flush_read_buffer(switch_rtp_t *rtp_session, switch_rtp
   \return SWITCH_STAUTS_SUCCESS on success
 */
 SWITCH_DECLARE(switch_status_t) switch_rtp_enable_vad(switch_rtp_t *rtp_session, switch_core_session_t *session,
-													  switch_codec_t *codec, switch_vad_flag_t flags);
+                                                      switch_codec_t *codec, switch_vad_flag_t flags);
 
 /*!
   \brief Disable VAD on an RTP Session
@@ -476,7 +476,7 @@ SWITCH_DECLARE(int) switch_rtp_write_frame(switch_rtp_t *rtp_session, switch_fra
   \return the number of bytes written
 */
 SWITCH_DECLARE(int) switch_rtp_write_manual(switch_rtp_t *rtp_session,
-											void *data, uint32_t datalen, uint8_t m, switch_payload_t payload, uint32_t ts, switch_frame_flag_t *flags);
+                                            void *data, uint32_t datalen, uint8_t m, switch_payload_t payload, uint32_t ts, switch_frame_flag_t *flags);
 
 /*! 
   \brief Retrieve the SSRC from a given RTP session
@@ -547,6 +547,9 @@ SWITCH_DECLARE(void) switch_rtp_set_muted(switch_channel_t *channel, switch_bool
 SWITCH_DECLARE(switch_bool_t) switch_rtp_get_muted(switch_channel_t *channel);
 SWITCH_DECLARE(void) switch_rtp_set_active(switch_channel_t *channel, switch_bool_t active);
 SWITCH_DECLARE(int16_t) switch_rtp_get_lost_percent(switch_channel_t *channel);
+SWITCH_DECLARE(void) switch_rtp_reset_cn_stats(switch_channel_t *channel);
+SWITCH_DECLARE(void) switch_rtp_get_cn_stats(switch_channel_t *channel, switch_size_t *largest, switch_size_t *smallest,
+                                             switch_size_t *last, float *large_ratio, float *small_ratio);
 
 /*!
   \}

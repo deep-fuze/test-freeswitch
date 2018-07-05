@@ -365,7 +365,9 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_fast_read_frame_from_socket(
     switch_bool_t prevcantspeak;
     switch_bool_t wasskipping = SWITCH_FALSE;
     uint32_t read_packets = 0;
-    
+    switch_size_t largest, smallest, last;
+    float large_ratio, small_ratio;
+
     switch_assert(session != NULL);
     
     if (switch_mutex_trylock(session->codec_read_mutex) == SWITCH_STATUS_SUCCESS) {
@@ -524,12 +526,18 @@ read_again:
     
     if (flags & SWITCH_IO_FLAG_CANT_SPEAK) {
         if (!session->cantspeak) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "state changed from speak to can't speak %d\n", prevcantspeak);
+            switch_rtp_get_cn_stats(session->channel, &largest, &smallest, &last, &large_ratio, &small_ratio);
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                              "state changed from speak to can't speak %d (ratio %f/%f %d/%d/%d)\n",
+                              prevcantspeak, large_ratio, small_ratio, (int)largest, (int)smallest, (int)last);
             session->cantspeak = SWITCH_TRUE;
         }
     } else {
         if (session->cantspeak) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "state changed from can't speak to speak %d\n", prevcantspeak);
+            switch_rtp_get_cn_stats(session->channel, &largest, &smallest, &last, &large_ratio, &small_ratio);
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                              "state changed from can't speak to speak %d (ratio %f/%f %d/%d/%d)\n",
+                              prevcantspeak, large_ratio, small_ratio, (int)largest, (int)smallest, (int)last);
             session->cantspeak = SWITCH_FALSE;
         }
     }
@@ -3024,6 +3032,15 @@ SWITCH_DECLARE(switch_status_t) switch_core_conference_encoder_adjust_complexity
         } else {
             switch_core_ctl(&encoder_state->write_codec, 2, NULL);
         }
+    }
+    return status;
+}
+
+SWITCH_DECLARE(switch_status_t) switch_core_conference_encoder_control(conference_encoder_state_t *encoder_state, int command, uint32_t *data)
+{
+    switch_status_t status = SWITCH_STATUS_SUCCESS;
+    if (encoder_state && switch_core_codec_ready(&encoder_state->write_codec)) {
+        switch_core_ctl(&encoder_state->write_codec, command, data);
     }
     return status;
 }

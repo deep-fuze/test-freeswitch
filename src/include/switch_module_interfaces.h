@@ -602,6 +602,8 @@ struct switch_codec_fmtp {
 	int bits_per_second;
 	/*! number of microseconds of media in one packet (ptime * 1000) */
 	int microseconds_per_packet;
+
+	switch_bool_t stereo;
 	/*! private data for the codec module to store handle specific info */
 	void *private_info;
 

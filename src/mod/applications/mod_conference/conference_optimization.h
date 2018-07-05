@@ -84,7 +84,10 @@ typedef struct conference_write_codec {
     uint32_t codec_id;
     uint32_t impl_id;
     uint32_t ianacode;
+
     int loss_idx;
+    uint32_t samplerate;
+    uint32_t bitrate;
 
     uint32_t write_idx;
     
@@ -107,8 +110,9 @@ typedef struct conf_member_encoder_optimization {
 } conf_member_encoder_optimization_t;
 
 /* 711a, 711u, 722, (opus5,10,20,30,40,50) */
+/* the 1920*2 is a little arbitrary ... it doesn't need to be that big */
 #define N_CWC 4
-#define ENC_FRAME_DATA (960*2)
+#define ENC_FRAME_DATA (1920*2)
 
 /* This is a conference object.
  * Each conference has one of these
@@ -140,7 +144,8 @@ switch_bool_t ceo_initilialize(conf_encoder_optimization_t *ceo, switch_memory_p
 void ceo_destroy(conf_encoder_optimization_t *ceo, char *name);
 switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, uint32_t bytes, int16_t max);
 switch_status_t ceo_write_new_wc(conf_encoder_optimization_t *ceo, switch_codec_t *frame_codec, switch_codec_t *write_codec,
-                                 int codec_id, int impl_id, int ianacode, int loss_percent);
+                                 int codec_id, int impl_id, int ianacode, uint32_t bitrate, uint32_t samplerate, uint32_t loss,
+				 int loss_idx, char *name);
 
 void ceo_set_listener_count(conf_encoder_optimization_t *ceo, int ianacode, int loss_percent, uint32_t count);
 void ceo_set_listener_count_incr(conf_encoder_optimization_t *ceo, int ianacode, int loss_percent, uint32_t count);
