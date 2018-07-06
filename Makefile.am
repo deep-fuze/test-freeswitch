@@ -151,7 +151,7 @@ endif
 
 CORE_LIBS += libs/webrtcneteq/libwebrtcneteq.la libs/spandsp/src/libspandsp.la
 CORE_LIBS += libs/fuzetransport/libfuzetransport.la libs/Libevent/libevent.la libs/Libevent/libevent_pthreads.la
-CORE_LIBS += $(WEBRTC_LIBS) libs/opus-1.2.1/libopus.la
+CORE_LIBS += $(WEBRTC_LIBS) libs/opus-1.3-rc/libopus.la
 
 
 MOD_LINK      = $(switch_srcdir)/libfreeswitch.la
