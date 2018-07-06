@@ -1269,7 +1269,7 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_opus_load)
     opus_codec_settings_t settings = { 0 };
     switch_status_t status = SWITCH_STATUS_SUCCESS;
 
-    globals.debug = 1;
+    globals.debug = 0;
 
     if ((status = opus_load_config(SWITCH_FALSE)) != SWITCH_STATUS_SUCCESS) {
         return status;
