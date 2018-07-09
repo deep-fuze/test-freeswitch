@@ -364,7 +364,7 @@ static opus_profile_t opus_profiles[OPUS_PROFILES] = {
     {OPUS_MIN_LOSS, 48000, 64000},
     /* {OPUS_MIN_LOSS, 48000, 48000}, */
     {OPUS_MIN_LOSS, 48000, 24000},
-	/* {5, 48000, 20000}, 40000 */
+    /* {5, 48000, 20000}, 40000 */
                {10, 24000, 20000}, /* 40000 */
                {20, 16000, 18800}, /* 40000 */
                {30, 16000, 16400}, /* 16400 */
@@ -7584,11 +7584,12 @@ typedef enum {
     OUTPUT_LOOP_OK = 0,
     OUTPUT_LOOP_FAILED = 1,
     OUTPUT_LOOP_HANGUP = 2,
-    PARTICIPANT_THREAD_DATA_TOO_SOON = 3,
-    OUTPUT_LOOP_ALREADY_STOPPED = 4,
-    OUTPUT_LOOP_OK_NULL_FRAME = 5,
-    OUTPUT_LOOP_OK_NOT_SENT = 6,
-    OUTPUT_LOOP_OK_NO_FRAME = 7
+    OUTPUT_LOOP_HANGUP_NORX = 3,
+    PARTICIPANT_THREAD_DATA_TOO_SOON = 4,
+    OUTPUT_LOOP_ALREADY_STOPPED = 5,
+    OUTPUT_LOOP_OK_NULL_FRAME = 6,
+    OUTPUT_LOOP_OK_NOT_SENT = 7,
+    OUTPUT_LOOP_OK_NO_FRAME = 8
 } OUTPUT_LOOP_RET;
 
 OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switch_timer_t *timer, uint32_t *time_since_last_send, int *sent_frames);
@@ -8211,6 +8212,9 @@ static void output_processing(conference_thread_data_t *list, switch_thread_id_t
             } else if (ret == OUTPUT_LOOP_HANGUP) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
                                   "Hangup\n");
+            } else if (ret == OUTPUT_LOOP_HANGUP_NORX) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
+                                  "Hangup not receiving!\n");
             } else if (ols->stopping && !ols->stopped) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(ols->member->session), SWITCH_LOG_INFO,
                                   "Stopping\n");
@@ -8723,10 +8727,19 @@ OUTPUT_LOOP_RET process_participant_output(participant_thread_data_t *ols, switc
 
     if (ols->ild->leadin_over) {
         if (ols->check_ticks++ >= ols->ticks_per_stats_check) {
+            size_t rxcnt;
+            int interval;
             switch_rtp_update_rtp_stats(member->channel, member->max_input_level, member->max_out_level, member->one_of_active);
             member->max_out_level = 0;
             member->max_input_level = 0;
             ols->check_ticks = 0;
+            if (switch_rtp_check_transport_rxcnt(member->channel, &rxcnt, &interval) == SWITCH_FALSE) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, 
+                                  "member %d isn't receiving any packets for an extended period of time (pktcnt=%" PRId64 ", time=%ds)\n",
+                                  member->id, rxcnt, interval);
+                switch_mutex_unlock(ols->member->write_mutex);
+                return OUTPUT_LOOP_HANGUP_NORX;
+            }
         }
     } else {
         if (ols->check_ticks++ >= 50) {

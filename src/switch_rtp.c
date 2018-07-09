@@ -474,6 +474,8 @@ struct switch_rtp {
 
     switch_time_t time_of_first_rx_ts;
     uint32_t first_rx_ts;
+    size_t transport_rxcnt;
+    int transport_rxcnt_same;
 
     uint32_t high_drift_packets;
     uint32_t high_drift_log_suppress;
@@ -4828,6 +4830,8 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     }
 
     rtp_session->stats.duration = 0;
+    rtp_session->transport_rxcnt = 0;
+    rtp_session->transport_rxcnt_same = 0;
 
 #ifdef TRACE_READ
     memset(rtp_session->trace_buffer, 0, 1024);
@@ -9852,6 +9856,37 @@ SWITCH_DECLARE(void) switch_rtp_get_cn_stats(switch_channel_t *channel, switch_s
     *last = rtp_session->last_rtp_packet_rcvd_size;
     *large_ratio = rtp_session->last_rtp_packet_rcvd_large_ratio;
     *small_ratio = rtp_session->last_rtp_packet_rcvd_small_ratio;
+}
+
+#define TRANSPORT_RXCNT_SAME_THRESHOLD 30
+SWITCH_DECLARE(switch_bool_t) switch_rtp_check_transport_rxcnt(switch_channel_t *channel, size_t *pktcnt, int *interval)
+{
+    switch_rtp_t *rtp_session;
+    size_t rxcnt;
+    switch_bool_t ret = SWITCH_TRUE;
+
+    if (!channel) { return ret; }
+
+    rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session) {
+        return ret;
+    }
+
+    if (fuze_transport_get_rxcnt(rtp_session->rtp_conn, &rxcnt) == TR_STATUS_SUCCESS) {
+        if (rtp_session->transport_rxcnt == rxcnt) {
+            rtp_session->transport_rxcnt_same += 1;
+            if (rtp_session->transport_rxcnt_same > TRANSPORT_RXCNT_SAME_THRESHOLD) {
+                ret = SWITCH_FALSE;
+            }
+        } else {
+            rtp_session->transport_rxcnt_same = 0;
+        }
+    }
+    *pktcnt = rxcnt;
+    *interval = TRANSPORT_RXCNT_SAME_THRESHOLD;
+    rtp_session->transport_rxcnt = rxcnt;
+    return ret;
 }
 
 /* For Emacs:

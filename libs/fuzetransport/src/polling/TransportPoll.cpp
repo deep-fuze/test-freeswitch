@@ -64,6 +64,8 @@ struct connection_wrap_t
     uint16_t count[4];
     uint16_t arrivedTime[4];
 
+    size_t rxCnt;
+
     size_t ignore_size;
 };
 
@@ -127,6 +129,7 @@ void TransportPoll::OnDataReceived(void* pContext, Buffer::Ptr spBuffer)
         Buffer::Ptr rdBuf = te->Data(IP, port, remChanged);
 
         if (rdBuf) {
+	    conn_wrap->rxCnt += 1;
             if (conn_wrap->ignore_size != 0) {
                 if (rdBuf->size() < conn_wrap->ignore_size) {
                     return;
@@ -375,7 +378,8 @@ void* fuze_transport_tbase_create_connection(void *tbase, connection_type_t conn
                 conn_wrap->conn_ = conn;
                 conn_wrap->conn_type_ = conn_type;
                 conn_wrap->ignore_size = 0;
-                
+                conn_wrap->rxCnt = 0;
+
                 TransportDB::GetInstance().addConnection(conn_wrap);
                 
                 conn->SetAppContext(conn_wrap);
@@ -494,6 +498,18 @@ transport_status_t fuze_transport_get_rates(void *conn, uint16_t *local_send, ui
     *local_recv_cnt = conn_wrap->count[RT_LOCAL_RECV];
     
     return TR_STATUS_SUCCESS;
+}
+
+transport_status_t fuze_transport_get_rxcnt(void *conn, size_t *rxcnt)
+{
+  if (!conn) {
+    return TR_STATUS_FALSE;
+  }
+
+  connection_wrap_t *conn_wrap = (connection_wrap_t *) conn;
+  *rxcnt = conn_wrap->rxCnt;
+
+  return TR_STATUS_SUCCESS;
 }
 
 #ifdef FREE_SWITCH

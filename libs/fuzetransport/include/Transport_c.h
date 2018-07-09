@@ -138,6 +138,8 @@ extern void fuze_transport_ignore_packets(void *conn, int size);
 /* read local rates from transport */
 extern transport_status_t fuze_transport_get_rates(void *conn, uint16_t *local_send, uint16_t *local_recv, uint16_t *local_send_cnt, uint16_t *local_recv_cnt);
 
+extern transport_status_t fuze_transport_get_rxcnt(void *conn, size_t *rxcnt);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
