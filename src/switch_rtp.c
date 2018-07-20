@@ -3841,6 +3841,7 @@ static int dtls_state_setup(switch_rtp_t *rtp_session, switch_dtls_t *dtls)
     X509 *cert;
     int r = 0;
 
+    ERR_clear_error();
     if ((dtls->type & DTLS_TYPE_SERVER)) {
         r = 1;
     } else if ((cert = SSL_get_peer_certificate(dtls->ssl))) {
@@ -3861,6 +3862,7 @@ static int dtls_state_setup(switch_rtp_t *rtp_session, switch_dtls_t *dtls)
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "%s Fingerprint Verified.\n", rtp_type(rtp_session));
 
 #ifdef HAVE_OPENSSL_DTLS_SRTP
+        ERR_clear_error();
         if (!SSL_export_keying_material(dtls->ssl, raw_key_data, sizeof(raw_key_data), "EXTRACTOR-dtls_srtp", 19, NULL, 0, 0)) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "%s Key material export failure\n", rtp_type(rtp_session));
             dtls_set_state(dtls, DS_FAIL);
@@ -3936,6 +3938,7 @@ static int dtls_state_handshake(switch_rtp_t *rtp_session, switch_dtls_t *dtls)
 {
     int ret;
 
+    ERR_clear_error();
     if ((ret = SSL_do_handshake(dtls->ssl)) != 1){
         switch((ret = SSL_get_error(dtls->ssl, ret))){
         case SSL_ERROR_WANT_READ:
@@ -3949,6 +3952,7 @@ static int dtls_state_handshake(switch_rtp_t *rtp_session, switch_dtls_t *dtls)
         }
     }
 
+    ERR_clear_error();
     if (SSL_is_init_finished(dtls->ssl)) {
         dtls_set_state(dtls, DS_SETUP);
     }
@@ -3967,10 +3971,11 @@ static void free_dtls(switch_dtls_t **dtlsp)
     dtls = *dtlsp;
     *dtlsp = NULL;
 
+    ERR_clear_error();
     if (dtls->ssl) {
         SSL_free(dtls->ssl);
     }
-
+    ERR_clear_error();
     if (dtls->ssl_ctx) {
         SSL_CTX_free(dtls->ssl_ctx);
     }
@@ -3988,6 +3993,7 @@ static int do_dtls(switch_rtp_t *rtp_session, switch_dtls_t *dtls)
         return 0;
     }
 
+    ERR_clear_error();
     if ((ret = BIO_write(dtls->read_bio, dtls->data, (int)dtls->bytes)) != (int)dtls->bytes && dtls->bytes > 0) {
         ret = SSL_get_error(dtls->ssl, ret);
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "%s DTLS packet read err %d\n", rtp_type(rtp_session), ret);
@@ -4016,6 +4022,7 @@ static int cb_verify_peer(int preverify_ok, X509_STORE_CTX *ctx)
     X509 *cert;
     int r = 0;
 
+    ERR_clear_error();
     ssl = X509_STORE_CTX_get_app_data(ctx);
     dtls = (switch_dtls_t *) SSL_get_app_data(ssl);
 
@@ -4023,6 +4030,7 @@ static int cb_verify_peer(int preverify_ok, X509_STORE_CTX *ctx)
         return 0;
     }
 
+    ERR_clear_error();
     if ((cert = SSL_get_peer_certificate(dtls->ssl))) {
         switch_core_cert_extract_fingerprint(cert, dtls->remote_fp);
 
@@ -4148,14 +4156,17 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_dtls(switch_rtp_t *rtp_session, d
 
     dtls->ca = switch_core_sprintf(rtp_session->pool, "%s%sca-bundle.crt", SWITCH_GLOBAL_dirs.certs_dir, SWITCH_PATH_SEPARATOR);
 
+    ERR_clear_error();
     dtls->ssl_ctx = SSL_CTX_new(DTLSv1_method());
     switch_assert(dtls->ssl_ctx);
 
     SSL_CTX_set_mode(dtls->ssl_ctx, SSL_MODE_AUTO_RETRY);
 
+    ERR_clear_error();
     SSL_CTX_set_verify(dtls->ssl_ctx, SSL_VERIFY_NONE, NULL);
     {
         EC_KEY *p_ecdh = EC_KEY_new_by_curve_name(NID_secp384r1);
+        ERR_clear_error();
         if (p_ecdh) {
             if (SSL_CTX_set_tmp_ecdh(dtls->ssl_ctx, p_ecdh) != 1) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "%s DTLS SSL_CTX_set_tmp_ecdh error\n",
@@ -4167,6 +4178,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_dtls(switch_rtp_t *rtp_session, d
                               rtp_type(rtp_session));
         }
     }
+    ERR_clear_error();
     SSL_CTX_set_cipher_list(dtls->ssl_ctx, "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH");
     SSL_CTX_set_session_cache_mode(dtls->ssl_ctx, SSL_SESS_CACHE_OFF);
 
@@ -4183,22 +4195,26 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_dtls(switch_rtp_t *rtp_session, d
 
     BIO_set_mem_eof_return(dtls->read_bio, -1);
     BIO_set_mem_eof_return(dtls->write_bio, -1);
+    ERR_clear_error();
 
     if ((ret=SSL_CTX_use_certificate_file(dtls->ssl_ctx, dtls->rsa, SSL_FILETYPE_PEM)) != 1) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "%s DTLS cert err [%d]\n", rtp_type(rtp_session), SSL_get_error(dtls->ssl, ret));
         return SWITCH_STATUS_FALSE;
     }
 
+    ERR_clear_error();
     if ((ret=SSL_CTX_use_PrivateKey_file(dtls->ssl_ctx, dtls->pvt, SSL_FILETYPE_PEM)) != 1) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "%s DTLS key err [%d]\n", rtp_type(rtp_session), SSL_get_error(dtls->ssl, ret));
         return SWITCH_STATUS_FALSE;
     }
 
+    ERR_clear_error();
     if (SSL_CTX_check_private_key(dtls->ssl_ctx) == 0) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "%s DTLS check key failed\n", rtp_type(rtp_session));
         return SWITCH_STATUS_FALSE;
     }
 
+    ERR_clear_error();
     if (!zstr(dtls->ca) && switch_file_exists(dtls->ca, rtp_session->pool) == SWITCH_STATUS_SUCCESS
         && (ret = SSL_CTX_load_verify_locations(dtls->ssl_ctx, dtls->ca, NULL)) != 1) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "%s DTLS check chain cert failed [%d]\n",
@@ -4207,6 +4223,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_dtls(switch_rtp_t *rtp_session, d
         return SWITCH_STATUS_FALSE;
     }
 
+    ERR_clear_error();
     dtls->ssl = SSL_new(dtls->ssl_ctx);
 
     SSL_set_bio(dtls->ssl, dtls->read_bio, dtls->write_bio);
@@ -4229,7 +4246,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_dtls(switch_rtp_t *rtp_session, d
     dtls->rtp_session = rtp_session;
 
     switch_core_cert_expand_fingerprint(remote_fp, remote_fp->str);
-
+    ERR_clear_error();
     if ((type & DTLS_TYPE_RTP)) {
         rtp_session->dtls = dtls;
         dtls->sock_output = rtp_session->sock_output;
@@ -4245,8 +4262,10 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_dtls(switch_rtp_t *rtp_session, d
     }
 
     if ((type & DTLS_TYPE_SERVER)) {
+        ERR_clear_error();
         SSL_set_accept_state(dtls->ssl);
     } else {
+        ERR_clear_error();
         SSL_set_connect_state(dtls->ssl);
     }
 
