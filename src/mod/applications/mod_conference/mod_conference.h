@@ -9,7 +9,7 @@
 #include <switch_cJSON.h>
 
 
-#define OPENAL_POSITIONING 1
+//#define OPENAL_POSITIONING 1
 
 #ifdef OPENAL_POSITIONING
 #define AL_ALEXT_PROTOTYPES
