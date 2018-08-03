@@ -2778,9 +2778,7 @@ static void conference_opus_complexity_adjust(conference_obj_t *conference) {
             if (member->ianacode < 95) {
                 continue;
             }
-            if (switch_core_codec_ready(&member->write_codec)) {
-				switch_core_ctl(switch_core_session_get_write_codec(member->session), 2, NULL);
-            }
+            switch_core_ctl(switch_core_session_get_write_codec(member->session), 2, NULL);
         }
     }
     switch_mutex_unlock(conference->member_mutex);
@@ -2822,7 +2820,7 @@ static void conference_opus_loss_adjust(conference_obj_t *conference) {
                                   member->id, member->loss, prev_loss_idx, member->loss_idx, i);
 
                 /* TBD: adjust member loss based on schedule */
-				switch_core_ctl(switch_core_session_get_write_codec(member->session), 2, (uint32_t *)&opus_profiles[member->loss_idx].channels);
+                switch_core_ctl(switch_core_session_get_write_codec(member->session), 11, (uint32_t *)&opus_profiles[member->loss_idx].channels);
                 switch_core_ctl(switch_core_session_get_write_codec(member->session), 1, (uint32_t *)&opus_profiles[member->loss_idx].loss);
                 switch_core_ctl(switch_core_session_get_write_codec(member->session), 5, (uint32_t *)&opus_profiles[member->loss_idx].samplerate);
                 switch_core_ctl(switch_core_session_get_write_codec(member->session), 4, (uint32_t *)&opus_profiles[member->loss_idx].bitrate);
