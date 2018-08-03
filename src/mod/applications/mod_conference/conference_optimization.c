@@ -396,14 +396,20 @@ switch_status_t ceo_write_new_wc(conf_encoder_optimization_t *ceo, switch_codec_
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "switch_core_conference_encode_init [%s] channels=%d bitrate=%d\n",
                                   name, channels, bitrate);
                 switch_core_conference_encode_init(new_write_codec->encoder, write_codec, ceo->enc_frame_pool, loss, channels, bitrate);
+                if (loss > 0) {
+                    switch_core_conference_encoder_control(new_write_codec->encoder, 1, (uint32_t *)&loss);
+                }
                 if (strlen(name)) {
                     switch_core_conference_encoder_control(new_write_codec->encoder, 7, (uint32_t *)name);
                 }
                 if (samplerate) {
-                    // switch_core_conference_encoder_control(new_write_codec->encoder, 5, &samplerate);
+                    switch_core_conference_encoder_control(new_write_codec->encoder, 5, &samplerate);
                 }
                 if (bitrate) {
                     switch_core_conference_encoder_control(new_write_codec->encoder, 4, &bitrate);
+                }
+                if (channels) {
+                    switch_core_conference_encoder_control(new_write_codec->encoder, 11, (uint32_t *)&channels);
                 }
             }
             new_write_codec->ianacode = ianacode;

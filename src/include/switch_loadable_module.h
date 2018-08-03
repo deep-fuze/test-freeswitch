@@ -536,6 +536,79 @@ static inline void switch_core_codec_add_implementation(switch_memory_pool_t *po
 	}
 }
 
+static inline void switch_core_codec_add_implementation_w_ctl(switch_memory_pool_t *pool, switch_codec_interface_t *codec_interface,
+                                                              /*! enumeration defining the type of the codec */
+                                                              const switch_codec_type_t codec_type,
+                                                              /*! the IANA code number */
+                                                              switch_payload_t ianacode,
+                                                              /*! the IANA code name */
+                                                              const char *iananame,
+                                                              /*! default fmtp to send (can be overridden by the init function) */
+                                                              char *fmtp,
+                                                              /*! samples transferred per second */
+                                                              uint32_t samples_per_second,
+                                                              /*! actual samples transferred per second for those who are not moron g722 RFC writers */
+                                                              uint32_t actual_samples_per_second,
+                                                              /*! bits transferred per second */
+                                                              int bits_per_second,
+                                                              /*! number of microseconds that denote one frame */
+                                                              int microseconds_per_packet,
+                                                              /*! number of samples that denote one frame */
+                                                              uint32_t samples_per_packet,
+                                                              /*! number of bytes that denote one frame decompressed */
+                                                              uint32_t decoded_bytes_per_packet,
+                                                              /*! number of bytes that denote one frame compressed */
+                                                              uint32_t encoded_bytes_per_packet,
+                                                              /*! number of channels represented */
+                                                              uint8_t number_of_channels,
+                                                              /*! number of frames to send in one network packet */
+                                                              int codec_frames_per_packet,
+                                                              /*! function to initialize a codec handle using this implementation */
+                                                              switch_core_codec_init_func_t init,
+                                                              /*! function to encode raw data into encoded data */
+                                                              switch_core_codec_encode_func_t encode,
+                                                              /*! function to decode encoded data into raw data */
+                                                              switch_core_codec_decode_func_t decode,
+                                                              /*! deinitalize a codec handle using this implementation */
+                                                              switch_core_codec_destroy_func_t destroy,
+                                                              switch_core_codec_ctl_func_t ctl)
+{
+
+    if (decoded_bytes_per_packet > SWITCH_RECOMMENDED_BUFFER_SIZE) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Rejected codec name: %s rate: %u ptime: %d not enough buffer space %u > %d\n",
+                          iananame, actual_samples_per_second, microseconds_per_packet / 1000, decoded_bytes_per_packet, SWITCH_RECOMMENDED_BUFFER_SIZE);
+    } else if (codec_type == SWITCH_CODEC_TYPE_VIDEO || switch_check_interval(actual_samples_per_second, microseconds_per_packet / 1000)) {
+        switch_codec_implementation_t *impl = (switch_codec_implementation_t *) switch_core_alloc(pool, sizeof(*impl));
+        impl->codec_type = codec_type;
+        impl->ianacode = ianacode;
+        impl->iananame = switch_core_strdup(pool, iananame);
+        impl->fmtp = switch_core_strdup(pool, fmtp);
+        impl->samples_per_second = samples_per_second;
+        impl->actual_samples_per_second = actual_samples_per_second;
+        impl->bits_per_second = bits_per_second;
+        impl->microseconds_per_packet = microseconds_per_packet;
+        impl->samples_per_packet = samples_per_packet;
+        impl->decoded_bytes_per_packet = decoded_bytes_per_packet;
+        impl->encoded_bytes_per_packet = encoded_bytes_per_packet;
+        impl->number_of_channels = number_of_channels;
+        impl->codec_frames_per_packet = codec_frames_per_packet;
+        impl->init = init;
+        impl->encode = encode;
+        impl->decode = decode;
+        impl->destroy = destroy;
+        impl->codec_id = codec_interface->codec_id;
+        impl->next = codec_interface->implementations;
+        impl->impl_id = switch_core_codec_next_id();
+        impl->decoder = NULL;
+        impl->timestamp_multiplier = 1;
+        impl->ctl = ctl;
+        codec_interface->implementations = impl;
+    } else {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Rejected codec name: %s rate: %u ptime: %d\n",
+                          iananame, actual_samples_per_second, microseconds_per_packet / 1000);
+    }
+}
+
 static inline void switch_core_codec_implementation_set_decoder
 			(switch_codec_interface_t *codec_interface, switch_core_codec_decoder_t decoder)
 {

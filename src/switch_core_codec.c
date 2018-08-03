@@ -641,6 +641,9 @@ SWITCH_DECLARE(switch_status_t) switch_core_codec_copy(switch_codec_t *codec, sw
         pSettings = &codec_settings;
     }
 
+    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "switch_core_codec_copy (%s) : codec->implementation->ctl %s bitrate=%d channels=%d\n",
+                      codec->implementation->iananame, codec->implementation->ctl ? "set" : "null", bitrate, channels);
+
     new_codec->implementation->init(new_codec, new_codec->flags, pSettings);
 
     switch_mutex_init(&new_codec->mutex, SWITCH_MUTEX_NESTED, new_codec->memory_pool);
