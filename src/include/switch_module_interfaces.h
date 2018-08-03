@@ -591,6 +591,8 @@ struct switch_directory_handle {
 /* nobody has more setting than speex so we will let them set the standard */
 /*! \brief Various codec settings (currently only relevant to speex) */
 struct switch_codec_settings {
+	int bits_per_second;
+	int channels;
 	int unused;
 };
 

@@ -13,7 +13,8 @@ static switch_frame_t *cwc_get_frame(conference_write_codec_t *cwc, uint32_t rea
 static switch_bool_t cwc_frame_encoded(conference_write_codec_t *cwc, uint32_t read_idx);
 
 SWITCH_DECLARE(conference_encoder_state_t *) switch_core_conference_encode_alloc(switch_memory_pool_t *pool);
-SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_init(conference_encoder_state_t *encoder_state, switch_codec_t *write_codec, switch_memory_pool_t *pool, int loss);
+SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_init(conference_encoder_state_t *encoder_state, switch_codec_t *write_codec,
+                                                                   switch_memory_pool_t *pool, int loss, int channels, int bitrate);
 SWITCH_DECLARE(void) switch_core_conference_encode_destroy(conference_encoder_state_t *encoder_state);
 SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_frame(conference_encoder_state_t *encoder_state, switch_frame_t *frame,
                                                                     switch_io_flag_t flags, switch_frame_t **ret_enc_frame);
@@ -55,7 +56,7 @@ void cwc_next(conference_write_codec_t *cwc) {
 
 switch_bool_t cwc_initialize(conference_write_codec_t *cwc, switch_memory_pool_t *mutex_pool,
                              switch_memory_pool_t *frame_pool, switch_bool_t create_encoder,
-                             switch_codec_t *frame_codec)
+                             switch_codec_t *frame_codec, int channels, int bitrate)
 {
     
     switch_mutex_init(&cwc->codec_mutex, SWITCH_MUTEX_NESTED, mutex_pool);
@@ -67,8 +68,10 @@ switch_bool_t cwc_initialize(conference_write_codec_t *cwc, switch_memory_pool_t
     cwc->write_idx = 0;
 
     if (create_encoder) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "cwc_initialize create_encoder channels=%d bitrate=%d\n",
+                          channels, bitrate);
         cwc->encoder = switch_core_conference_encode_alloc(frame_pool);
-        switch_core_codec_copy(frame_codec, &cwc->frame_codec, frame_pool);
+        switch_core_codec_copy(frame_codec, &cwc->frame_codec, frame_pool, channels, bitrate);
         switch_core_codec_reset(&cwc->frame_codec);
         cwc->num_conf_frames = 1;
     } else {
@@ -106,7 +109,9 @@ void cwc_destroy(conference_write_codec_t *cwc) {
     }
 }
 
-switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t *data, uint32_t bytes, int16_t max) {
+switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc,
+                                          int16_t *data_mono, int16_t *data_stereo,
+                                          uint32_t bytes, int16_t max) {
 #ifndef SIMULATE_LOAD
     int simulate_load = 0;
 #else
@@ -129,17 +134,36 @@ switch_bool_t cwc_write_and_encode_buffer(conference_write_codec_t *cwc, int16_t
         switch_status_t encode_status;
         switch_io_flag_t flags = SWITCH_IO_FLAG_NONE;
         switch_frame_t *ret_enc_frame;
+        uint32_t samples;
 
-        memcpy(cwc->frames[cwc->write_idx].frame.data, data, bytes);
+        samples = bytes/2;
+        if (cwc->channels <= 1) {
+            //switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Encode mono %d bytes %d channels %d samples\n",
+            //                bytes, cwc->channels, samples);
+            memcpy(cwc->frames[cwc->write_idx].frame.data, data_mono, bytes);
+        } else {
+            bytes *= 2;
+            if (data_stereo) {
+                memcpy(cwc->frames[cwc->write_idx].frame.data, data_stereo, bytes);
+            } else {
+                int16_t *interleave = (int16_t *)cwc->frames[cwc->write_idx].frame.data;
+                for (int i = 0; i < samples; i++) {
+                    interleave[i*2] = data_mono[i];
+                    interleave[i*2+1] = data_mono[i];
+                }
+            }
+            //switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Encode stereo %d bytes %d channels %d samples\n",
+            //                bytes, cwc->channels, samples);
+        }
         cwc->frames[cwc->write_idx].frame.datalen = bytes;
         cwc->frames[cwc->write_idx].written = SWITCH_TRUE;
-        cwc->frames[cwc->write_idx].frame.samples = bytes/2;
+        cwc->frames[cwc->write_idx].frame.samples = samples;
         cwc->frames[cwc->write_idx].frame.codec = &cwc->frame_codec;
         cwc->frames[cwc->write_idx].time = switch_time_now();
         cwc->frames[cwc->write_idx].max = max;
 
-        // switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "switch_core_conference_encode_frame loss_idx=%d sr=%d br=%d\n",
-        //                cwc->loss_idx, cwc->samplerate, cwc->bitrate);
+        //switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "switch_core_conference_encode_frame loss_idx=%d sr=%d br=%d channels=%d\n",
+        //                  cwc->loss_idx, cwc->samplerate, cwc->bitrate, cwc->channels);
 
         encode_status = switch_core_conference_encode_frame(cwc->encoder, &cwc->frames[cwc->write_idx].frame, flags, &ret_enc_frame);
         if (encode_status == SWITCH_STATUS_SUCCESS && ret_enc_frame) {
@@ -288,21 +312,30 @@ void ceo_complexity_adjust(conf_encoder_optimization_t *ceo, int direction) {
 }
 
 //#define SIMULATE_ENCODER_LOSS
-switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, uint32_t bytes, int16_t max) {
+switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo,
+                               int16_t *data_mono,
+                               int16_t *data_stereo,
+                               uint32_t bytes, int16_t max) {
 #ifdef SIMULATE_ENCODER_LOSS
     int randoms = rand() % 10;
 #endif
+    switch_bool_t stereo = SWITCH_FALSE;
 
-    if (data) {
-        memcpy(ceo->buffer, data, bytes);
+    if (data_mono) {
+        memcpy(ceo->buffer_mono, data_mono, bytes);
         ceo->bytes = bytes;
         ceo->max = max;
     } else {
 #ifdef SIMULATE_ENCODER_LOSS
         randoms = 0;
 #endif
-        data = ceo->buffer;
+        data_mono = ceo->buffer_mono;
         bytes = ceo->bytes;
+    }
+
+    if (data_stereo) {
+        memcpy(ceo->buffer_stereo, data_stereo, bytes*2);
+        stereo = SWITCH_TRUE;
     }
 
     for (conference_write_codec_t *wp_ptr = ceo->cwc[0];
@@ -316,7 +349,7 @@ switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, 
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "skipping\n");
         }
 #else
-        cwc_write_and_encode_buffer(wp_ptr, data, bytes, max);
+        cwc_write_and_encode_buffer(wp_ptr, data_mono, stereo ? ceo->buffer_stereo : NULL, bytes, max);
 #endif
     }
 
@@ -327,11 +360,11 @@ switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, 
              wp_ptr = wp_ptr->next) {
 #ifdef SIMULATE_ENCODER_LOSS
             if (randoms < 8) {
-                cwc_write_and_copy_buffer(wp_ptr, cwc0, data, bytes, max);
+                cwc_write_and_copy_buffer(wp_ptr, cwc0, data_mono, bytes, max);
                 cwc0 = cwc0->next;
             }
 #else
-            cwc_write_and_copy_buffer(wp_ptr, cwc0, data, bytes, max);
+            cwc_write_and_copy_buffer(wp_ptr, cwc0, data_mono, bytes, max);
             cwc0 = cwc0->next;
 #endif
         }
@@ -341,8 +374,8 @@ switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, 
 }
 
 switch_status_t ceo_write_new_wc(conf_encoder_optimization_t *ceo, switch_codec_t *frame_codec, switch_codec_t *write_codec,
-                                 int codec_id, int impl_id, int ianacode, uint32_t bitrate, uint32_t samplerate,
-                                 uint32_t loss, int idx, char *name) {
+                                 int codec_id, int impl_id, int ianacode, uint32_t bitrate, uint32_t samplerate, int loss,
+                                 int loss_idx, int channels, char *name) {
     conference_write_codec_t *new_write_codec;
 #ifdef SIMULATE_LOAD
     loss_percent += SIMULATE_LOAD;
@@ -358,9 +391,11 @@ switch_status_t ceo_write_new_wc(conf_encoder_optimization_t *ceo, switch_codec_
                               codec_id, impl_id, ianacode, bitrate, samplerate, loss);
             memset(new_write_codec, 0, sizeof(*new_write_codec));
 
-            cwc_initialize(new_write_codec, ceo->write_codecs_pool, ceo->enc_frame_pool, (i == 0), frame_codec);
+            cwc_initialize(new_write_codec, ceo->write_codecs_pool, ceo->enc_frame_pool, (i == 0), frame_codec, channels, bitrate);
             if (new_write_codec->encoder) {
-                switch_core_conference_encode_init(new_write_codec->encoder, write_codec, ceo->enc_frame_pool, loss);
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "switch_core_conference_encode_init channels=%d bitrate=%d\n",
+                                  channels, bitrate);
+                switch_core_conference_encode_init(new_write_codec->encoder, write_codec, ceo->enc_frame_pool, loss, channels, bitrate);
                 if (strlen(name)) {
                     switch_core_conference_encoder_control(new_write_codec->encoder, 7, (uint32_t *)name);
                 }
@@ -374,7 +409,8 @@ switch_status_t ceo_write_new_wc(conf_encoder_optimization_t *ceo, switch_codec_
             new_write_codec->ianacode = ianacode;
             new_write_codec->codec_id = codec_id;
             new_write_codec->impl_id = impl_id;
-            new_write_codec->loss_idx = idx;
+            new_write_codec->loss_idx = loss_idx;
+            new_write_codec->channels = channels;
             new_write_codec->bitrate = bitrate;
             new_write_codec->samplerate = samplerate;
             new_write_codec->next = ceo->cwc[i];

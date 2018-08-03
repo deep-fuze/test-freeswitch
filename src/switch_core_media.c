@@ -2711,6 +2711,9 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_set_codec(switch_core_session_
     int resetting = 0;
     switch_media_handle_t *smh;
     switch_rtp_engine_t *a_engine;
+    int channels;
+    int bitrate = 64000;
+    switch_codec_settings_t *pSettings = NULL, settings;
 
     switch_assert(session);
 
@@ -2773,15 +2776,50 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_set_codec(switch_core_session_
         }
     }
 
+    /*
+     * fun with clients
+     */
+    channels = a_engine->cur_payload_map->channels;
+    bitrate = a_engine->cur_payload_map->bitrate;
+
+    if (!strcasecmp(a_engine->cur_payload_map->iananame, "opus")) {
+        if (switch_channel_get_variable(session->channel, "firefox")) {
+            /* ok with stereo & 64kbps */
+#ifdef STEREO
+            channels = 2;
+            bitrate = 64000;
+#else
+            channels = 1;
+            bitrate = 24000;
+#endif
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Override opus codec for firefox channels=%d bitrate=%d\n",
+                              channels, bitrate);
+        } else if (switch_channel_get_variable(session->channel, "chrome")) {
+            /* ok with mono & 64kbps */
+            channels = 1;
+            bitrate = 24000;
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Override opus codec for chrome channels=%d bitrate=%d\n",
+                              channels, bitrate);
+        } else {
+            channels = 1;
+            bitrate = 24000;
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Override opus codec for other channels=%d bitrate=%d\n",
+                              channels, bitrate);
+        }
+        pSettings = &settings;
+        settings.bits_per_second = bitrate;
+        settings.channels = channels;
+    }
+
     if (switch_core_codec_init_with_bitrate(&a_engine->read_codec,
                                             a_engine->cur_payload_map->iananame,
                                             a_engine->cur_payload_map->rm_fmtp,
                                             a_engine->cur_payload_map->rm_rate,
                                             a_engine->cur_payload_map->codec_ms,
-                                            a_engine->cur_payload_map->channels,
-                                            a_engine->cur_payload_map->bitrate,
+                                            channels,
+                                            bitrate,
                                             SWITCH_CODEC_FLAG_ENCODE | SWITCH_CODEC_FLAG_DECODE | codec_flags,
-                                            NULL, switch_core_session_get_pool(session)) != SWITCH_STATUS_SUCCESS) {
+                                            pSettings, switch_core_session_get_pool(session)) != SWITCH_STATUS_SUCCESS) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Can't load codec?\n");
         switch_channel_hangup(session->channel, SWITCH_CAUSE_INCOMPATIBLE_DESTINATION);
         switch_goto_status(SWITCH_STATUS_FALSE, end);
@@ -2795,10 +2833,10 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_set_codec(switch_core_session_
                                             a_engine->cur_payload_map->rm_fmtp,
                                             a_engine->cur_payload_map->rm_rate,
                                             a_engine->cur_payload_map->codec_ms,
-                                            a_engine->cur_payload_map->channels,
-                                            a_engine->cur_payload_map->bitrate,
+                                            channels,
+                                            bitrate,
                                             SWITCH_CODEC_FLAG_ENCODE | SWITCH_CODEC_FLAG_DECODE | codec_flags,
-                                            NULL, switch_core_session_get_pool(session)) != SWITCH_STATUS_SUCCESS) {
+                                            pSettings, switch_core_session_get_pool(session)) != SWITCH_STATUS_SUCCESS) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Can't load codec?\n");
         switch_channel_hangup(session->channel, SWITCH_CAUSE_INCOMPATIBLE_DESTINATION);
         switch_goto_status(SWITCH_STATUS_FALSE, end);
@@ -3778,6 +3816,16 @@ SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *s
     }
 
     extract_browser_stuff(session);
+
+    if (is_firefox(session, sdp)) {
+        switch_channel_set_variable(session->channel, "firefox", "true");
+    }
+    if (is_chrome(session, sdp)) {
+        switch_channel_set_variable(session->channel, "chrome", "true");
+    }
+    if (is_fuze_app(session, sdp)) {
+        switch_channel_set_variable(session->channel, "fuzeapp", "true");
+    }
 
     if (sdp->sdp_origin->o_username) {
         if (is_firefox(session, sdp)) {

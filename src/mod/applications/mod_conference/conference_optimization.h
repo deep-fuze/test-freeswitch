@@ -88,6 +88,7 @@ typedef struct conference_write_codec {
     int loss_idx;
     uint32_t samplerate;
     uint32_t bitrate;
+    int channels;
 
     uint32_t write_idx;
     
@@ -123,7 +124,8 @@ typedef struct conf_encoder_optimization {
     conference_write_codec_t *cwc[N_CWC];
 
     uint32_t bytes;
-    int16_t buffer[ENC_FRAME_DATA];
+    int16_t buffer_mono[ENC_FRAME_DATA];
+    int16_t buffer_stereo[ENC_FRAME_DATA];
     int16_t max;
 
     switch_bool_t enabled;
@@ -142,10 +144,14 @@ conference_write_codec_t *cwc_get(conference_write_codec_t *cwc, int codec_id, i
 void ceo_start_write(conf_encoder_optimization_t *ceo);
 switch_bool_t ceo_initilialize(conf_encoder_optimization_t *ceo, switch_memory_pool_t *pool);
 void ceo_destroy(conf_encoder_optimization_t *ceo, char *name);
-switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo, int16_t *data, uint32_t bytes, int16_t max);
+switch_bool_t ceo_write_buffer(conf_encoder_optimization_t *ceo,
+                               int16_t *data_mono,
+                               int16_t *data_stereo,
+                               uint32_t bytes, int16_t max);
+
 switch_status_t ceo_write_new_wc(conf_encoder_optimization_t *ceo, switch_codec_t *frame_codec, switch_codec_t *write_codec,
-                                 int codec_id, int impl_id, int ianacode, uint32_t bitrate, uint32_t samplerate, uint32_t loss,
-				 int loss_idx, char *name);
+                                 int codec_id, int impl_id, int ianacode, uint32_t bitrate, uint32_t samplerate, int loss,
+                                 int loss_idx, int channels, char *name);
 
 void ceo_set_listener_count(conf_encoder_optimization_t *ceo, int ianacode, int loss_percent, uint32_t count);
 void ceo_set_listener_count_incr(conf_encoder_optimization_t *ceo, int ianacode, int loss_percent, uint32_t count);

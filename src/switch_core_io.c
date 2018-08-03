@@ -1247,7 +1247,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_read_frame_w_time(switch_cor
                     if (!switch_core_codec_ready(&session->bug_codec) && switch_core_codec_ready(read_frame->codec)) {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Setting BUG Codec %s:%d\n",
                                           read_frame->codec->implementation->iananame, read_frame->codec->implementation->ianacode);
-                        switch_core_codec_copy(read_frame->codec, &session->bug_codec, NULL);
+                        switch_core_codec_copy(read_frame->codec, &session->bug_codec, NULL, 0, 0);
                         if (!switch_core_codec_ready(&session->bug_codec)) {
                             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "%s Error setting BUG codec %s!\n", 
                                               switch_core_session_get_name(session), read_frame->codec->implementation->iananame);
@@ -2999,7 +2999,10 @@ SWITCH_DECLARE(conference_encoder_state_t *) switch_core_conference_encode_alloc
     return switch_core_alloc(pool, sizeof(conference_encoder_state_t));
 }
 
-SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_init(conference_encoder_state_t *encoder_state, switch_codec_t *write_codec, switch_memory_pool_t *pool, int loss)
+SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_init(conference_encoder_state_t *encoder_state,
+                                                                   switch_codec_t *write_codec,
+                                                                   switch_memory_pool_t *pool,
+                                                                   int loss, int channels, int bitrate)
 {
     switch_status_t status = SWITCH_STATUS_SUCCESS;
 
@@ -3012,7 +3015,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_conference_encode_init(conference_en
     encoder_state->raw_write_buffer = NULL;
     encoder_state->write_resampler = NULL;
 
-    switch_core_codec_copy(write_codec, &encoder_state->write_codec, pool);
+    switch_core_codec_copy(write_codec, &encoder_state->write_codec, pool, channels, bitrate);
     encoder_state->write_impl = encoder_state->write_codec.implementation;
 
     switch_core_codec_reset(&encoder_state->write_codec);

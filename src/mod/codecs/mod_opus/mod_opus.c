@@ -126,6 +126,7 @@ struct opus_context {
     codec_control_state_t control_state;
     char name[NAME_LEN];
     saved_debug_state_t debug_state;
+    int channels;
 };
 
 struct {
@@ -305,10 +306,11 @@ static switch_status_t switch_opus_fmtp_parse(const char *fmtp, switch_codec_fmt
                             codec_fmtp->stereo = codec_settings->stereo;
                         }
 
+#if 0
                         if (!strcasecmp(data, "sprop-stereo")) {
                             codec_settings->sprop_stereo = atoi(arg);
                         }
-
+#endif
                         if (!strcasecmp(data, "maxaveragebitrate")) {
                             codec_settings->maxaveragebitrate = atoi(arg);
                             if (codec_settings->maxaveragebitrate < SWITCH_OPUS_MIN_BITRATE || codec_settings->maxaveragebitrate > SWITCH_OPUS_MAX_BITRATE) {
@@ -579,6 +581,13 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
         opus_codec_settings.maxaveragebitrate = opus_codec_settings_remote.maxaveragebitrate;
     }
 
+    if (codec_settings) {
+        if (codec_settings->bits_per_second < opus_codec_settings.maxaveragebitrate ||
+            (codec_settings->bits_per_second > 0 && opus_codec_settings.maxaveragebitrate == OPUS_AUTO)) {
+            opus_codec_settings.maxaveragebitrate = codec_settings->bits_per_second;
+        }
+    }
+
     /* If asymmetric sample rates are allowed, verify whether remote is asking for a smaller maxplaybackrate */
     if (opus_prefs.maxplaybackrate &&
         (!opus_prefs.asymmetric_samplerates ||
@@ -605,17 +614,31 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
 
     opus_codec_settings.usedtx = opus_prefs.use_dtx;
 
+    if (codec_settings) {
+        if (codec_settings->channels > 0) {
+            opus_codec_settings.stereo = codec_settings->channels == 2;
+            opus_codec_settings.sprop_stereo = codec_settings->channels == 2;
+        }
+    }
+
     codec->fmtp_out = gen_fmtp(&opus_codec_settings, codec->memory_pool);
     
     if (encoding) {
         /* come up with a way to specify these */
-        int bitrate_bps = OPUS_AUTO;
+        int bitrate_bps = opus_codec_settings.maxaveragebitrate ? opus_codec_settings.maxaveragebitrate : OPUS_AUTO;
         int use_vbr = opus_prefs.use_vbr;
         int complexity = 10 /*opus_prefs.complexity*/;
         int err;
         int enc_samplerate =
             opus_codec_settings.samplerate ? opus_codec_settings.samplerate : codec->implementation->actual_samples_per_second;
         int inbandfec = 1;
+        int nchannels = 0;
+
+        if (codec_settings) {
+            if (codec_settings->channels > 0) {
+                nchannels = codec_settings->channels;
+            }
+        }
 
         if (opus_prefs.asymmetric_samplerates) {
             /* If an entity receives an fmtp: maxplaybackrate=R1,sprop-maxcapturerate=R2 and sends an fmtp with:
@@ -643,12 +666,21 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
         context->old_plpct = opus_prefs.plpct;
         context->complexity = 10; /*opus_prefs.complexity;*/
 
+        if (!nchannels) {
+            nchannels = codec->implementation->number_of_channels;
+            context->channels = nchannels;
+            if (nchannels == 0) {
+                nchannels = 1;
+            }
+        }
+
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
-                          "opus[%s] Create OPUS encoder: bps=%d vbr=%d complexity=%d samplerate=%d inbandfec=%d\n",
-                          context->name, bitrate_bps, use_vbr, complexity, enc_samplerate, inbandfec);
+                          "opus[%s] Create OPUS encoder: bps=%d vbr=%d complexity=%d samplerate=%d inbandfec=%d n_channels=%d\n",
+                          context->name, bitrate_bps, use_vbr, complexity, enc_samplerate, 
+                          inbandfec, nchannels);
 
         context->encoder_object = opus_encoder_create(enc_samplerate,
-                                                      codec->implementation->number_of_channels,
+                                                      nchannels,
                                                       OPUS_APPLICATION_VOIP, &err);
 
         if (err != OPUS_OK) {
@@ -799,21 +831,41 @@ static switch_status_t switch_opus_encode(switch_codec_t *codec,
 {
     struct opus_context *context = codec->private_info;
     int bytes = 0;
-    int len = (int) *encoded_data_len;
-    
+    int16_t d2[4096];
+    void *fdata = decoded_data;
+
     if (!context) {
         return SWITCH_STATUS_FALSE;
     }
     
-    if (len > 1275) len = 1275;
-    
-    bytes = opus_encode(context->encoder_object, (void *) decoded_data,
-                        context->enc_frame_size, (unsigned char *) encoded_data, len);
-
+    if (context->channels == 2) {
+        //switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Encode %d decoded %d encoded %d channels\n",
+        //                  decoded_data_len, *encoded_data_len, context->channels);
+        if (decoded_data_len == 960) {
+            /* hmm */
+        } else if (decoded_data_len == 1920) {
+            int16_t *p = (int16_t *)decoded_data;
+            for (int i = 0; i < decoded_data_len/2; i++) {
+                d2[i*2] = p[i];
+                d2[i*2+1] = p[i];
+            }
+            fdata = (void *)d2;
+        } else if (decoded_data_len == 3840) {
+            fdata = decoded_data;
+        }
+        bytes = opus_encode(context->encoder_object, (void *) fdata,
+                            context->enc_frame_size, (unsigned char *) encoded_data, *encoded_data_len);
+    } else {
+        bytes = opus_encode(context->encoder_object, (void *) decoded_data,
+                            context->enc_frame_size, (unsigned char *) encoded_data, *encoded_data_len);
+    }
     if (globals.debug || context->debug > 1) {
         int samplerate = context->enc_frame_size * 1000 / (codec->implementation->microseconds_per_packet / 1000);
         switch_opus_info(context, encoded_data, bytes, samplerate, "encode");
     }
+
+    // switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Encode %d decoded %d encoded %d channels\n",
+    //                decoded_data_len, *encoded_data_len, context->channels);
 
     if (bytes > 0) {
         *encoded_data_len = (uint32_t) bytes;
@@ -1003,6 +1055,18 @@ static switch_status_t switch_opus_ctl(switch_codec_t *codec,
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "opus[%s] OPUS codec get bitrate %d\n",
                               context->name, prev_bitrate);
             *bitrate = (uint32_t)prev_bitrate;
+        }
+        break;
+    case 9:
+        {
+            uint32_t *bitrate = (uint32_t *)data;
+            *bitrate = (uint32_t)context->control_state.wanted_bitrate;
+        }
+        break;
+    case 11:
+        {
+            uint32_t *channels = (uint32_t *)data;
+            *channels = context->channels;
         }
         break;
     case 4:
@@ -1304,7 +1368,6 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_opus_load)
         settings.sprop_maxcapturerate = opus_prefs.sprop_maxcapturerate;
     }
 
-
     for (x = 0; x < 3; x++) {
 
         settings.ptime = mss / 1000;
@@ -1313,34 +1376,25 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_opus_load)
         settings.samplerate = rate;
         dft_fmtp = gen_fmtp(&settings, pool);
 
-        switch_core_codec_add_implementation(pool, codec_interface, SWITCH_CODEC_TYPE_AUDIO,    /* enumeration defining the type of the codec */
-                                    116,   /* the IANA code number */
-                                    "opus",/* the IANA code name */
-                                    dft_fmtp,      /* default fmtp to send (can be overridden by the init function) */
-                                    48000, /* samples transferred per second */
-                                    rate,  /* actual samples transferred per second */
-                                    bits,  /* bits transferred per second */
-                                    mss,   /* number of microseconds per frame */
-                                    samples,       /* number of samples per frame */
-                                    bytes, /* number of bytes per frame decompressed */
-                                    0,     /* number of bytes per frame compressed */
-                                    1,/* number of channels represented */
-                                    1,     /* number of frames per network packet */
-                                    switch_opus_init,      /* function to initialize a codec handle using this implementation */
-                                    switch_opus_encode,    /* function to encode raw data into encoded data */
-                                    switch_opus_decode,    /* function to decode encoded data into raw data */
-                                    switch_opus_destroy);  /* deinitalize a codec handle using this implementation */
-
-        switch_core_codec_implementation_set_decoder(codec_interface, switch_opus_decoder);
-
-        switch_core_codec_add_ctl_implementation(codec_interface, switch_opus_ctl);
-
-        /*
-        * For opus, the rtp timestamp is based on assumption that 48K samples per second
-        * have been sent out irrespective of what actual rate was.
-        * For more info, refer to: http://tools.ietf.org/html/draft-spittka-payload-rtp-opus-03
-        */
-        switch_core_codec_set_timestamp_multiplier(codec_interface, multiplier);
+        for (int y = 1; y < 3; y++) {
+            switch_core_codec_add_implementation(pool, codec_interface, SWITCH_CODEC_TYPE_AUDIO,    /* enumeration defining the type of the codec */
+                                                 116,   /* the IANA code number */
+                                                 "opus",/* the IANA code name */
+                                                 dft_fmtp,      /* default fmtp to send (can be overridden by the init function) */
+                                                 48000, /* samples transferred per second */
+                                                 rate,  /* actual samples transferred per second */
+                                                 bits,  /* bits transferred per second */
+                                                 mss,   /* number of microseconds per frame */
+                                                 samples,       /* number of samples per frame */
+                                                 bytes, /* number of bytes per frame decompressed */
+                                                 0,     /* number of bytes per frame compressed */
+                                                 y,     /* number of channels represented */
+                                                 1,     /* number of frames per network packet */
+                                                 switch_opus_init,      /* function to initialize a codec handle using this implementation */
+                                                 switch_opus_encode,    /* function to encode raw data into encoded data */
+                                                 switch_opus_decode,    /* function to decode encoded data into raw data */
+                                                 switch_opus_destroy);  /* deinitalize a codec handle using this implementation */
+        }
 
         bytes *= 2;
         samples *= 2;
@@ -1361,40 +1415,41 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_opus_load)
         settings.samplerate = rate;
         dft_fmtp = gen_fmtp(&settings, pool);
 
-        switch_core_codec_add_implementation(pool, codec_interface, SWITCH_CODEC_TYPE_AUDIO,    /* enumeration defining the type of the codec */
-                                        116,    /* the IANA code number */
-                                        "opus",/* the IANA code name */
-                                        dft_fmtp,       /* default fmtp to send (can be overridden by the init function) */
-                                        48000,  /* samples transferred per second */
-                                        rate,   /* actual samples transferred per second */
-                                        bits,   /* bits transferred per second */
-                                        mss,    /* number of microseconds per frame */
-                                        samples,        /* number of samples per frame */
-                                        bytes,  /* number of bytes per frame decompressed */
-                                        0,      /* number of bytes per frame compressed */
-                                        1,/* number of channels represented */
-                                        1,      /* number of frames per network packet */
-                                        switch_opus_init,       /* function to initialize a codec handle using this implementation */
-                                        switch_opus_encode,     /* function to encode raw data into encoded data */
-                                        switch_opus_decode,     /* function to decode encoded data into raw data */
-                                        switch_opus_destroy);   /* deinitalize a codec handle using this implementation */
-
-        switch_core_codec_implementation_set_decoder(codec_interface, switch_opus_decoder);
-
-        switch_core_codec_add_ctl_implementation(codec_interface, switch_opus_ctl);
-
-        /*
-        * For opus, the rtp timestamp is based on assumption that 48K samples per second
-        * have been sent out irrespective of what actual rate was.
-        * For more info, refer to: http://tools.ietf.org/html/draft-spittka-payload-rtp-opus-03
-        */
-        switch_core_codec_set_timestamp_multiplier(codec_interface, multiplier);
+        for (int y = 1; y < 3; y++) {
+            switch_core_codec_add_implementation(pool, codec_interface, SWITCH_CODEC_TYPE_AUDIO,    /* enumeration defining the type of the codec */
+                                                 116,    /* the IANA code number */
+                                                 "opus",/* the IANA code name */
+                                                 dft_fmtp,       /* default fmtp to send (can be overridden by the init function) */
+                                                 48000,  /* samples transferred per second */
+                                                 rate,   /* actual samples transferred per second */
+                                                 bits,   /* bits transferred per second */
+                                                 mss,    /* number of microseconds per frame */
+                                                 samples,        /* number of samples per frame */
+                                                 bytes,  /* number of bytes per frame decompressed */
+                                                 0,      /* number of bytes per frame compressed */
+                                                 y,      /* number of channels represented */
+                                                 1,      /* number of frames per network packet */
+                                                 switch_opus_init,       /* function to initialize a codec handle using this implementation */
+                                                 switch_opus_encode,     /* function to encode raw data into encoded data */
+                                                 switch_opus_decode,     /* function to decode encoded data into raw data */
+                                                 switch_opus_destroy);   /* deinitalize a codec handle using this implementation */
+        }
 
         bytes += 160;
         samples += 80;
         mss += 10000;
 
     }
+
+    switch_core_codec_implementation_set_decoder(codec_interface, switch_opus_decoder);
+    switch_core_codec_add_ctl_implementation(codec_interface, switch_opus_ctl);
+
+    /*
+     * For opus, the rtp timestamp is based on assumption that 48K samples per second
+     * have been sent out irrespective of what actual rate was.
+     * For more info, refer to: http://tools.ietf.org/html/draft-spittka-payload-rtp-opus-03
+     */
+    switch_core_codec_set_timestamp_multiplier(codec_interface, multiplier);
 
     /* indicate that the module should continue to be loaded */
     return SWITCH_STATUS_SUCCESS;
