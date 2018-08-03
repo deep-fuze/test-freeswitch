@@ -304,7 +304,7 @@ typedef struct {
   int channels;
 } opus_profile_t;
 
-#define STEREO 1
+//#define STEREO 1
 
 #ifdef STEREO
 #define OPUS_PROFILES 6
