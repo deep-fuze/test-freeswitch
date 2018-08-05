@@ -39,7 +39,7 @@ SWITCH_MODULE_DEFINITION(mod_opus, mod_opus_load, NULL, NULL);
 
 #define SWITCH_OPUS_MIN_BITRATE 6000
 #define SWITCH_OPUS_MAX_BITRATE 510000
-#define FUZE_OPUS_MAX_BITRATE 64000
+#define FUZE_OPUS_MAX_BITRATE 128000
 #define SWITCH_OPUS_MIN_FEC_BITRATE 12400
 
 /*! \brief Various codec settings */
@@ -531,7 +531,7 @@ static switch_status_t switch_opus_info(struct opus_context *context, void * enc
         context->debug_state.nb_samples != nb_samples ||
         context->debug_state.has_fec != has_fec ||
         context->debug_state.audiobandwidth != audiobandwidth ||
-        (context->debug_state.last - now) > 1000) {
+        (now - context->debug_state.last) > 10000) {
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "opus[%s] %s: opus_frames [%d] samples [%d] audio bandwidth [%s]"
                           " bytes [%d] FEC[%s/%s] channels[%d] c=[%d/%d/%d]\n",
                           context->name, print_text, nb_opus_frames, nb_samples, audiobandwidth_str, len, has_fec ? "yes" : "no",
@@ -544,8 +544,8 @@ static switch_status_t switch_opus_info(struct opus_context *context, void * enc
         context->debug_state.nb_samples = nb_samples;
         context->debug_state.has_fec = has_fec;
         context->debug_state.audiobandwidth = audiobandwidth;
+        context->debug_state.last = now;
     }
-    context->debug_state.last = now;
 
     return SWITCH_STATUS_SUCCESS;
 }
@@ -565,6 +565,8 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
 
     context->enc_frame_size = codec->implementation->actual_samples_per_second *
         (codec->implementation->microseconds_per_packet / 1000) / 1000;
+
+    context->debug_state.last = switch_time_now()/1000;
 
     memset(&codec_fmtp, '\0', sizeof(struct switch_codec_fmtp));
     codec_fmtp.private_info = &opus_codec_settings;
@@ -587,9 +589,11 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
     }
 
     if (codec_settings) {
-        if (codec_settings->bits_per_second < opus_codec_settings.maxaveragebitrate ||
-            (codec_settings->bits_per_second > 0 && opus_codec_settings.maxaveragebitrate == OPUS_AUTO)) {
-            opus_codec_settings.maxaveragebitrate = codec_settings->bits_per_second;
+        if (strstr(codec->fmtp_in, "opus_codec_settings.maxaveragebitrate") == NULL) {
+            if (codec_settings->bits_per_second < opus_codec_settings.maxaveragebitrate ||
+                (codec_settings->bits_per_second > 0 && opus_codec_settings.maxaveragebitrate == OPUS_AUTO)) {
+                opus_codec_settings.maxaveragebitrate = codec_settings->bits_per_second;
+            }
         }
     }
 
@@ -1064,8 +1068,10 @@ static switch_status_t switch_opus_ctl(switch_codec_t *codec,
         break;
     case 9:
         {
-            uint32_t *bitrate = (uint32_t *)data;
-            *bitrate = (uint32_t)context->control_state.wanted_bitrate;
+            int32_t *bitrate = (int32_t *)data;
+            opus_int32 obitrate;
+            opus_encoder_ctl(context->encoder_object, OPUS_GET_BITRATE(&obitrate));
+            *bitrate = obitrate;
         }
         break;
     case 11:

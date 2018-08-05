@@ -71,7 +71,7 @@ switch_bool_t cwc_initialize(conference_write_codec_t *cwc, switch_memory_pool_t
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "cwc_initialize create_encoder channels=%d bitrate=%d\n",
                           channels, bitrate);
         cwc->encoder = switch_core_conference_encode_alloc(frame_pool);
-        switch_core_codec_copy(frame_codec, &cwc->frame_codec, frame_pool, channels, bitrate);
+        switch_core_codec_copy(frame_codec, &cwc->frame_codec, frame_pool, 0, 0);
         switch_core_codec_reset(&cwc->frame_codec);
         cwc->num_conf_frames = 1;
     } else {
@@ -387,8 +387,8 @@ switch_status_t ceo_write_new_wc(conf_encoder_optimization_t *ceo, switch_codec_
             return SWITCH_STATUS_FALSE;
         } else {
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
-                              " created [%s] new codec_id=%d impl_id=%d ianacode=%d bitrate=%d samplerate=%d loss=%d%%\n",
-                              name, codec_id, impl_id, ianacode, bitrate, samplerate, loss);
+                              " created [%s] new codec_id=%d impl_id=%d ianacode=%d bitrate=%d samplerate=%d loss=%d%% loss_idx=%d\n",
+                              name, codec_id, impl_id, ianacode, bitrate, samplerate, loss, loss_idx);
             memset(new_write_codec, 0, sizeof(*new_write_codec));
 
             cwc_initialize(new_write_codec, ceo->write_codecs_pool, ceo->enc_frame_pool, (i == 0), frame_codec, channels, bitrate);

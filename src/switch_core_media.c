@@ -2712,7 +2712,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_set_codec(switch_core_session_
     switch_media_handle_t *smh;
     switch_rtp_engine_t *a_engine;
     int channels;
-    int bitrate = 64000;
+    int bitrate = 24000;
     switch_codec_settings_t *pSettings = NULL, settings;
 
     switch_assert(session);

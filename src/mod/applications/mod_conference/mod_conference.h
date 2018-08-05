@@ -307,9 +307,9 @@ typedef struct {
 //#define STEREO 1
 
 #ifdef STEREO
-#define OPUS_PROFILES 6
+#define OPUS_PROFILES 8
 #else
-#define OPUS_PROFILES 5
+#define OPUS_PROFILES 7
 #endif
 
 typedef struct {
@@ -416,7 +416,7 @@ typedef struct conference_record {
 typedef enum {
   eMemberListTypes_Speakers = 0,
   eMemberListTypes_Listeners = 1,
-    eMemberListTypes_Recorders = 2
+  eMemberListTypes_Recorders = 2
 } eMemberListTypes;
 
 typedef struct {
@@ -532,6 +532,9 @@ typedef struct conference_obj {
 
   /* */
   conference_member_t *member_lists[NUMBER_OF_MEMBER_LISTS];
+  int speaker_count;
+  int unmuted_count;
+  int32_t speaker_energy;
 
   /* */
   conference_member_t *floor_holder;
@@ -756,6 +759,9 @@ struct conference_member {
 
   uint32_t flush_len;
   uint32_t low_count;
+
+  switch_bool_t last_one_of_active;
+  switch_bool_t last_individual_mix;
 
 #define FUZE_PIN_LEN 4
 #define FUZE_PIN_LEN_FIELD 10

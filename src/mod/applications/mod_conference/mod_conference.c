@@ -69,6 +69,8 @@ static int EC = 0;
 #define test_eflag(conference, flag) ((conference)->eflags & flag)
 
 static opus_profile_t opus_profiles[OPUS_PROFILES] = {
+    {OPUS_MIN_LOSS, 48000, 128000, 1},
+    {OPUS_MIN_LOSS, 48000, 64000, 1},
     {OPUS_MIN_LOSS, 48000, 24000, 1},
     {10, 24000, 20000, 1},
     {20, 16000, 18800, 1},
@@ -2172,14 +2174,18 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
 
             /* Find the max bitrate for this channel so that we can set the appropriate opus profile for this member */
             switch_core_ctl(switch_core_session_get_write_codec(member->session), 11, &member->channels);
+            switch_core_ctl(switch_core_session_get_write_codec(member->session), 9, &member->max_bitrate);
+
             channel = switch_core_session_get_channel(member->session);
 
-            if (switch_channel_get_variable(channel, "firefox")) {
-                member->max_bitrate = 24000;
-            } else if (switch_channel_get_variable(channel, "chrome")) {
-                member->max_bitrate = 24000;
-            } else {
-                member->max_bitrate = 24000;
+            if (member->max_bitrate == 0) {
+                if (switch_channel_get_variable(channel, "firefox")) {
+                    member->max_bitrate = 24000;
+                } else if (switch_channel_get_variable(channel, "chrome")) {
+                    member->max_bitrate = 24000;
+                } else {
+                    member->max_bitrate = 24000;
+                }
             }
             member->channels = impl.number_of_channels;
             member->stereo = member->channels == 2;
@@ -2721,6 +2727,9 @@ static void set_opus_profile(conference_member_t *member)
      * Packet sizes will change between profiles so make sure that we reset all of these stats
      */
     if (prev_idx != member->loss_idx) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
+                          "set_opus_profile %d -> %d [loss=%f bitrate=%d channels=%d]\n",
+                          prev_idx, member->loss_idx, member->loss, member->max_bitrate, member->channels);
         switch_rtp_reset_cn_stats(member->channel);
     }
 }
@@ -2838,6 +2847,7 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
     uint32_t g722cnt = 0, g711ucnt = 0, g711acnt = 0, othercnt = 0, opuscnt[OPUS_PROFILES], opustotalcnt = 0;
     int count;
     switch_bool_t changed = SWITCH_FALSE;
+    int32_t last_speaker_energy = 0;
 
     for (int i = 0; i < OPUS_PROFILES; i++) {
         opuscnt[i] = 0;
@@ -2845,6 +2855,8 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
 
     conference_mutex_lock(conference);
     switch_mutex_lock(conference->member_mutex);
+
+    conference->speaker_count = 0;
 
     for (count = 0, member = conference->member_lists[eMemberListTypes_Speakers]; member; count += 1) {
         if (switch_test_flag(member, MFLAG_NOCHANNEL) || !switch_test_flag(member, MFLAG_RUNNING)) {
@@ -2895,6 +2907,7 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
                 member = member_next;
             }
         } else {
+            conference->speaker_count += 1;
             last = member;
             member = member->next;
         }
@@ -2942,10 +2955,15 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
         }
     }
 
+    conference->unmuted_count = 0;
+
     for (int i = 0; i < eMemberListTypes_Recorders; i++) {
         for (member = conference->member_lists[i]; member; member = member->next) {
             if (switch_test_flag(member, MFLAG_NOCHANNEL) || !switch_test_flag(member, MFLAG_RUNNING)) {
                 continue;
+            }
+            if (!is_ignored(member)) {
+                conference->unmuted_count += 1;
             }
             if (member->one_of_active) {
                 continue;
@@ -2963,6 +2981,21 @@ static void conference_reconcile_member_lists(conference_obj_t *conference) {
                 othercnt += 1;
             }
         }
+    }
+
+    last_speaker_energy = conference->speaker_energy;
+    if (conference->unmuted_count <= 2) {
+        conference->speaker_energy = conference->energy_level / 2;
+    } else if (conference->unmuted_count == 3) {
+        conference->speaker_energy = (conference->energy_level * 2) / 3;
+    } else {
+        conference->speaker_energy = conference->energy_level;
+    }
+
+    if (last_speaker_energy != conference->speaker_energy) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                          "Conference Speaker Energy Level Changed: %d -> %d (%d potential speakers)\n",
+                          last_speaker_energy, conference->speaker_energy, conference->unmuted_count);
     }
 
     for (int i = 0; i < OPUS_PROFILES; i++) {
@@ -3621,7 +3654,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
 
     /*
      * To keep memory for debug stats not persistent,
-      * we manage it as necessary.
+     * we manage it as necessary.
      */
     delta = switch_time_now();
     count = 0;
@@ -3735,8 +3768,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
     for (i = 0, max_runs = 0; i < MAX_ACTIVE_TALKERS && max_runs < MAX_ACTIVE_TALKERS; max_runs += 1) {
         if (conference->last_active_talkers[i] != NULL) {
             conference_member_t *cmember = conference->last_active_talkers[i];
-            if (is_muted(cmember) ||
-                (!switch_test_flag(cmember, MFLAG_TALKING) && !switch_test_flag(cmember, MFLAG_ACTIVE_TALKER))) {
+            if (is_muted(cmember)) {
                 conference->last_active_talkers[i] = NULL;
                 for (int j = i+1; j < MAX_ACTIVE_TALKERS; ++j) {
                     conference->last_active_talkers[j-1] = conference->last_active_talkers[j];
@@ -3758,9 +3790,9 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         switch_bool_t skip_speaker = SWITCH_FALSE;
         count += 1;
         switch_clear_flag(imember, MFLAG_NOTIFY_ACTIVITY);
-        if (!switch_test_flag(imember, MFLAG_HAS_AUDIO) &&
-            !switch_test_flag(imember, MFLAG_TALKING))
+        if (!switch_test_flag(imember, MFLAG_HAS_AUDIO)) {
             continue;
+        }
 
         if (is_muted(imember)) {
             continue;
@@ -4086,7 +4118,6 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         delta = switch_time_now() - delta;
         if (delta > 20000) {switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "CT took a long time %" PRId64 "ms\n", delta/1000);}
         delta = switch_time_now();
-
     } else {
         for (j = 0; j < MAX_ACTIVE_TALKERS; ) {
             if (conference->last_active_talkers[j]) {
@@ -4468,7 +4499,8 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
     for (omember = conference->member_lists[eMemberListTypes_Speakers]; omember && !exclusive_play; omember = omember->next) {
         conference->member_loop_count++;
 
-        if (!(switch_test_flag(omember, MFLAG_RUNNING) && switch_test_flag(omember, MFLAG_HAS_AUDIO))) {
+        if (!switch_test_flag(omember, MFLAG_RUNNING) || !switch_test_flag(omember, MFLAG_HAS_AUDIO)) {
+            omember->one_of_active = SWITCH_FALSE;
             continue;
         }
 
@@ -4480,6 +4512,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         
         /* changed this to continue if "can't speak and not fake mute" */
         if (!switch_test_flag(omember, MFLAG_CAN_SPEAK) && !switch_test_flag(omember, MFLAG_USE_FAKE_MUTE)) {
+            omember->one_of_active = SWITCH_FALSE;
             continue;
         }
 
@@ -4491,6 +4524,7 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
         }
 
         if (switch_test_flag(omember, MFLAG_USE_FAKE_MUTE) && is_ignored(omember)) {
+            omember->one_of_active = SWITCH_FALSE;
             continue;
         }
 
@@ -4553,7 +4587,6 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
                 continue;
             }
 
-
             one_of_active = omember->one_of_active && (switch_test_flag(omember, MFLAG_CAN_SPEAK) ||
                                                        (!switch_test_flag(omember, MFLAG_CAN_SPEAK) &&
                                                         switch_test_flag(omember, MFLAG_USE_FAKE_MUTE) &&
@@ -4562,6 +4595,14 @@ static CONFERENCE_LOOP_RET conference_thread_run(conference_obj_t *conference)
             individual_mix = (!omember->fnode && one_of_active) || 
                 (conference->is_recording && omember->rec) ||
                 omember->individual_codec;
+
+            if (one_of_active != omember->last_one_of_active ||
+                individual_mix != omember->last_individual_mix) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "%s/%d one:%d->%d ind:%d->%d\n",
+                                  omember->mname, omember->id, omember->last_one_of_active, one_of_active, omember->last_individual_mix, individual_mix);
+            }
+            omember->last_one_of_active= one_of_active;
+            omember->last_individual_mix = individual_mix;
 
             if (!individual_mix) {
                 continue;
@@ -5853,7 +5894,7 @@ static int noise_gate_check(conference_member_t *member)
         r = (int)member->score > target_score;
 
     } else {
-        r = (int32_t)member->score > member->energy_level;
+        r = (int32_t)member->score > member->conference->speaker_energy;
     }
 
     return r;
@@ -6321,7 +6362,7 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
         /* FUZE-TALKING */
         /* noise_gate_check: (int32_t)member->score > member->energy_level; */
         if (noise_gate_check(member)) {
-            uint32_t diff = member->score - member->energy_level;
+            uint32_t diff = member->score - member->conference->speaker_energy;
             if (il->hangover_hits) {
                 il->hangover_hits--;
             }
@@ -6357,7 +6398,7 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
             if (member->conference->agc_level) {
                 member->nt_tally++;
             }
-            
+
             if (switch_test_flag(member, MFLAG_TALKING) && can_speak) {
                 if (++il->hangover_hits >= il->hangover) {
                     il->hangover_hits = il->hangunder_hits = 0;
@@ -13840,7 +13881,7 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
     uint32_t announce_count = 0;
     char *maxmember_sound = NULL;
     char *maxmember_sound_attendee = NULL;
-    uint32_t rate = 8000, interval = 20;
+    uint32_t rate = 48000, interval = 20;
     int broadcast_chat_messages = 0;
     int comfort_noise_level = 0;
     int pin_retries = 3;
@@ -14431,6 +14472,8 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
                     conference->energy_level = 0;
                 }
             }
+
+            conference->speaker_energy = conference->energy_level;
 
             if (!zstr(auto_gain_level)) {
                 int level = 0;
