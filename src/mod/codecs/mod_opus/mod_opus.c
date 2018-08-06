@@ -589,7 +589,7 @@ static switch_status_t switch_opus_init(switch_codec_t *codec, switch_codec_flag
     }
 
     if (codec_settings) {
-        if (strstr(codec->fmtp_in, "opus_codec_settings.maxaveragebitrate") == NULL) {
+        if (!codec->fmtp_in || strstr(codec->fmtp_in, "maxaveragebitrate") == NULL) {
             if (codec_settings->bits_per_second < opus_codec_settings.maxaveragebitrate ||
                 (codec_settings->bits_per_second > 0 && opus_codec_settings.maxaveragebitrate == OPUS_AUTO)) {
                 opus_codec_settings.maxaveragebitrate = codec_settings->bits_per_second;
