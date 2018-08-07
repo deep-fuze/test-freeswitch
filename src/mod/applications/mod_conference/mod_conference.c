@@ -2104,6 +2104,8 @@ static switch_status_t conference_create_codec_opus(conference_obj_t *conference
     return SWITCH_STATUS_SUCCESS;
 }
 
+SWITCH_DECLARE(void) switch_rtp_set_opus_rate(switch_channel_t *channel, int rate);
+
 /* Gain exclusive access and add the member to the list */
 static switch_status_t conference_add_member(conference_obj_t *conference, conference_member_t *member)
 {
@@ -2187,6 +2189,12 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
                     member->max_bitrate = 24000;
                 }
             }
+
+            /*
+             * probably need to eventually change this
+             */
+            switch_rtp_set_opus_rate(member->channel, member->max_bitrate);
+
             member->channels = impl.number_of_channels;
             member->stereo = member->channels == 2;
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO, "member->max_bitrate=%d ch=%d stereo=%d\n",

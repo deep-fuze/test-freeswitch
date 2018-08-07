@@ -495,6 +495,7 @@ struct switch_rtp {
     switch_size_t last_rtp_packet_rcvd_size;
     float last_rtp_packet_rcvd_large_ratio;
     float last_rtp_packet_rcvd_small_ratio;
+    int opus_rate;
 
 #ifdef ENABLE_ZRTP
     zrtp_session_t *zrtp_session;
@@ -4803,6 +4804,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->last_rtp_packet_rcvd_size = 0;
     rtp_session->last_rtp_packet_rcvd_large_ratio = 0;
     rtp_session->last_rtp_packet_rcvd_small_ratio = 0;
+    rtp_session->opus_rate = 24000;
 
     rtp_session->stats.last_jitter = -1;
     rtp_session->stats.last_recv_level = -1;
@@ -6781,18 +6783,27 @@ static switch_bool_t is_opus_cn(switch_rtp_t *rtp_session, switch_size_t bytes)
 {
     float large_ratio = 1.0;
     float small_ratio = 1.0;
+    float largest_smallest_ratio = 1.0;
+    switch_bool_t changed = SWITCH_FALSE;
 
     if (rtp_session->recv_msg.header.pt <= 95) {
         return SWITCH_FALSE;
     }
     if (bytes > 0) {
-        if (bytes >rtp_session->largest_rtp_packet_rcvd) {
+        if (bytes > rtp_session->largest_rtp_packet_rcvd) {
             rtp_session->largest_rtp_packet_rcvd = bytes;
+            changed = SWITCH_TRUE;
         }
         if (bytes < rtp_session->smallest_rtp_packet_rcvd ||
             rtp_session->smallest_rtp_packet_rcvd == 0) {
             rtp_session->smallest_rtp_packet_rcvd = bytes;
+            changed = SWITCH_TRUE;
         }
+    }
+    if (changed) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+                          "is_opus_cn largest:%" PRId64" smallest:%" PRId64 "\n",
+                          rtp_session->largest_rtp_packet_rcvd, rtp_session->smallest_rtp_packet_rcvd);
     }
     if (rtp_session->largest_rtp_packet_rcvd > 0 && 
         rtp_session->smallest_rtp_packet_rcvd > 0 &&
@@ -6805,7 +6816,31 @@ static switch_bool_t is_opus_cn(switch_rtp_t *rtp_session, switch_size_t bytes)
         rtp_session->last_rtp_packet_rcvd_large_ratio = large_ratio;
         rtp_session->last_rtp_packet_rcvd_small_ratio = small_ratio;
     } else {
-        return SWITCH_FALSE;
+        if (bytes > 0) {
+            return SWITCH_FALSE;
+        } else {
+            return SWITCH_TRUE;
+        }
+    }
+
+    if (rtp_session->largest_rtp_packet_rcvd > 0) {
+        largest_smallest_ratio = (float)rtp_session->smallest_rtp_packet_rcvd/rtp_session->largest_rtp_packet_rcvd;
+    }
+
+    /* Case where we don't have enough history */
+    if (largest_smallest_ratio > OPUS_CN_LARGE_RATIO) {
+        switch_size_t cn_bytes = 4;
+        if (rtp_session->opus_rate >= 128000) {
+        } else if (rtp_session->opus_rate >= 64000) {
+        } else if (rtp_session->opus_rate >= 24000) {
+        } else if (rtp_session->opus_rate >= 12000) {
+        } else {
+        }
+        if (bytes <= cn_bytes) {
+            return SWITCH_TRUE;
+        } else {
+            return SWITCH_FALSE;
+        }
     }
 
     return (large_ratio < OPUS_CN_LARGE_RATIO) && (small_ratio < OPUS_CN_SMALL_RATIO);
@@ -9906,6 +9941,18 @@ SWITCH_DECLARE(switch_bool_t) switch_rtp_check_transport_rxcnt(switch_channel_t 
     *interval = TRANSPORT_RXCNT_SAME_THRESHOLD;
     rtp_session->transport_rxcnt = rxcnt;
     return ret;
+}
+
+SWITCH_DECLARE(void) switch_rtp_set_opus_rate(switch_channel_t *channel, int rate)
+{
+    switch_rtp_t *rtp_session;
+    if (!channel) { return; }
+
+    rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session) { return; }
+
+    rtp_session->opus_rate = rate;
 }
 
 /* For Emacs:
