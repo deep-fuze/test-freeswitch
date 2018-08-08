@@ -6829,10 +6829,11 @@ static switch_bool_t is_opus_cn(switch_rtp_t *rtp_session, switch_size_t bytes)
 
     /* Case where we don't have enough history */
     if (largest_smallest_ratio > OPUS_CN_LARGE_RATIO) {
-        switch_size_t cn_bytes = 4;
+        switch_size_t cn_bytes = 4+12;
         if (rtp_session->opus_rate >= 128000) {
         } else if (rtp_session->opus_rate >= 64000) {
         } else if (rtp_session->opus_rate >= 24000) {
+            /* 3 bytes RTP + 12 bytes RTP header */
         } else if (rtp_session->opus_rate >= 12000) {
         } else {
         }
