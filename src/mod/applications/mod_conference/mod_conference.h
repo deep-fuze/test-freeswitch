@@ -50,7 +50,7 @@ typedef enum {
 typedef enum {
   FILE_STOP_CURRENT,
   FILE_STOP_ALL,
-    FILE_STOP_ASYNC
+  FILE_STOP_ASYNC
 } file_stop_t;
 
 /* forward declaration for conference_obj and caller_control */
@@ -72,7 +72,7 @@ typedef struct conference_cdr_node_s {
 typedef enum {
   CDRR_LOCKED = 1,
   CDRR_PIN,
-    CDRR_MAXMEMBERS
+  CDRR_MAXMEMBERS
 } cdr_reject_reason_t;
 
 typedef struct conference_cdr_reject_s {
@@ -85,7 +85,7 @@ typedef struct conference_cdr_reject_s {
 typedef enum {
   CDRE_NONE,
   CDRE_AS_CONTENT,
-    CDRE_AS_FILE
+  CDRE_AS_FILE
 } cdr_event_mode_t;
 
 
@@ -247,7 +247,7 @@ typedef struct conference_file_node {
 typedef enum {
   REC_ACTION_STOP = 1,
   REC_ACTION_PAUSE,
-    REC_ACTION_RESUME
+  REC_ACTION_RESUME
 } recording_action_type_t;
 
 /* conference xml config sections */
@@ -674,20 +674,20 @@ typedef enum {
   MS_UNMUTED,
   MS_UNMUTING,
   MS_MUTED,
-    MS_CN
+  MS_CN
 } mute_state_t;
 
 typedef enum {
   ME_PKTS,
   ME_CN,
   ME_MUTE,
-    ME_UNMUTE
+  ME_UNMUTE
 } mute_event_t;
 
 typedef enum {
   NOISE_NONE,
   NOISE_MEDIUM,
-    NOISE_HIGH
+  NOISE_HIGH
 } member_noise_t;
 
 /* Conference Member Object */
