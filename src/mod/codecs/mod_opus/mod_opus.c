@@ -40,6 +40,7 @@ SWITCH_MODULE_DEFINITION(mod_opus, mod_opus_load, NULL, NULL);
 #define SWITCH_OPUS_MIN_BITRATE 6000
 #define SWITCH_OPUS_MAX_BITRATE 510000
 #define FUZE_OPUS_MAX_BITRATE 128000
+#define FUZE_OPUS_DEFAULT_BITRATE 24000
 #define SWITCH_OPUS_MIN_FEC_BITRATE 12400
 
 /*! \brief Various codec settings */
@@ -1254,7 +1255,7 @@ static switch_status_t opus_load_config(switch_bool_t reload)
     opus_prefs.bitrate_negotiation = 1;
     opus_prefs.fec_decode = 1;
     opus_prefs.adjust_bitrate = 1;
-    opus_prefs.maxaveragebitrate = FUZE_OPUS_MAX_BITRATE;
+    opus_prefs.maxaveragebitrate = FUZE_OPUS_DEFAULT_BITRATE;
 
     if ((settings = switch_xml_child(cfg, "settings"))) {
         for (param = switch_xml_child(settings, "param"); param; param = param->next) {
