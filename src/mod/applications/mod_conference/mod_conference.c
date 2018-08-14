@@ -2429,10 +2429,13 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
             pch = strchr(member->sdpname,'i');
             
             if ((pch = strstr(member->sdpname, "contactive=true"))) {
+                char *pmod;
                 switch_channel_set_variable(member->channel, "contactive", "true");
                 member->contactive = SWITCH_TRUE;
 
-                switch_set_flag(member, MFLAG_MOD);
+                if ((pmod = strstr(member->sdpname, "moderator=true"))) {
+                    switch_set_flag(member, MFLAG_MOD);
+                }
 
                 if ((pch = strstr(member->sdpname, "contactive_name="))) {
                     len = (ech = strstr(pch, ";")) ? (ech - pch) : strlen(member->sdpname) - (pch-member->sdpname);
