@@ -42,6 +42,8 @@ typedef struct {
   uint16_t samples_per_10ms;
   webrtc::NetEq::Config config;
   bool receiving;
+  uint16_t payload;
+  uint32_t last_rate;
 } neteq_inst_t;
 
 /*
@@ -144,6 +146,7 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Init_inst(void **inst, app_memory_alloc_t alloc
   neteq_inst->local_seqno = neteq_inst->last_rd_seqno = 0;
   neteq_inst->pkt_ms = packet_ms;
   neteq_inst->rate = rate;
+  neteq_inst->last_rate = rate;
   neteq_inst->receiving = false;
   if (payload == 9) {
     neteq_inst->ts_increment = neteq_inst->pkt_ms * 8;
@@ -152,7 +155,7 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Init_inst(void **inst, app_memory_alloc_t alloc
     neteq_inst->ts_increment = ((rate / 8000) * neteq_inst->pkt_ms * 8);
     neteq_inst->samples_per_10ms = rate/100;
   }
-
+  neteq_inst->payload = payload;
   return WebRtcNetEQ_SUCCESS;
 }
 
@@ -273,9 +276,16 @@ WebRtcNetEQ_status_t WebRtcNetEQ_Extract(void *inst, int8_t *pcm_data, uint32_t 
     if (ret == 0) {
       if (!muted) {
         const int8_t *data = (int8_t *)audio_frame.data();
-        if (audio_frame.sample_rate_hz_ == neteq_inst->rate) {
+        if (audio_frame.sample_rate_hz_ == neteq_inst->rate || neteq_inst->payload > 95) {
           memcpy(pcm_data, data, audio_frame.samples_per_channel_*2);
           neteq_inst->receiving = true;
+	  if (neteq_inst->last_rate != audio_frame.sample_rate_hz_) {
+	    app_log_cb(1, "WebRtcNetEQ_Extract extract rate %d -> %d s/c=%lld r=%d (actual %d) nc=%lld t=%d va=%d\n",
+		       neteq_inst->last_rate, audio_frame.sample_rate_hz_, audio_frame.samples_per_channel_,
+		       audio_frame.sample_rate_hz_, neteq_inst->rate, audio_frame.num_channels_, audio_frame.speech_type_,
+		       audio_frame.vad_activity_);
+	    neteq_inst->last_rate = audio_frame.sample_rate_hz_;
+	  }
         } else {
           app_log_cb(2, "WebRtcNetEQ_Extract extract s/c=%lld r=%d (actual %d) nc=%lld t=%d va=%d\n",
                      audio_frame.samples_per_channel_, audio_frame.sample_rate_hz_, neteq_inst->rate,
