@@ -293,7 +293,7 @@ typedef struct {
 
 /* Some things are different for Opus */
 #define OPUS_CHECK_FREQ 10
-#define OPUS_MIN_LOSS 0
+#define OPUS_MIN_LOSS 5
 #define OPUS_MAX_LOSS 50
 #define OPUS_IANACODE 116
 
