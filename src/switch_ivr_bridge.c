@@ -312,6 +312,7 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
     char description_a[MAX_DESCRIPTION_LEN];
     char description_b[MAX_DESCRIPTION_LEN];
     switch_time_t next_wake_up;
+    int bad_consecutive = 0;
 
     char description_tmp[MAX_DESCRIPTION_LEN];
     int hot_read = 0, hot_read_cnt = 0;
@@ -706,7 +707,10 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
         status = switch_core_session_read_frame(session_a, &read_frame, io_flags | SWITCH_IO_FLAG_NONE | SWITCH_IO_FLAG_DONT_WAIT, stream_id);
 
         if (SWITCH_READ_ACCEPTABLE(status)) {
-
+            if (bad_consecutive > 0) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), SWITCH_LOG_INFO, "Recovered from %d consecutive failed reads\n", bad_consecutive);
+                bad_consecutive = 0;
+            }
             if (read_frame->flags & SFF_HOT_READ && hot_read == 0) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), DEBUG_LEVEL, "Hot read start\n");
                 hot_read = 1;
@@ -753,9 +757,9 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
                     switch_rtp_update_rtp_stats(chan_a, -1, -1, -1);
                     if (neteq_inst) {
                         FuzeNetEqNetworkStatistics nwstats;
-						if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
-							if (nwstats.currentBufferSize > RTP_EVENT_JB_SIZE_THRESHOLD_MS) {
-								int val = nwstats.currentBufferSize;
+                        if (WebRtcNetEQ_GetNetworkStatistics(neteq_inst, &nwstats) == 0) {
+                            if (nwstats.currentBufferSize > RTP_EVENT_JB_SIZE_THRESHOLD_MS) {
+                                int val = nwstats.currentBufferSize;
                                 switch_core_ioctl_stats(session_a, SET_JB_SIZE, &val);
                                 switch_core_ioctl_stats(session_a, SET_EVENT_LONG_JB, NULL);
                             }
@@ -833,8 +837,13 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
                 next_wake_up += (interval_ms*1000);
             }
         } else {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), SWITCH_LOG_DEBUG, "%s ending bridge by request from read function\n", switch_channel_get_name(chan_a));
-            goto end_of_bridge_loop;
+            bad_consecutive += 1;
+            if (bad_consecutive > 100) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), SWITCH_LOG_DEBUG,
+                                  "%s ending bridge by request from read function (%d)\n", switch_channel_get_name(chan_a),
+                                  status);
+                goto end_of_bridge_loop;
+            }
         }
     }
     
