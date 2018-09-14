@@ -838,10 +838,13 @@ static void *audio_bridge_thread(switch_thread_t *thread, void *obj)
             }
         } else {
             bad_consecutive += 1;
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), SWITCH_LOG_DEBUG,
+							  "%s %s (%d) bridge by request from read function (%d)\n",
+							  switch_channel_get_name(chan_a),
+							  bad_consecutive > 100 ? "ending" : "warning",
+							  bad_consecutive,
+							  status);
             if (bad_consecutive > 100) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session_a), SWITCH_LOG_DEBUG,
-                                  "%s ending bridge by request from read function (%d)\n", switch_channel_get_name(chan_a),
-                                  status);
                 goto end_of_bridge_loop;
             }
         }
