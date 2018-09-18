@@ -185,7 +185,7 @@ void fuze_conference_accept(switch_core_session_t *session, ivrc_profile_t *prof
 #define AUTHORIZATION "Authorization-Bearer %s"
 #define BODY_FMT "auth_email=%s&auth_password=%s&mobile_number=%s&dialed_number=%s&iso_code=%s"
 #define BODY_JSON_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&pin=%s&call_info={\"caller_id_number\":\"%s\",\"destination_number\":\"%s\"}"
-#define BODY2_JSON_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&username=%s&ping=%scall_info={\"caller_id_number\":\"%s\",\"destination_number\":\"%s\"}"
+#define BODY2_JSON_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&username=%s&pin=%scall_info={\"caller_id_number\":\"%s\",\"destination_number\":\"%s\"}"
 
 
 struct server_iso_code {
