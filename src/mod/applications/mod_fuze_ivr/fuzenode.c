@@ -185,7 +185,7 @@ void fuze_conference_accept(switch_core_session_t *session, ivrc_profile_t *prof
 #define AUTHORIZATION "Authorization-Bearer %s"
 #define BODY_FMT "auth_email=%s&auth_password=%s&mobile_number=%s&dialed_number=%s&iso_code=%s"
 #define BODY_JSON_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&pin=%s&call_info={\"caller_id_number\":\"%s\",\"destination_number\":\"%s\"}"
-#define BODY2_JSON_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&username=%s&call_info={\"caller_id_number\":\"%s\",\"destination_number\":\"%s\"}"
+#define BODY2_JSON_FMT "auth_email=%s&auth_password=%s&meeting_id=%s&username=%s&ping=%scall_info={\"caller_id_number\":\"%s\",\"destination_number\":\"%s\"}"
 
 
 struct server_iso_code {
@@ -340,9 +340,9 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
 
                 if (meeting_id) {
                     body = switch_core_session_sprintf(session, BODY2_JSON_FMT,
-						       email, password, meeting_id, userid, caller_number, dialed_number);
+						       email, password, meeting_id, userid, pin, caller_number, dialed_number);
 		    body2 = switch_core_session_sprintf(session, BODY2_JSON_FMT,
-							email, "xxxxx", meeting_id, userid, caller_number, dialed_number);
+							email, "xxxxx", meeting_id, userid, pin, caller_number, dialed_number);
 		    cmd = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUTHENTICATE_USER_SERVICE, CONTENT_URLENCODED, body);
 		    cmd2 = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUTHENTICATE_USER_SERVICE, CONTENT_URLENCODED, body2);
 		    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: About to call authenticate_user (cmd: %s) - dialed_number=%s callerid_number=%s\n",
@@ -421,9 +421,9 @@ void fuze_conference_authenticate(switch_core_session_t *session, ivrc_profile_t
 
                     if (profile->uname) {
                         body = switch_core_session_sprintf(session, BODY2_JSON_FMT,
-                                                           email, password, profile->id, profile->uname, caller_number, dialed_number);
+                                                           email, password, profile->id, profile->uname, pin, caller_number, dialed_number);
                         body2 = switch_core_session_sprintf(session, BODY2_JSON_FMT,
-                                                            email, "xxxxx", profile->id, profile->uname, caller_number, dialed_number);
+                                                            email, "xxxxx", profile->id, profile->uname, pin, caller_number, dialed_number);
                         cmd = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUTHENTICATE_USER_SERVICE, CONTENT_URLENCODED, body);
                         cmd2 = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUTHENTICATE_USER_SERVICE, CONTENT_URLENCODED, body2);
                         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "IVRC: About to call authenticate_user (cmd: %s) - dialed_number=%s callerid_number=%s\n",
