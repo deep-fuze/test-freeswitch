@@ -14526,7 +14526,7 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
                 conference->domain = "cluecon.com";
             }
 
-            conference->rate = 48000; //rate;
+            conference->rate = rate;
             conference->interval = interval;
             conference->ivr_dtmf_timeout = ivr_dtmf_timeout;
             conference->ivr_input_timeout = ivr_input_timeout;
