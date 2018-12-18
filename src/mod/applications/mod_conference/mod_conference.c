@@ -73,9 +73,9 @@ static opus_profile_t opus_profiles[OPUS_PROFILES] = {
     {OPUS_MIN_LOSS, 48000, 64000, 1},
     {OPUS_MIN_LOSS, 48000, 24000, 1},
     {10, 48000, 24000, 1},
-    {20, 48000, 26000, 1},
-    {30, 48000, 28000, 1},
-    {OPUS_MAX_LOSS, 48000, 28000, 1}};
+    {20, 8000, 20000, 1},
+    {30, 8000, 16000, 1},
+    {OPUS_MAX_LOSS, 8000, 12000, 1}};
 
 typedef enum {
     INPUT_LOOP_RET_DONE = 0,
@@ -2835,9 +2835,10 @@ static void conference_opus_loss_adjust(conference_obj_t *conference) {
 
             if (member->loss_idx != prev_loss_idx) {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_INFO,
-                                  "M(%s)/I(%s):U(%s) Setting loss for opus member %d to %2.2f%% (%d -> %d) [list %d]\n",
+                                  "M(%s)/I(%s):U(%s) Setting loss for opus member %d to %2.2f%% (%d -> %d) [list %d] [sr:%d br:%d]\n",
                                   conference->meeting_id, conference->instance_id, member->mname,
-                                  member->id, member->loss, prev_loss_idx, member->loss_idx, i);
+                                  member->id, member->loss, prev_loss_idx, member->loss_idx, i,
+								  opus_profiles[member->loss_idx].samplerate, opus_profiles[member->loss_idx].bitrate);
 
                 /* TBD: adjust member loss based on schedule */
                 switch_core_ctl(switch_core_session_get_write_codec(member->session), 11, (uint32_t *)&opus_profiles[member->loss_idx].channels);
