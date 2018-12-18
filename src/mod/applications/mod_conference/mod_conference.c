@@ -72,10 +72,10 @@ static opus_profile_t opus_profiles[OPUS_PROFILES] = {
     {OPUS_MIN_LOSS, 48000, 128000, 1},
     {OPUS_MIN_LOSS, 48000, 64000, 1},
     {OPUS_MIN_LOSS, 48000, 24000, 1},
-    {10, 24000, 20000, 1},
-    {20, 16000, 18800, 1},
-    {30, 16000, 16400, 1},
-    {OPUS_MAX_LOSS, 16000, 12400, 1}};
+    {10, 48000, 24000, 1},
+    {20, 48000, 26000, 1},
+    {30, 48000, 28000, 1},
+    {OPUS_MAX_LOSS, 48000, 28000, 1}};
 
 typedef enum {
     INPUT_LOOP_RET_DONE = 0,
