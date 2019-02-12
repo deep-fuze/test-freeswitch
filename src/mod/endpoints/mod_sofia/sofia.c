@@ -2327,6 +2327,7 @@ void event_handler(switch_event_t *event)
 			switch_event_add_header_string(pevent, SWITCH_STACK_BOTTOM, "Unique-ID", switch_event_get_header_nil(event, "Orig-Unique-ID"));
 			switch_event_add_header_string(pevent, SWITCH_STACK_BOTTOM, "variable_sip_from_user", switch_event_get_header_nil(event, "Orig-variable_sip_from_user"));
 			switch_event_add_header_string(pevent, SWITCH_STACK_BOTTOM, "variable_sip_to_user", switch_event_get_header_nil(event, "Orig-variable_sip_to_user"));
+			switch_event_add_header_string(pevent, SWITCH_STACK_BOTTOM, "variable_sip_full_to_user", switch_event_get_header_nil(event, "sip_full_to"));
 
 			/* we cannot use switch_event_fire, or otherwise we'll start an endless loop */
 			sofia_presence_event_handler(pevent);

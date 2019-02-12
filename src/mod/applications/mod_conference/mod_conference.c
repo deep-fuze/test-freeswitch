@@ -1553,6 +1553,7 @@ static switch_status_t conference_add_event_member_data(conference_member_t *mem
     }
 
     if (member->session) {
+        const char *full_to;
         switch_channel_t *channel = switch_core_session_get_channel(member->session);
 
         if (member->verbose_events) {
@@ -1562,6 +1563,35 @@ static switch_status_t conference_add_event_member_data(conference_member_t *mem
         }
         switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Video", "%s",
                                 switch_channel_test_flag(switch_core_session_get_channel(member->session), CF_VIDEO) ? "true" : "false" );
+        full_to = switch_channel_get_variable(member->channel, "sip_full_to");
+        if (full_to) {
+            char *ak = strstr(full_to, "AK=");
+            if (ak) {
+                char *eos;
+                ak += 3;
+                eos = ak+1;
+                while ((eos-ak) < 30) {
+                    char c = *eos;
+                    if ((c >= 'a' && c <= 'f') ||
+                        (c >= 'A' && c <= 'F') ||
+                        (c >= '0' && c <= '9')) {
+                        eos += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if (eos) {
+                    char akstr[30];
+                    int len = (int)(eos - ak);
+                    if (len >= 30) {
+                        len = 29;
+                    }
+                    strncpy(akstr, ak, len);
+                    akstr[len] = 0;
+                    switch_event_add_header(event, SWITCH_STACK_BOTTOM, "AK", "%s", akstr);
+                }
+            }
+        }
     }
 
     muted = switch_test_flag(member, MFLAG_CAN_SPEAK) ? SWITCH_FALSE : SWITCH_TRUE;
@@ -2838,7 +2868,7 @@ static void conference_opus_loss_adjust(conference_obj_t *conference) {
                                   "M(%s)/I(%s):U(%s) Setting loss for opus member %d to %2.2f%% (%d -> %d) [list %d] [sr:%d br:%d]\n",
                                   conference->meeting_id, conference->instance_id, member->mname,
                                   member->id, member->loss, prev_loss_idx, member->loss_idx, i,
-								  opus_profiles[member->loss_idx].samplerate, opus_profiles[member->loss_idx].bitrate);
+                                  opus_profiles[member->loss_idx].samplerate, opus_profiles[member->loss_idx].bitrate);
 
                 /* TBD: adjust member loss based on schedule */
                 switch_core_ctl(switch_core_session_get_write_codec(member->session), 11, (uint32_t *)&opus_profiles[member->loss_idx].channels);
