@@ -4158,7 +4158,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_dtls(switch_rtp_t *rtp_session, d
     dtls->ca = switch_core_sprintf(rtp_session->pool, "%s%sca-bundle.crt", SWITCH_GLOBAL_dirs.certs_dir, SWITCH_PATH_SEPARATOR);
 
     ERR_clear_error();
-    dtls->ssl_ctx = SSL_CTX_new(DTLSv1_method());
+    dtls->ssl_ctx = SSL_CTX_new(DTLSv1_2_method());
     switch_assert(dtls->ssl_ctx);
 
     SSL_CTX_set_mode(dtls->ssl_ctx, SSL_MODE_AUTO_RETRY);
@@ -4180,11 +4180,18 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_add_dtls(switch_rtp_t *rtp_session, d
         }
     }
     ERR_clear_error();
-    SSL_CTX_set_cipher_list(dtls->ssl_ctx, "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH");
+
+#define DTLS_OLD_CIPHERS "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH"
+#define DTLS_CIPHERS "ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:RSA+AESGCM:RSA+AES:!aNULL:!MD5:!DSS"
+#define DTLS_SRTP "SRTP_AES128_CM_HMAC_SHA1_80"
+
+#define DTLS_OLD_SRTP "SRTP_AES128_CM_SHA1_80"
+
+    SSL_CTX_set_cipher_list(dtls->ssl_ctx, DTLS_CIPHERS);
     SSL_CTX_set_session_cache_mode(dtls->ssl_ctx, SSL_SESS_CACHE_OFF);
 
 #ifdef HAVE_OPENSSL_DTLS_SRTP
-    SSL_CTX_set_tlsext_use_srtp(dtls->ssl_ctx, "SRTP_AES128_CM_SHA1_80");
+    SSL_CTX_set_tlsext_use_srtp(dtls->ssl_ctx, DTLS_OLD_SRTP);
 #endif
 
     dtls->type = type;
