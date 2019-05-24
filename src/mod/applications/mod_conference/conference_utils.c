@@ -222,7 +222,9 @@ fuze_status_t authenticate(switch_core_session_t *session, conf_auth_profile_t *
     fuze_status_t status = FUZE_STATUS_FALSE;
     const char *caller_number;
     const char *dialed_number;
-    const char *body, *cmd, *url, *body2, *cmd2, *ak;
+    const char *body, *cmd, *url, *body2, *cmd2, *ak, *full_to;
+    char akstr[30];
+    akstr[0] = '\0';
 
     switch_channel_t *channel = switch_core_session_get_channel(session);
 
@@ -234,7 +236,34 @@ fuze_status_t authenticate(switch_core_session_t *session, conf_auth_profile_t *
         url = get_caller_url();
     }
 
-    ak = switch_channel_get_variable(channel, "AK");
+    full_to = switch_channel_get_variable(member->channel, "sip_full_to");
+    if (full_to) {
+        ak = strstr(full_to, "AK=");
+        if (ak) {
+            char *eos;
+            ak += 3;
+            eos = ak+1;
+            while ((eos-ak) < 30) {
+                char c = *eos;
+                if ((c >= 'a' && c <= 'f') ||
+                    (c >= 'A' && c <= 'F') ||
+                    (c >= '0' && c <= '9')) {
+                    eos += 1;
+                } else {
+                    break;
+                }
+            }
+            if (eos) {
+                int len = (int)(eos - ak);
+                if (len >= 30) {
+                    len = 29;
+                }
+                strncpy(akstr, ak, len);
+                akstr[len] = '\0';
+                ak = akstr;
+            }
+        }
+    }
     caller_number = switch_channel_get_variable(channel, "caller_id_number");
     dialed_number = switch_channel_get_variable(channel, "userfield");
 
@@ -250,7 +279,7 @@ fuze_status_t authenticate(switch_core_session_t *session, conf_auth_profile_t *
     }
 
     /* Post 2 */
-    body = switch_core_session_sprintf(session, BODY_JSON_FMT, AUTH_EMAIL, AUTH_PASSWD, conference_id, instance_id, ak ? ak : "", pin, caller_number, dialed_number);
+    body = switch_core_session_sprintf(session, BODY_JSON_FMT, AUTH_EMAIL, AUTH_PASSWD, conference_id, instance_id, akstr, pin, caller_number, dialed_number);
     cmd = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUTHENTICATE_CALLER_SERVICE, CONTENT, body);
     body2 = switch_core_session_sprintf(session, BODY_JSON_FMT, AUTH_EMAIL, "xxxxx", conference_id, instance_id, pin, caller_number, dialed_number);
     cmd2 = switch_core_session_sprintf(session, "%s%s json %s post %s", url, AUTHENTICATE_CALLER_SERVICE, CONTENT, body2);
