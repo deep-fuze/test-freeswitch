@@ -222,13 +222,14 @@ fuze_status_t authenticate(switch_core_session_t *session, conf_auth_profile_t *
     fuze_status_t status = FUZE_STATUS_FALSE;
     const char *caller_number;
     const char *dialed_number;
-    const char *body, *cmd, *url, *body2, *cmd2, *ak, *full_to;
+    const char *body, *cmd, *url, *body2, *cmd2, *full_to;
+    char *ak;
     char akstr[30];
-    akstr[0] = '\0';
 
     switch_channel_t *channel = switch_core_session_get_channel(session);
 
     url = switch_channel_get_variable(channel, "fuze_callback_caller_url");
+    akstr[0] = '\0';
     if (!url || zstr(url)) {
         url = switch_channel_get_variable(channel, "callback_caller_url");
     }
