@@ -236,7 +236,7 @@ fuze_status_t authenticate(switch_core_session_t *session, conf_auth_profile_t *
         url = get_caller_url();
     }
 
-    full_to = switch_channel_get_variable(member->channel, "sip_full_to");
+    full_to = switch_channel_get_variable(channel, "sip_full_to");
     if (full_to) {
         ak = strstr(full_to, "AK=");
         if (ak) {
