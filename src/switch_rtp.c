@@ -1084,6 +1084,10 @@ static switch_status_t rtp_recvfrom(switch_rtp_t *rtp_session, switch_sockaddr_t
 
         tret = (switch_status_t) fuze_transport_socket_read(rtp_session->rtp_conn, &saddr, (uint8_t *) buf, len);
 
+        if (len) {
+            rtp_session->missed_count = 0;
+        }
+
 #if 0
         if ((switch_time_now() - now) > 1000 && rtp_session->ignore_rtp_size == 0) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
@@ -3644,6 +3648,8 @@ SWITCH_DECLARE(void) switch_rtp_set_max_missed_packets(switch_rtp_t *rtp_session
                           "new max missed packets(%d->%d) greater than current missed packets(%d). RTP will timeout.\n",
                           rtp_session->missed_count, max, rtp_session->missed_count);
     }
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+                      "new max missed packets(%d->%d)\n", rtp_session->max_missed_packets, max);
 
     rtp_session->max_missed_packets = max;
 }
@@ -7075,6 +7081,9 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                     if (bytes) {
                         rtp_session->missed_count = 0;
                     } else if (++rtp_session->missed_count >= rtp_session->max_missed_packets) {
+						switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR,
+										  "missed_count exceeded %d > %d\n",
+										  rtp_session->missed_count, rtp_session->max_missed_packets);
                         ret = -2;
                         goto end;
                     }
@@ -7846,6 +7855,9 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_read(switch_rtp_t *rtp_session, void 
 
     if (bytes < 0) {
         *datalen = 0;
+        if (bytes == -2) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "SWITCH_STATUS_TIMEOUT");
+        }
         return bytes == -2 ? SWITCH_STATUS_TIMEOUT : SWITCH_STATUS_GENERR;
     } else if (bytes == 0) {
         *datalen = 0;
@@ -7909,6 +7921,8 @@ SWITCH_DECLARE(switch_status_t) switch_rtcp_zerocopy_read_frame(switch_rtp_t *rt
 
         return SWITCH_STATUS_SUCCESS;
     }
+
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "SWITCH_STATUS_TIMEOUT");
 
     return SWITCH_STATUS_TIMEOUT;
 }
@@ -8012,6 +8026,9 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_zerocopy_read_frame(switch_rtp_t *rtp
 
     if (bytes < 0) {
         frame->datalen = 0;
+        if (bytes == -2) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "SWITCH_STATUS_TIMEOUT");
+        }
         return bytes == -2 ? SWITCH_STATUS_TIMEOUT : SWITCH_STATUS_GENERR;
     } else if (bytes < rtp_header_len) {
         frame->datalen = 0;

@@ -2210,6 +2210,12 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_read_frame(switch_core_session
                     engine->max_missed_packets = (engine->read_impl.samples_per_second * rtp_timeout_sec) /
                         engine->read_impl.samples_per_packet;
 
+                    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, 
+                                      "switch_rtp_set_max_missed_packets "
+                                      "switch_rtp_set_max_missed_packets rtp_timeout_sec=%d sps=%d * rtp_timeout_sec=%d / spp=%d == %d\n",
+                                      rtp_timeout_sec, engine->read_impl.samples_per_second, rtp_timeout_sec, engine->read_impl.samples_per_packet,
+                                      engine->max_missed_packets);
+
                     switch_rtp_set_max_missed_packets(engine->rtp_session, engine->max_missed_packets);
                     if (!rtp_hold_timeout_sec) {
                         rtp_hold_timeout_sec = rtp_timeout_sec * 10;
@@ -3699,6 +3705,9 @@ SWITCH_DECLARE(uint8_t) switch_core_media_negotiate_sdp(switch_core_session_t *s
             recvonly = 1;
 
             if (switch_rtp_ready(a_engine->rtp_session)) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                                  "switch_rtp_set_max_missed_packets 0");
+
                 switch_rtp_set_max_missed_packets(a_engine->rtp_session, 0);
                 a_engine->max_missed_hold_packets = 0;
                 a_engine->max_missed_packets = 0;
@@ -4737,6 +4746,10 @@ SWITCH_DECLARE(int) switch_core_media_toggle_hold(switch_core_session_t *session
             changed = 1;
 
             if (a_engine->max_missed_hold_packets && a_engine->rtp_session) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                                  "switch_rtp_set_max_missed_packets to hold packets %d",
+                                  a_engine->max_missed_hold_packets);
+
                 switch_rtp_set_max_missed_packets(a_engine->rtp_session, a_engine->max_missed_hold_packets);
             }
 
@@ -4789,6 +4802,11 @@ SWITCH_DECLARE(int) switch_core_media_toggle_hold(switch_core_session_t *session
 
             if (a_engine->max_missed_packets && a_engine->rtp_session) {
                 switch_rtp_reset_media_timer(a_engine->rtp_session);
+
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                                  "switch_rtp_set_max_missed_packets %d",
+                                  a_engine->max_missed_packets);
+
                 switch_rtp_set_max_missed_packets(a_engine->rtp_session, a_engine->max_missed_packets);
             }
 
@@ -6024,6 +6042,10 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_activate_rtp(switch_core_sessi
         }
 
         if (smh->mparams->rtp_timeout_sec) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session),
+                              SWITCH_LOG_INFO, "max_missed_packets = %d * %ds / %d = %d\n",
+                              a_engine->read_impl.samples_per_second, smh->mparams->rtp_timeout_sec, a_engine->read_impl.samples_per_packet,
+                              (a_engine->read_impl.samples_per_second * smh->mparams->rtp_timeout_sec) / a_engine->read_impl.samples_per_packet);
             a_engine->max_missed_packets = (a_engine->read_impl.samples_per_second * smh->mparams->rtp_timeout_sec) / a_engine->read_impl.samples_per_packet;
 
             switch_rtp_set_max_missed_packets(a_engine->rtp_session, a_engine->max_missed_packets);
