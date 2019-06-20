@@ -563,6 +563,8 @@ struct switch_rtp {
 
     switch_time_t last_rtcp_send;
     int16_t remote_lost;
+
+    int consecutive_errors;
 };
 
 struct switch_rtcp_report_block {
@@ -4851,6 +4853,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->level_in = -1;
 
     rtp_session->last_rtcp_send = switch_time_now();
+    rtp_session->consecutive_errors = 0;
 
     rtp_session->stats.recv_rate_history_idx = 0;
     rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
@@ -7859,14 +7862,22 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_read(switch_rtp_t *rtp_session, void 
 
     if (bytes < 0) {
         *datalen = 0;
-        if (bytes == -2) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "SWITCH_STATUS_TIMEOUT");
+        if (++rtp_session->consecutive_errors > 50) {
+            if (bytes == -2) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "SWITCH_STATUS_TIMEOUT");
+            } else {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "SWITCH_STATUS_GENERR");
+            }
+            return bytes == -2 ? SWITCH_STATUS_TIMEOUT : SWITCH_STATUS_GENERR;
+        } else {
+			return SWITCH_STATUS_BREAK;
         }
-        return bytes == -2 ? SWITCH_STATUS_TIMEOUT : SWITCH_STATUS_GENERR;
     } else if (bytes == 0) {
+		rtp_session->consecutive_errors = 0;
         *datalen = 0;
         return SWITCH_STATUS_BREAK;
     } else {
+		rtp_session->consecutive_errors = 0;
         if (bytes > rtp_header_len) {
             bytes -= rtp_header_len;
         }
@@ -8028,14 +8039,22 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_zerocopy_read_frame(switch_rtp_t *rtp
 
     if (bytes < 0) {
         frame->datalen = 0;
-        if (bytes == -2) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "SWITCH_STATUS_TIMEOUT");
+        if (++rtp_session->consecutive_errors > 50) {
+            if (bytes == -2) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "SWITCH_STATUS_TIMEOUT");
+            } else {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "SWITCH_STATUS_GENERR");
+            }
+            return bytes == -2 ? SWITCH_STATUS_TIMEOUT : SWITCH_STATUS_GENERR;
+        } else {
+            return SWITCH_STATUS_BREAK;
         }
-        return bytes == -2 ? SWITCH_STATUS_TIMEOUT : SWITCH_STATUS_GENERR;
     } else if (bytes < rtp_header_len) {
+		rtp_session->consecutive_errors = 0;
         frame->datalen = 0;
         return SWITCH_STATUS_BREAK;
     } else {
+        rtp_session->consecutive_errors = 0;
         bytes -= rtp_header_len;
     }
 
