@@ -7081,11 +7081,15 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
                     if (bytes) {
                         rtp_session->missed_count = 0;
                     } else if (++rtp_session->missed_count >= rtp_session->max_missed_packets) {
-						switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR,
-										  "missed_count exceeded %d > %d\n",
-										  rtp_session->missed_count, rtp_session->max_missed_packets);
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR,
+                                          "missed_count exceeded %d > %d\n",
+                                          rtp_session->missed_count, rtp_session->max_missed_packets);
                         ret = -2;
                         goto end;
+                    } else if (rtp_session->missed_count > 0) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR,
+                                          "missed_count increasing %d > %d\n",
+                                          rtp_session->missed_count, rtp_session->max_missed_packets);
                     }
                 }
 
@@ -7921,8 +7925,6 @@ SWITCH_DECLARE(switch_status_t) switch_rtcp_zerocopy_read_frame(switch_rtp_t *rt
 
         return SWITCH_STATUS_SUCCESS;
     }
-
-    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_ERROR, "SWITCH_STATUS_TIMEOUT");
 
     return SWITCH_STATUS_TIMEOUT;
 }
