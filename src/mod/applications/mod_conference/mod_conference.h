@@ -850,6 +850,7 @@ struct conference_member {
   uint32_t min_iir_to_speak_when_no_one_speaking;
 
   al_handle_t *al;
+  rtp_rx_congestion_state_t rx_state;
 };
 
 #define ALC_HRTF_SOFT  0x1992

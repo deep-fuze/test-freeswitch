@@ -129,7 +129,7 @@ void TransportPoll::OnDataReceived(void* pContext, Buffer::Ptr spBuffer)
         Buffer::Ptr rdBuf = te->Data(IP, port, remChanged);
 
         if (rdBuf) {
-	    conn_wrap->rxCnt += 1;
+            conn_wrap->rxCnt += 1;
             if (conn_wrap->ignore_size != 0) {
                 if (rdBuf->size() < conn_wrap->ignore_size) {
                     return;
@@ -336,7 +336,7 @@ void* fuze_transport_create_transport_base()
 
     TransportBase::Ptr tbase = Transport::GetInstance()->CreateBase();
     if (tbase) {
-	    TransportDB::GetInstance().addBase(tbase);
+            TransportDB::GetInstance().addBase(tbase);
         return static_cast<void*>(tbase.get());
     }
 
@@ -704,5 +704,19 @@ extern void fuze_release_udp_port(uint16_t port)
 {
     ReleaseUdpPort(port);
 }
+
+int fuze_transport_is_udp(void *conn)
+{
+  if (!conn) {
+    return 1;
+  }
+  connection_wrap_t *conn_wrap = (connection_wrap_t*)conn;
+
+  ConnectionType rType;
+  conn_wrap->conn_->GetConnectedType(rType);
+
+  return rType == CT_UDP;
+}
+
 
 /* End: C Interface*/

@@ -6176,6 +6176,7 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
     switch_status_t status;
     switch_bool_t can_speak = SWITCH_FALSE;
     switch_bool_t cn_state;
+    switch_event_t *event;
 
     if (!(switch_test_flag(member, MFLAG_RUNNING) && switch_channel_ready(channel))) {
         return INPUT_LOOP_RET_DONE;
@@ -6189,6 +6190,14 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(member->session), SWITCH_LOG_ERROR, "Input Timer: switch yield\n");
         /* switch_yield(100000); */
         return INPUT_LOOP_RET_YIELD;
+    }
+
+    if (switch_rtp_get_congestion_state(channel, &member->rx_state) &&
+        switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, CONF_EVENT_MAINT) == SWITCH_STATUS_SUCCESS) {
+        conference_add_event_member_data(member, event);
+        switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Action", "new-rxstate");
+        switch_event_add_header(event, SWITCH_STACK_BOTTOM, "New-RxState", "%d", member->rx_state);
+        switch_event_fire(&event);
     }
 
     /* Read a frame */
@@ -6900,6 +6909,7 @@ OUTPUT_LOOP_RET process_participant_output_end_member(participant_thread_data_t 
 SWITCH_DECLARE(void) switch_close_transport(switch_channel_t *channel);
 SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int level_in, int level_out, int active);
 SWITCH_DECLARE(void) switch_rtp_reset_rtp_stats(switch_channel_t *channel);
+SWITCH_DECLARE(switch_bool_t) switch_rtp_get_congestion_state(switch_channel_t *channel, rtp_rx_congestion_state_t *state);
 
 /* marshall frames from the conference (or file or tts output) to the call leg */
 /* NB. this starts the input thread after some initial setup for the call leg */

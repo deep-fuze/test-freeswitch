@@ -733,6 +733,8 @@ typedef enum {
 
 typedef enum {
     RTP_RX_CONGESTION_GOOD,
+	RTP_RX_CONGESTION_FAIR,
+	RTP_RX_CONGESTION_POOR,
     RTP_RX_CONGESTION_BAD
 } rtp_rx_congestion_state_t;
 

@@ -435,6 +435,7 @@ struct switch_rtp {
     switch_rtp_stats_t stats;
     int rtcp_interval;
     uint32_t send_rtcp;
+    switch_bool_t congestion_state_changed;
     switch_bool_t rtcp_fresh_frame;
     uint8_t been_active_talker;
 
@@ -2816,7 +2817,15 @@ static int add_rx_congestion(switch_rtp_t *rtp_session, void *body, switch_rtcp_
     rx_congestion->version = 1;
 
     rx_congestion->jitter = htons(rtp_session->stats.last_jitter);
-    rx_congestion->degraded = htons(rtp_session->stats.rx_congestion_state);
+    if (rtp_session->stats.rx_congestion_state == RTP_RX_CONGESTION_BAD) {
+        rx_congestion->degraded = 3;
+    } else if (rtp_session->stats.rx_congestion_state == RTP_RX_CONGESTION_POOR) {
+        rx_congestion->degraded = 2;
+    } else if (rtp_session->stats.rx_congestion_state == RTP_RX_CONGESTION_FAIR) {
+        rx_congestion->degraded = 1;
+    } else {
+        rx_congestion->degraded = 0;
+    }
 
     rx_congestion->active = rtp_session->active;
     rx_congestion->muted = rtp_session->muted;
@@ -4854,6 +4863,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
 
     rtp_session->last_rtcp_send = switch_time_now();
     rtp_session->consecutive_errors = 0;
+    rtp_session->congestion_state_changed = SWITCH_FALSE;
 
     rtp_session->stats.recv_rate_history_idx = 0;
     rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
@@ -7870,14 +7880,14 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_read(switch_rtp_t *rtp_session, void 
             }
             return bytes == -2 ? SWITCH_STATUS_TIMEOUT : SWITCH_STATUS_GENERR;
         } else {
-			return SWITCH_STATUS_BREAK;
+            return SWITCH_STATUS_BREAK;
         }
     } else if (bytes == 0) {
-		rtp_session->consecutive_errors = 0;
+        rtp_session->consecutive_errors = 0;
         *datalen = 0;
         return SWITCH_STATUS_BREAK;
     } else {
-		rtp_session->consecutive_errors = 0;
+        rtp_session->consecutive_errors = 0;
         if (bytes > rtp_header_len) {
             bytes -= rtp_header_len;
         }
@@ -8050,7 +8060,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_zerocopy_read_frame(switch_rtp_t *rtp
             return SWITCH_STATUS_BREAK;
         }
     } else if (bytes < rtp_header_len) {
-		rtp_session->consecutive_errors = 0;
+        rtp_session->consecutive_errors = 0;
         frame->datalen = 0;
         return SWITCH_STATUS_BREAK;
     } else {
@@ -9598,34 +9608,66 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
                 if (rtp_session->stats.ignore_rate_period > 0) {
                     rtp_session->stats.ignore_rate_period -= 1;
                 } else {
-                    float delta = 0.0;
-                    if (rtp_session->stats.rx_congestion_state == RTP_RX_CONGESTION_GOOD) {
-                        for (int i = 0; i < RTP_STATS_RATE_HISTORY_BAD; i++) {
-                            int idx = rtp_session->stats.recv_rate_history_idx - (i+1);
-                            idx = (idx < 0) ? (idx + RTP_STATS_RATE_HISTORY) : idx;
-                            delta += abs(rtp_session->stats.recv_rate_history[idx] - 68);
+                    //float delta = 0.0;
+                    uint32_t avg = 0;
+                    uint32_t stddev = 0;
+                    switch_bool_t b_cnt = SWITCH_FALSE;
+                    uint32_t avg_threshhold;
+                    uint32_t avg_stddev;
+                    rtp_rx_congestion_state_t prev_state;
+
+                    if (rtp_session->samples_per_interval != 160) {
+                        b_cnt = SWITCH_TRUE;
+                    }
+
+                    avg_threshhold = (b_cnt ? 44 : 60);
+                    avg_stddev = (b_cnt ? 6 : 8);
+
+                    if (b_cnt && fuze_transport_is_udp(rtp_session->rtp_conn)) {
+                        avg_stddev = 8;
+                    }
+
+                    for (int i = 0; i < 5; ++i) {
+                        int idx = rtp_session->stats.recv_rate_history_idx - (i+1);
+                        idx = (idx < 0) ? (idx + RTP_STATS_RATE_HISTORY) : idx;
+                        avg += rtp_session->stats.recv_rate_history[idx];
+                    }
+                    avg /= 5;
+                    for (int i = 0; i < 5; ++i) {
+                        int idx = rtp_session->stats.recv_rate_history_idx - (i+1);
+                        int diff;
+                        idx = (idx < 0) ? (idx + RTP_STATS_RATE_HISTORY) : idx;
+                        diff = rtp_session->stats.recv_rate_history[idx]- avg;
+                        stddev += diff * diff;
+                    }
+                    stddev = (uint32_t)(sqrt((double)stddev/5));
+                    
+                    prev_state = rtp_session->stats.rx_congestion_state;
+                    if (avg < avg_threshhold || stddev > avg_stddev) { // 6, 8
+                        rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_BAD;
+                    }
+                    else if (stddev > (avg_stddev*10/15)) { // 4, 5 (divide by 1.5)
+                        rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_POOR;
+                    }
+                    else if (stddev > ((avg_stddev+2)/3)) { // 2, 3 (+2 to round up)
+                        rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_FAIR;
+                    }
+                    else if (stddev > (avg_stddev/4)) { // 1, 2
+                        rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
+                    }
+
+                    if (prev_state != rtp_session->stats.rx_congestion_state) {
+                        rtp_session->congestion_state_changed = SWITCH_TRUE;
+                        if (rtp_session->stats.rx_congestion_state == RTP_RX_CONGESTION_GOOD) {
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+                                              "Transition to good rx congestion state: %d -> %d\n",
+                                              prev_state, rtp_session->stats.rx_congestion_state);
+                        } else {
+                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
+                                              "Transition to worse rx congestion state: %d -> %d\n",
+                                              prev_state, rtp_session->stats.rx_congestion_state);
                         }
-                        delta = delta / (float)RTP_STATS_RATE_HISTORY_BAD;
-                        if (((delta > 5 && rtp_session->samples_per_second == 16000) || jbuf > 750)) {
-                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "Transition to bad rx congestion state: delta:%f\n",
-                                              delta);
-                            rtp_session->send_rtcp |=  (SWITCH_RTCP_NORMAL | SWITCH_RTCP_RX_CONGESTION);
-                            rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_BAD;
-                        }
-                    } else {
-                        for (int i = 0; i < RTP_STATS_RATE_HISTORY_GOOD; i++) {
-                            int idx = rtp_session->stats.recv_rate_history_idx - (i+1);
-                            idx = (idx < 0) ? (idx + RTP_STATS_RATE_HISTORY) : idx;
-                            delta += abs(rtp_session->stats.recv_rate_history[idx] - 68);
-                        }
-                        delta = delta / (float)RTP_STATS_RATE_HISTORY_GOOD;
-                        if ((delta < 2 && rtp_session->samples_per_second == 16000) && jbuf < 500) {
-                            delta = 0;
-                            rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
-                            rtp_session->send_rtcp |=  (SWITCH_RTCP_NORMAL | SWITCH_RTCP_RX_CONGESTION);
-                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING, "Transition to good congestion state: delta:%f\n",
-                                              delta);
-                        }
+                        rtp_session->send_rtcp |=  (SWITCH_RTCP_NORMAL | SWITCH_RTCP_RX_CONGESTION);
                     }
                 }
             } else {
@@ -9999,6 +10041,26 @@ SWITCH_DECLARE(void) switch_rtp_set_opus_rate(switch_channel_t *channel, int rat
     if (!rtp_session) { return; }
 
     rtp_session->opus_rate = rate;
+}
+
+
+SWITCH_DECLARE(switch_bool_t) switch_rtp_get_congestion_state(switch_channel_t *channel, rtp_rx_congestion_state_t *state)
+{
+    switch_bool_t ret;
+
+    switch_rtp_t *rtp_session;
+    if (!channel) { return SWITCH_FALSE; }
+
+    rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
+
+    if (!rtp_session) { return SWITCH_FALSE; }
+
+    *state = rtp_session->stats.rx_congestion_state;
+
+    ret = rtp_session->congestion_state_changed;
+    rtp_session->congestion_state_changed = SWITCH_FALSE;
+
+    return ret;
 }
 
 /* For Emacs:
