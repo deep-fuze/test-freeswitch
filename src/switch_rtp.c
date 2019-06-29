@@ -436,6 +436,7 @@ struct switch_rtp {
     int rtcp_interval;
     uint32_t send_rtcp;
     switch_bool_t congestion_state_changed;
+    int congestion_state_changed_hysteresis;
     switch_bool_t rtcp_fresh_frame;
     uint8_t been_active_talker;
 
@@ -4864,6 +4865,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->last_rtcp_send = switch_time_now();
     rtp_session->consecutive_errors = 0;
     rtp_session->congestion_state_changed = SWITCH_FALSE;
+    rtp_session->congestion_state_changed_hysteresis = 0;
 
     rtp_session->stats.recv_rate_history_idx = 0;
     rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
@@ -9614,7 +9616,7 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
                     switch_bool_t b_cnt = SWITCH_FALSE;
                     uint32_t avg_threshhold;
                     uint32_t avg_stddev;
-                    rtp_rx_congestion_state_t prev_state;
+                    rtp_rx_congestion_state_t prev_state, next_state;;
 
                     if (rtp_session->samples_per_interval != 160) {
                         b_cnt = SWITCH_TRUE;
@@ -9643,17 +9645,32 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
                     stddev = (uint32_t)(sqrt((double)stddev/5));
                     
                     prev_state = rtp_session->stats.rx_congestion_state;
+                    next_state = prev_state;
                     if (avg < avg_threshhold || stddev > avg_stddev) { // 6, 8
-                        rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_BAD;
+                        next_state = RTP_RX_CONGESTION_BAD;
                     }
                     else if (stddev > (avg_stddev*10/15)) { // 4, 5 (divide by 1.5)
-                        rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_POOR;
+                        next_state = RTP_RX_CONGESTION_POOR;
                     }
                     else if (stddev > ((avg_stddev+2)/3)) { // 2, 3 (+2 to round up)
-                        rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_FAIR;
+                        next_state = RTP_RX_CONGESTION_FAIR;
                     }
                     else if (stddev > (avg_stddev/4)) { // 1, 2
-                        rtp_session->stats.rx_congestion_state = RTP_RX_CONGESTION_GOOD;
+                        next_state = RTP_RX_CONGESTION_GOOD;
+                    }
+
+                    if (rtp_session->congestion_state_changed_hysteresis == 0) {
+                        if (prev_state != next_state) {
+                            rtp_session->stats.rx_congestion_state = next_state;
+                            rtp_session->congestion_state_changed_hysteresis = 2;
+                        }
+                    } else if (rtp_session->congestion_state_changed_hysteresis > 0) {
+                        if (prev_state < next_state) {
+                            rtp_session->stats.rx_congestion_state = next_state;
+                            rtp_session->congestion_state_changed_hysteresis = 2;
+                        } else {
+                            rtp_session->congestion_state_changed_hysteresis -= 1;
+                        }
                     }
 
                     if (prev_state != rtp_session->stats.rx_congestion_state) {
