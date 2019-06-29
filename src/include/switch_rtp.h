@@ -551,7 +551,7 @@ SWITCH_DECLARE(void) switch_rtp_reset_cn_stats(switch_channel_t *channel);
 SWITCH_DECLARE(void) switch_rtp_get_cn_stats(switch_channel_t *channel, switch_size_t *largest, switch_size_t *smallest,
                                              switch_size_t *last, float *large_ratio, float *small_ratio);
 SWITCH_DECLARE(switch_bool_t) switch_rtp_check_transport_rxcnt(switch_channel_t *channel, size_t *pktcnt, int *interval);
-SWITCH_DECLARE(switch_bool_t) switch_rtp_get_congestion_state(switch_channel_t *channel, rtp_rx_congestion_state_t *state);
+SWITCH_DECLARE(switch_bool_t) switch_rtp_get_congestion_state(switch_channel_t *channel, rtp_rx_congestion_state_t *state, short *jitter, short *loss);
 
 /*!
   \}

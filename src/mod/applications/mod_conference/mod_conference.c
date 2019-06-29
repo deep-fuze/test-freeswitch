@@ -6177,7 +6177,8 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
     switch_bool_t can_speak = SWITCH_FALSE;
     switch_bool_t cn_state;
     switch_event_t *event;
-
+    short jitter;
+    short loss;
     if (!(switch_test_flag(member, MFLAG_RUNNING) && switch_channel_ready(channel))) {
         return INPUT_LOOP_RET_DONE;
     }
@@ -6192,11 +6193,21 @@ static INPUT_LOOP_RET conference_loop_input(input_loop_data_t *il)
         return INPUT_LOOP_RET_YIELD;
     }
 
-    if (switch_rtp_get_congestion_state(channel, &member->rx_state) &&
+    if (switch_rtp_get_congestion_state(channel, &member->rx_state, &jitter, &loss) &&
         switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, CONF_EVENT_MAINT) == SWITCH_STATUS_SUCCESS) {
         conference_add_event_member_data(member, event);
         switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Action", "new-rxstate");
-        switch_event_add_header(event, SWITCH_STACK_BOTTOM, "New-RxState", "%d", member->rx_state);
+        if (member->rx_state == RTP_RX_CONGESTION_FAIR) {
+            switch_event_add_header(event, SWITCH_STACK_BOTTOM, "New-RxState", "fair");
+        } else if (member->rx_state == RTP_RX_CONGESTION_POOR) {
+            switch_event_add_header(event, SWITCH_STACK_BOTTOM, "New-RxState", "poor");
+        } else if (member->rx_state == RTP_RX_CONGESTION_BAD) {
+            switch_event_add_header(event, SWITCH_STACK_BOTTOM, "New-RxState", "bad");
+        } else {
+            switch_event_add_header(event, SWITCH_STACK_BOTTOM, "New-RxState", "good");
+        }
+        switch_event_add_header(event, SWITCH_STACK_BOTTOM, "RxJitter", "%d", jitter);
+        switch_event_add_header(event, SWITCH_STACK_BOTTOM, "RxLoss", "%d", loss);
         switch_event_fire(&event);
     }
 
@@ -6909,7 +6920,6 @@ OUTPUT_LOOP_RET process_participant_output_end_member(participant_thread_data_t 
 SWITCH_DECLARE(void) switch_close_transport(switch_channel_t *channel);
 SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int level_in, int level_out, int active);
 SWITCH_DECLARE(void) switch_rtp_reset_rtp_stats(switch_channel_t *channel);
-SWITCH_DECLARE(switch_bool_t) switch_rtp_get_congestion_state(switch_channel_t *channel, rtp_rx_congestion_state_t *state);
 
 /* marshall frames from the conference (or file or tts output) to the call leg */
 /* NB. this starts the input thread after some initial setup for the call leg */

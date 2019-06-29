@@ -2818,13 +2818,13 @@ static int add_rx_congestion(switch_rtp_t *rtp_session, void *body, switch_rtcp_
 
     rx_congestion->jitter = htons(rtp_session->stats.last_jitter);
     if (rtp_session->stats.rx_congestion_state == RTP_RX_CONGESTION_BAD) {
-        rx_congestion->degraded = 3;
+        rx_congestion->degraded = htons(3);
     } else if (rtp_session->stats.rx_congestion_state == RTP_RX_CONGESTION_POOR) {
-        rx_congestion->degraded = 2;
+        rx_congestion->degraded = htons(2);
     } else if (rtp_session->stats.rx_congestion_state == RTP_RX_CONGESTION_FAIR) {
-        rx_congestion->degraded = 1;
+        rx_congestion->degraded = htons(1);
     } else {
-        rx_congestion->degraded = 0;
+        rx_congestion->degraded = htons(0);
     }
 
     rx_congestion->active = rtp_session->active;
@@ -10044,7 +10044,7 @@ SWITCH_DECLARE(void) switch_rtp_set_opus_rate(switch_channel_t *channel, int rat
 }
 
 
-SWITCH_DECLARE(switch_bool_t) switch_rtp_get_congestion_state(switch_channel_t *channel, rtp_rx_congestion_state_t *state)
+SWITCH_DECLARE(switch_bool_t) switch_rtp_get_congestion_state(switch_channel_t *channel, rtp_rx_congestion_state_t *state, short *jitter, short *loss)
 {
     switch_bool_t ret;
 
@@ -10059,6 +10059,13 @@ SWITCH_DECLARE(switch_bool_t) switch_rtp_get_congestion_state(switch_channel_t *
 
     ret = rtp_session->congestion_state_changed;
     rtp_session->congestion_state_changed = SWITCH_FALSE;
+
+    *jitter = rtp_session->stats.last_jitter;
+    if (rtp_session->stats.last_lost_percent > 0 && rtp_session->ignore_loss_after_muted <= 0) {
+        *loss = rtp_session->stats.last_lost_percent;
+    } else {
+        *loss = 0;
+    }
 
     return ret;
 }
