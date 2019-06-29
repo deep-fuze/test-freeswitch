@@ -9630,14 +9630,14 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
                     for (int i = 0; i < 5; ++i) {
                         int idx = rtp_session->stats.recv_rate_history_idx - (i+1);
                         idx = (idx < 0) ? (idx + RTP_STATS_RATE_HISTORY) : idx;
-                        avg += rtp_session->stats.recv_rate_history[idx];
+                        avg += rtp_session->stats.recv_cnt_history[idx];
                     }
                     avg /= 5;
                     for (int i = 0; i < 5; ++i) {
                         int idx = rtp_session->stats.recv_rate_history_idx - (i+1);
                         int diff;
                         idx = (idx < 0) ? (idx + RTP_STATS_RATE_HISTORY) : idx;
-                        diff = rtp_session->stats.recv_rate_history[idx]- avg;
+                        diff = rtp_session->stats.recv_cnt_history[idx]- avg;
                         stddev += diff * diff;
                     }
                     stddev = (uint32_t)(sqrt((double)stddev/5));
@@ -9660,12 +9660,12 @@ SWITCH_DECLARE(void) switch_rtp_update_rtp_stats(switch_channel_t *channel, int 
                         rtp_session->congestion_state_changed = SWITCH_TRUE;
                         if (rtp_session->stats.rx_congestion_state == RTP_RX_CONGESTION_GOOD) {
                             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
-                                              "Transition to good rx congestion state: %d -> %d\n",
-                                              prev_state, rtp_session->stats.rx_congestion_state);
+                                              "Transition to good rx congestion state: %d -> %d (%d/%d)\n",
+                                              prev_state, rtp_session->stats.rx_congestion_state, avg, stddev);
                         } else {
                             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_WARNING,
-                                              "Transition to worse rx congestion state: %d -> %d\n",
-                                              prev_state, rtp_session->stats.rx_congestion_state);
+                                              "Transition to worse rx congestion state: %d -> %d (%d/%d)\n",
+                                              prev_state, rtp_session->stats.rx_congestion_state, avg, stddev);
                         }
                         rtp_session->send_rtcp |=  (SWITCH_RTCP_NORMAL | SWITCH_RTCP_RX_CONGESTION);
                     }
