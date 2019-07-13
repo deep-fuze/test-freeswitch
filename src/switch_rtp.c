@@ -7756,6 +7756,11 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
     
     READ_DEC(rtp_session);
 
+	if (ret > 0) {
+		uint32_t buffer[1000];
+		rtp_common_write(rtp_session, &rtp_session->recv_msg, buffer, ret, *payload_type, ntohl(rtp_session->recv_msg.header.ts), flags);
+	}
+
 #ifdef TRACE_READ
     if (bytes == 0) {
         if (strncmp(rtp_session->trace_buffer, trace_buffer, 1024) != 0) {

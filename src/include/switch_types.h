@@ -1626,7 +1626,8 @@ typedef enum {
     SFF_IVR_FRAME = (1 << 14),
     SFF_RTP_AUDIO_OVER_THR = (1 << 15),
     SFF_MARKER = (1 << 16),
-    SFF_TIMEOUT = (1 << 17)
+    SFF_TIMEOUT = (1 << 17),
+	SFF_LOOPBACK = (1 << 18)
 } switch_frame_flag_enum_t;
 typedef uint32_t switch_frame_flag_t;
 
