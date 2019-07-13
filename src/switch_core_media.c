@@ -6042,10 +6042,6 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_activate_rtp(switch_core_sessi
         }
 
         if (smh->mparams->rtp_timeout_sec) {
-            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session),
-                              SWITCH_LOG_INFO, "max_missed_packets = %d * %ds / %d = %d\n",
-                              a_engine->read_impl.samples_per_second, smh->mparams->rtp_timeout_sec, a_engine->read_impl.samples_per_packet,
-                              (a_engine->read_impl.samples_per_second * smh->mparams->rtp_timeout_sec) / a_engine->read_impl.samples_per_packet);
             a_engine->max_missed_packets = (a_engine->read_impl.samples_per_second * smh->mparams->rtp_timeout_sec) / a_engine->read_impl.samples_per_packet;
 
             switch_rtp_set_max_missed_packets(a_engine->rtp_session, a_engine->max_missed_packets);
