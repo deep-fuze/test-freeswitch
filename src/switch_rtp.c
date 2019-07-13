@@ -3660,8 +3660,10 @@ SWITCH_DECLARE(void) switch_rtp_set_max_missed_packets(switch_rtp_t *rtp_session
                           "new switch_rtp_set_max_missed_packets(%d->%d) greater than current missed packets(%d). RTP will timeout.\n",
                           rtp_session->missed_count, max, rtp_session->missed_count);
     }
-    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
-                      "new switch_rtp_set_max_missed_packets(%d->%d)\n", rtp_session->max_missed_packets, max);
+	if (rtp_session->max_missed_packets > 0) {
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+						  "new switch_rtp_set_max_missed_packets(%d->%d)\n", rtp_session->max_missed_packets, max);
+	}
 
     rtp_session->max_missed_packets = max;
 }
