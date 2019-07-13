@@ -36,6 +36,8 @@ struct ivrc_profile
     int number_auth_is_allowed;
     int caller_contactive_found;
 
+    switch_bool_t loopback;
+
     const char *api_profile;
     
     switch_event_t *event_settings;

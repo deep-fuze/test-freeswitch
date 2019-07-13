@@ -1,4 +1,4 @@
-/*
+ /*
  * FreeSWITCH Modular Media Switching Software Library / Soft-Switch Application
  * Copyright (C) 2005-2014, Anthony Minessale II <anthm@freeswitch.org>
  *
@@ -567,6 +567,7 @@ struct switch_rtp {
     int16_t remote_lost;
 
     int consecutive_errors;
+    switch_bool_t loopback;
 };
 
 struct switch_rtcp_report_block {
@@ -3660,10 +3661,10 @@ SWITCH_DECLARE(void) switch_rtp_set_max_missed_packets(switch_rtp_t *rtp_session
                           "new switch_rtp_set_max_missed_packets(%d->%d) greater than current missed packets(%d). RTP will timeout.\n",
                           rtp_session->missed_count, max, rtp_session->missed_count);
     }
-	if (rtp_session->max_missed_packets > 0) {
-		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
-						  "new switch_rtp_set_max_missed_packets(%d->%d)\n", rtp_session->max_missed_packets, max);
-	}
+    if (rtp_session->max_missed_packets > 0) {
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO,
+                          "new switch_rtp_set_max_missed_packets(%d->%d)\n", rtp_session->max_missed_packets, max);
+    }
 
     rtp_session->max_missed_packets = max;
 }
@@ -4883,7 +4884,7 @@ SWITCH_DECLARE(switch_status_t) switch_rtp_create(switch_rtp_t **new_rtp_session
     rtp_session->stats.duration = 0;
     rtp_session->transport_rxcnt = 0;
     rtp_session->transport_rxcnt_same = 0;
-
+    rtp_session->loopback = SWITCH_FALSE;
 #ifdef TRACE_READ
     memset(rtp_session->trace_buffer, 0, 1024);
     rtp_session->trace_cnt = 0;
@@ -7756,10 +7757,11 @@ static int rtp_common_read(switch_rtp_t *rtp_session, switch_payload_t *payload_
     
     READ_DEC(rtp_session);
 
-	if (ret > 0) {
-		uint32_t buffer[1000];
-		rtp_common_write(rtp_session, &rtp_session->recv_msg, buffer, ret, *payload_type, ntohl(rtp_session->recv_msg.header.ts), flags);
-	}
+    if (ret > 0 && rtp_session->loopback) {
+        uint32_t buffer[1000];
+        *flags |= SFF_LOOPBACK;
+        rtp_common_write(rtp_session, &rtp_session->recv_msg, buffer, ret, *payload_type, ntohl(rtp_session->recv_msg.header.ts), flags);
+    }
 
 #ifdef TRACE_READ
     if (bytes == 0) {
@@ -8159,6 +8161,10 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
     // codec == opus
     if (rtp_session->samples_per_interval != 160) {
         adjust_ts_step = rtp_session->samples_per_interval;
+    }
+
+    if (rtp_session->loopback && (*flags & SFF_LOOPBACK) == 0) {
+        return 0;
     }
 
     rtp_session->total_sent += 1;
@@ -8693,8 +8699,10 @@ static int rtp_common_write(switch_rtp_t *rtp_session,
                 }
 
                 if (rtp_session->last_bridge_seq[0] == bseq) {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "hmm same sequence number as last packet %d sad times!\n",
-                                      bseq);
+                    if (rtp_session->loopback == SWITCH_FALSE) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "hmm same sequence number as last packet %d sad times!\n",
+                                          bseq);
+                    }
                     rtp_session->seq += 1;
                     bseq += 1;
                 }
@@ -10093,6 +10101,19 @@ SWITCH_DECLARE(switch_bool_t) switch_rtp_get_congestion_state(switch_channel_t *
 
     return ret;
 }
+
+SWITCH_DECLARE(void) switch_rtp_set_loopback(switch_channel_t *channel)
+{
+    switch_rtp_t *rtp_session;
+    if (!channel) { return; }
+    rtp_session = switch_channel_get_private(channel, "__rtcp_audio_rtp_session");
+    if (!rtp_session) { return; }
+
+    rtp_session->loopback = (rtp_session->loopback == SWITCH_TRUE) ? SWITCH_FALSE : SWITCH_TRUE;
+
+    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(rtp_session->session), SWITCH_LOG_INFO, "set loopback to: %d\n", rtp_session->loopback);
+}
+
 
 /* For Emacs:
  * Local Variables:
