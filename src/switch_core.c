@@ -1176,6 +1176,10 @@ SWITCH_DECLARE(switch_bool_t) switch_check_network_list_ip_token(const char *ip_
 	char *ipv6 = strchr(ip_str,':');
 	switch_bool_t ok = SWITCH_FALSE;
 
+	if (ipv6) {
+		return ok;
+	}
+
 	switch_mutex_lock(runtime.global_mutex);
 	if (ipv6) {
 		switch_inet_pton(AF_INET6, ip_str, &ip);
