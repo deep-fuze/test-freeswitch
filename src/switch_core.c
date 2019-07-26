@@ -1175,8 +1175,14 @@ SWITCH_DECLARE(switch_bool_t) switch_check_network_list_ip_token(const char *ip_
 	uint32_t bits;
 	char *ipv6 = strchr(ip_str,':');
 	switch_bool_t ok = SWITCH_FALSE;
+	switch_bool_t prod = SWITCH_TRUE;
+    const char *host = switch_core_get_hostname();
 
-	if (ipv6) {
+    if (strstr(host, "prod") == NULL) {
+		prod = SWITCH_FALSE;
+    }
+
+	if (ipv6 && !prod) {
 		return ok;
 	}
 
