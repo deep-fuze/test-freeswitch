@@ -125,8 +125,12 @@ check_lt_ver() {
   # output is multiline from 1.5 onwards
 
   # Require libtool 1.4 or newer
+  echo "${LIBDIR}/apr/build/PrintPath glibtool libtool libtool22 libtool15 libtool14"
   libtool=${LIBTOOL:-`${LIBDIR}/apr/build/PrintPath glibtool libtool libtool22 libtool15 libtool14`}
-  lt_pversion=`$libtool --version 2>/dev/null|sed -e 's/([^)]*)//g;s/^[^0-9]*//;s/[- ].*//g;q'`
+
+  #lt_pversion=`$libtool --version 2>/dev/null|sed -e 's/([^)]*)//g;s/^[^0-9]*//;s/[- ].*//g;q'`
+
+  lt_pversion=`libtoolize --version 2>/dev/null|sed -e 's/([^)]*)//g;s/^[^0-9]*//;s/[- ].*//g;q'`
   if test -z "$lt_pversion"; then
     echo "bootstrap: libtool not found."
     echo "           You need libtool version 1.5.14 or newer to build FreeSWITCH from source."

@@ -33,6 +33,7 @@ switch_srcdir=`(cd $srcdir && pwd)`
 switch_builddir=`pwd`
 AC_SUBST(switch_srcdir)
 AC_SUBST(switch_builddir)
+CFLAGS="$CFLAGS -D_DEFAULT_SOURCE -Wno-error=misleading-indentation -Wno-error=pedantic -Wno-error=parentheses"
 
 #
 # --enable-64 has been moved up higher prior to AC_PROG_CC so that we can tuck in the -m64 flag 

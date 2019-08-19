@@ -14,6 +14,7 @@
 #if defined(__linux__) && !defined(ANDROID)
 #include <atomic>
 #include <strings.h>
+#include <sys/uio.h>
 #endif
 
 namespace fuze {
