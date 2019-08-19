@@ -33,6 +33,8 @@ switch_srcdir=`(cd $srcdir && pwd)`
 switch_builddir=`pwd`
 AC_SUBST(switch_srcdir)
 AC_SUBST(switch_builddir)
+
+# Ubuntu 18.04
 CFLAGS="$CFLAGS -D_DEFAULT_SOURCE -Wno-error=misleading-indentation -Wno-error=pedantic -Wno-error=parentheses"
 
 #
