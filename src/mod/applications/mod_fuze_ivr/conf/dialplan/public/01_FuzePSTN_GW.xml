@@ -1,0 +1,19 @@
+<include>
+    <extension name="Authenticate Conference">
+      <condition field="destination_number" expression="99983">
+        <action application="set" data="authenticate_caller_url=https://main.fuzemeeting.com/json/authenticate_caller"/>
+		<action application="answer"/>
+		<action application="fuze_ivr" data="dialin"/>
+      </condition>
+    </extension>
+    <extension name="Invitation Accept">
+      <condition field="destination_number" expression="99984">
+        <action application="set" data="authenticate_caller_url=https://main.fuzemeeting.com/json/authenticate_caller"/>
+		<action application="answer"/>
+		<action application="fuze_ivr" data="dialout"/>
+      </condition>
+    </extension>
+</include>
+
+
+

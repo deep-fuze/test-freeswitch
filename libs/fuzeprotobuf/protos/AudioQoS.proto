@@ -1,0 +1,12 @@
+package AudioQoSProto;
+
+message QoSUpdate
+{
+    optional uint32     majorVersion = 1;
+    optional uint32     minorVersion = 2;
+    optional uint32     jitter = 3; 
+    optional double     late_and_lost = 4;
+    optional bool       been_active_talker = 5;
+    repeated uint32     chop_events = 6;
+}
+

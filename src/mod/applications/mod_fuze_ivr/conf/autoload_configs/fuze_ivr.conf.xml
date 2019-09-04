@@ -1,0 +1,60 @@
+<configuration name="fuze_ivr.conf" description="Fuze IVR">
+<profiles>
+	<profile name="dialin">
+		<settings>
+			<param name="IVR-Maximum-Attempts" value="3" />
+			<param name="IVR-Entry-Timeout" value="5000" />
+			<param name="Exit-Purge" value="true" />
+			<param name="ID-Mask" value="XXXXXX." />
+			<param name="Init-Menu" value="fuze_conference_authenticate" />
+			<param name="Main-Menu" value="" />
+
+		</settings>
+		<menus>
+			<menu name="std_menu_get_id">
+			<phrases>
+                <phrase name="invalid" value="invalid_entry@fuze_ivr" />
+                <phrase name="connected" value="connected@fuze_ivr" />
+				<phrase name="instructions" value="meeting_pin@fuze_ivr" />
+				<phrase name="try_again" value="try_again@fuze_ivr" />
+			</phrases>
+			<keys>
+				<key dtmf="#" action="ivrengine:terminate_entry" variable="VM-Key-Terminator" />
+			</keys>
+			</menu>
+
+		</menus>
+	</profile>
+
+	<profile name="dialout">
+		<settings>
+			<param name="IVR-Maximum-Attempts" value="3" />
+			<param name="IVR-Entry-Timeout" value="5000" />
+			<param name="Exit-Purge" value="true" />
+			<param name="ID-Mask" value="XXX." />
+			<param name="Init-Menu" value="fuze_conference_accept" />
+			<param name="Main-Menu" value="" />
+
+		</settings>
+		<menus>
+			<menu name="std_menu_accept">
+			<phrases>
+				<phrase name="instructions" value="press_one@fuze_ivr" />
+				<phrase name="invalid" value="invalid_entry@fuze_ivr" />
+				<phrase name="timeout" value="timeout@fuze_ivr" />
+				<phrase name="try_again" value="try_again@fuze_ivr" />
+				<phrase name="connected" value="connected@fuze_ivr" />
+			</phrases>
+			<keys>
+				<key dtmf="1" action="play:connected" />
+				<key dtmf="#" action="return" />
+			</keys>
+			</menu>
+
+		</menus>
+	</profile>
+
+</profiles>
+</configuration>
+
+

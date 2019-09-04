@@ -1,0 +1,21 @@
+BASE=../..
+switch_srcdir := $(CURDIR)/../..
+switch_builddir := $(CURDIR)/../..
+GETLIB=cd $(switch_srcdir)/libs && $(SHELL) $(switch_builddir)/build/getlib.sh
+
+OPUS=opus-1.1-p2
+OPUS_DIR=$(switch_srcdir)/libs/$(OPUS)
+OPUS_BUILDDIR=$(switch_builddir)/libs/$(OPUS)
+
+OPUS_LA=$(OPUS_BUILDDIR)/.libs/libopus.la
+
+$(OPUS_DIR):
+	$(GETLIB) $(OPUS).tar.gz
+
+$(OPUS_DIR)/Makefile: $(OPUS_DIR)
+	cd $(OPUS_BUILDDIR) && $(OPUS_DIR)/configure --disable-shared --with-pic --srcdir=$(OPUS_DIR) 
+
+$(OPUS_LA): $(OPUS_DIR)/Makefile
+	cd $(OPUS_BUILDDIR) && $(MAKE)
+
+all: $(OPUS_LA)

@@ -1,0 +1,122 @@
+<include>
+
+<!-- Tested -->
+<macros name="fuze_ivr">
+	<macro name="press_one">
+		<input>
+			<match>
+				<action function="play-file" data="fuze_ivr/press_one.wav"/>
+			</match>
+		</input>
+	</macro>
+
+	<macro name="try_again">
+		<input>
+			<match>
+				<action function="play-file" data="fuze_ivr/try_again.wav"/>
+			</match>
+		</input>
+	</macro>
+
+	<macro name="invalid_entry">
+		<input>
+			<match>
+				<action function="play-file" data="ivr/invalid_entry.wav"/>
+			</match>
+		</input>
+	</macro>
+
+	<macro name="timeout">
+		<input>
+			<match>
+				<action function="play-file" data="fuze_ivr/meeting_number_pin_pound.wav"/>
+			</match>
+		</input>
+	</macro>
+
+	<macro name="connected">
+		<input>
+			<match>
+				<action function="play-file" data="ivr/connected_to_fuze.wav"/>
+			</match>
+		</input>
+	</macro>
+
+	<macro name="meeting_pin">
+		<input>
+			<match>
+				<action function="play-file" data="fuze_ivr/meeting_number_pin_pound.wav"/>
+			</match>
+		</input>
+	</macro>
+
+
+	<macro name="call_cannot_be_completed">
+		<input>
+			<match>
+				<action function="play-file" data="ivr/ivr-call_cannot_be_completed_as_dialed.wav"/>
+			</match>
+		</input>
+	</macro>
+
+	<macro name="no_minutes">
+		<input>
+			<match>
+				<action function="play-file" data="ivr/no_minutes.wav"/>
+			</match>
+		</input>
+	</macro>
+
+	<macro name="restricted">
+		<input>
+			<match>
+				<action function="play-file" data="ivr/restricted_access.wav"/>
+			</match>
+		</input>
+	</macro>
+
+	<macro name="retired">
+		<input>
+			<match>
+				<action function="play-file" data="ivr/not_published_number.wav"/>
+			</match>
+		</input>
+	</macro>
+
+	<macro name="locked">
+		<input>
+			<match>
+				<action function="play-file" data="conference/conf-is-locked.wav"/>
+			</match>
+		</input>
+	</macro>
+
+
+<!-- -->
+	<macro name="hello">
+		<input>
+			<match>
+				<action function="play-file" data="fuze_ivr/hello.wav"/>
+			</match>
+		</input>
+	</macro>
+
+	<macro name="goodbye">
+		<input>
+			<match>
+				<action function="play-file" data="fuze_ivr/goodbye.wav"/>
+			</match>
+		</input>
+	</macro>
+
+	<macro name="say_number">
+		<input pattern="^(\d+)$">
+			<match>
+				<action function="say" data="$1" method="pronounced" type="items"/>
+			</match>
+		</input>
+	</macro>
+
+</macros>
+
+</include>
